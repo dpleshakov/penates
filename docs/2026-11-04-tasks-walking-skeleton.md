@@ -28,7 +28,7 @@ targets, kit-to-target mapping, last selection per target — persisted as JSON 
 the penates data directory; directory injectable for tests.
 **Definition of done:** registering a kit and target, saving, and loading again yields
 the identical state; round-trip test passes.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `lock-format`
 **Description:** `internal/lock`: the per-target lock in the RFC 6.7 JSON shape,

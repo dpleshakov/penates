@@ -308,7 +308,13 @@ func (m *model) apply() {
 		m.screen = screenResults
 		return
 	}
-	p := plan.Build(plan.Input{Kits: m.kits, Selection: selection, Lock: m.lk, Snapshot: snap})
+	sources, err := kit.ReadSources(m.kits, selection)
+	if err != nil {
+		m.lastResults = "apply failed: " + err.Error()
+		m.screen = screenResults
+		return
+	}
+	p := plan.Build(plan.Input{Kits: m.kits, Selection: selection, Lock: m.lk, Snapshot: snap, Sources: sources})
 	results := apply.Apply(m.target, p, m.lk, m.app.Locks)
 	errors := map[string]string{}
 	for _, r := range results {

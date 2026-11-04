@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -41,17 +42,6 @@ func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result
 }
 
 func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
-	// Read every source before touching the target, so a broken kit fails the item
-	// with the target unchanged.
-	contents := make([][]byte, len(ip.Actions))
-	for i, a := range ip.Actions {
-		data, err := os.ReadFile(a.Src)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", a.Src, err)
-		}
-		contents[i] = data
-	}
-
 	var createdDirs []string
 	var staged []string
 	fail := func(err error) error {
@@ -59,23 +49,35 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		return err
 	}
 
-	// Stage every file beside its destination, creating directories as needed.
 	files := make(map[string]string, len(ip.Actions))
-	for i, a := range ip.Actions {
+	sections := make(map[string]lock.Section)
+	existed := make(map[string]bool, len(ip.Actions))
+
+	// Stage every file beside its destination, creating directories as needed.
+	for _, a := range ip.Actions {
 		dst := filepath.Join(root, filepath.FromSlash(a.To))
+		if _, err := os.Stat(dst); err == nil {
+			existed[a.To] = true
+		} else if !os.IsNotExist(err) {
+			return fail(fmt.Errorf("inspect %s: %w", a.To, err))
+		}
 		dirs, err := mkdirAllTracking(root, filepath.Dir(dst))
 		if err != nil {
 			return fail(fmt.Errorf("create directory for %s: %w", a.To, err))
 		}
 		createdDirs = append(createdDirs, dirs...)
 
-		sum := sha256.Sum256(contents[i])
-		tmp, err := stage(dst, contents[i])
+		tmp, err := stage(dst, a.Content)
 		if err != nil {
 			return fail(fmt.Errorf("stage %s: %w", a.To, err))
 		}
 		staged = append(staged, tmp)
-		files[a.To] = "sha256:" + hex.EncodeToString(sum[:])
+		switch a.Kind {
+		case plan.ActionSection:
+			sections[a.To] = lock.Section{Block: a.Block, Hash: a.BlockHash}
+		default:
+			files[a.To] = hashOf(a.Content)
+		}
 	}
 
 	// Everything is staged: move the files into place.
@@ -86,16 +88,44 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		}
 	}
 
+	// Shared files this item brought into existence belong to penates as long as
+	// they exist (RFC 6.7).
+	var createdShared []string
+	for _, a := range ip.Actions {
+		if a.Kind == plan.ActionSection && !existed[a.To] && !containsPath(lk.CreatedSharedFiles, a.To) {
+			createdShared = append(createdShared, a.To)
+		}
+	}
+	if len(createdShared) > 0 {
+		lk.CreatedSharedFiles = append(lk.CreatedSharedFiles, createdShared...)
+		sort.Strings(lk.CreatedSharedFiles)
+	}
+
 	lk.SetItem(ip.Key, &lock.Item{
 		Version:     ip.Version,
 		Answers:     map[string]string{},
 		Files:       files,
 		DirsCreated: createdDirs,
+		Sections:    sections,
 	})
 	if err := store.Save(lk); err != nil {
 		return fail(fmt.Errorf("save lock: %w", err))
 	}
 	return nil
+}
+
+func hashOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func containsPath(list []string, p string) bool {
+	for _, el := range list {
+		if el == p {
+			return true
+		}
+	}
+	return false
 }
 
 // stage writes content to a fresh temp file in the destination's directory and

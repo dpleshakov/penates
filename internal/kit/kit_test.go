@@ -199,6 +199,97 @@ func TestLoadInvalid(t *testing.T) {
 	}
 }
 
+// TestLoadSources checks how load treats contribution sources: directories are
+// expanded into per-file contributions, everything else must be a readable file.
+func TestLoadSources(t *testing.T) {
+	kitWith := func(itemYAML string) map[string]string {
+		return map[string]string{
+			"kit.yaml":                  "name: example\n",
+			"items/a/item.yaml":         itemYAML,
+			"items/a/f":                 "content\n",
+			"items/a/s":                 "section\n",
+			"items/a/skill/SKILL.md":    "skill\n",
+			"items/a/skill/lib/util.md": "util\n",
+		}
+	}
+
+	t.Run("directory file source expands to one contribution per file", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - file: skill\n    to: skills/a\n    template: true\n"))
+		k, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		want := []Contribution{
+			{Kind: KindFile, Src: "skill/SKILL.md", To: "skills/a/SKILL.md", Template: true},
+			{Kind: KindFile, Src: "skill/lib/util.md", To: "skills/a/lib/util.md", Template: true},
+		}
+		if diff := cmp.Diff(want, k.Items[0].Contributes); diff != "" {
+			t.Errorf("contributions (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("missing source", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - file: gone\n    to: skills/a/f\n"))
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), `source "gone" cannot be read`) {
+			t.Fatalf("Load error = %v", err)
+		}
+	})
+
+	t.Run("section source may not be a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		files := kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - section: skill\n    to: AGENTS.md\n")
+		files["kit.yaml"] = "name: example\nshared:\n  - AGENTS.md\n"
+		writeFiles(t, dir, files)
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "only file contributions may use directories") {
+			t.Fatalf("Load error = %v", err)
+		}
+	})
+
+	t.Run("empty directory source", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - file: empty\n    to: skills/a\n"))
+		if err := os.MkdirAll(filepath.Join(dir, "items", "a", "empty"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "holds no files") {
+			t.Fatalf("Load error = %v", err)
+		}
+	})
+}
+
+func TestReadSources(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"kit.yaml":          "name: example\nshared:\n  - AGENTS.md\n",
+		"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/a/f\n",
+		"items/a/f":         "file content\n",
+		"items/b/item.yaml": "id: b\nversion: 1.0.0\ncontributes:\n  - section: s\n    to: AGENTS.md\n",
+		"items/b/s":         "section content\n",
+	})
+	k, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	sources, err := ReadSources([]*Kit{k}, []string{"example/b", "example/missing"})
+	if err != nil {
+		t.Fatalf("ReadSources: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("sources = %d entries, want only the selected item's", len(sources))
+	}
+	b := k.Items[1]
+	key := b.SourcePath(b.Contributes[0])
+	if string(sources[key]) != "section content\n" {
+		t.Errorf("sources[%s] = %q", key, sources[key])
+	}
+}
+
 // writeFiles writes a map of slash-separated relative paths to file contents into
 // dir; an empty content deletes the file, and directories left empty by a deletion
 // are removed as well. Parent directories are created as needed.

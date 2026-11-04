@@ -151,6 +151,17 @@ func (l *Lock) OwnsFile(itemKey, path string) bool {
 	return owned
 }
 
+// SectionOwner returns the item key that owns a block in a shared file, with the
+// recorded hash of the block content at installation.
+func (l *Lock) SectionOwner(file, block string) (itemKey, hash string, ok bool) {
+	for key, item := range l.Items {
+		if s, owned := item.Sections[file]; owned && s.Block == block {
+			return key, s.Hash, true
+		}
+	}
+	return "", "", false
+}
+
 // CreatedDir reports whether an item had a directory created for it.
 func (l *Lock) CreatedDir(itemKey, dir string) bool {
 	item, ok := l.Items[itemKey]

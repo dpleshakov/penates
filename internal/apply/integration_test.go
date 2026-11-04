@@ -75,7 +75,11 @@ func TestInstallEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap})
+		sources, err := kit.ReadSources(kits, selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources})
 		results := Apply(targetDir, p, lk, locks)
 		for _, r := range results {
 			if r.Err != nil {

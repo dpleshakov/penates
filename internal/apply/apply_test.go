@@ -10,17 +10,23 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 )
 
-// stagedPlan builds a plan with installable items whose sources live under kitDir.
+// stagedPlan builds a plan with installable items whose actions carry content the
+// way the planner emits them: the sources under kitDir, read at planning time.
 func stagedPlan(kitDir string, keys ...string) *plan.Plan {
 	p := &plan.Plan{}
 	for _, key := range keys {
 		_, id, _ := strings.Cut(key, "/")
 		ip := &plan.ItemPlan{Key: key, KitName: "k", ItemID: id, Version: "1.0.0", Status: plan.StatusInstall}
 		for _, to := range []string{"skills/" + id + "/SKILL.md", "skills/" + id + "/lib.md"} {
+			content, err := os.ReadFile(filepath.Join(kitDir, filepath.FromSlash(to)))
+			if err != nil {
+				content = nil // the planner would have excluded the item; here it just writes nothing
+			}
 			ip.Actions = append(ip.Actions, plan.Action{
-				Src:    filepath.Join(kitDir, filepath.FromSlash(to)),
-				To:     to,
-				Reason: "target file is absent",
+				Kind:    plan.ActionFile,
+				To:      to,
+				Content: content,
+				Reason:  "target file is absent",
 			})
 		}
 		p.Items = append(p.Items, ip)
@@ -89,8 +95,8 @@ func TestApplyFailureLeavesNothing(t *testing.T) {
 	root := t.TempDir()
 	kitDir := t.TempDir()
 	dataDir := t.TempDir()
-	// The first source exists so staging begins; the destination of its rename is
-	// blocked by a directory, so the item fails before the second file moves.
+	// The first action stages fine; the destination of its rename is blocked by a
+	// directory, so the item fails before the second file moves.
 	writeSource(t, kitDir, "skills/one/SKILL.md", "skill\n")
 	if err := os.MkdirAll(filepath.Join(root, "skills", "one", "SKILL.md"), 0o755); err != nil {
 		t.Fatal(err)

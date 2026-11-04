@@ -47,7 +47,7 @@ outside managed blocks, block-id conflicts between selected items (7.5). Actions
 carry final content; `Input.Sources` is introduced here.
 **Definition of done:** table tests cover every 7.3 rule and the conflict; the
 planner performs no I/O.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `section-apply`
 **Description:** Apply writes section actions: append with a blank-line

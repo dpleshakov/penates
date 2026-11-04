@@ -11,7 +11,7 @@ func TestParse(t *testing.T) {
 		wantBlocks   []Block
 		wantHeadings []string
 	}{
-		"empty file":            {in: "", wantHeadings: nil},
+		"empty file": {in: "", wantHeadings: nil},
 		"user file without blocks": {
 			in:           "# User notes\n\ntext\n\n## More\n",
 			wantHeadings: []string{"user notes", "more"},
@@ -38,11 +38,11 @@ func TestParse(t *testing.T) {
 			wantBlocks: []Block{{ID: "a/1", Content: ""}},
 		},
 		"unbalanced begin is user content": {
-			in: "<!-- penates:begin a/1 -->\n## Heading inside nothing\n",
+			in:           "<!-- penates:begin a/1 -->\n## Heading inside nothing\n",
 			wantHeadings: []string{"heading inside nothing"},
 		},
 		"mismatched end id keeps block open": {
-			in: "<!-- penates:begin a/1 -->\ncontent\n<!-- penates:end other -->\n<!-- penates:end a/1 -->\n",
+			in:         "<!-- penates:begin a/1 -->\ncontent\n<!-- penates:end other -->\n<!-- penates:end a/1 -->\n",
 			wantBlocks: []Block{{ID: "a/1", Content: "content\n<!-- penates:end other -->"}},
 		},
 		"setext heading is not detected": {

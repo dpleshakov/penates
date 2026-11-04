@@ -7,6 +7,7 @@ package kit
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,7 +78,9 @@ const (
 	KindJSON ContributionKind = "json"
 )
 
-// Contribution is one declared effect of an item on the target.
+// Contribution is one declared effect of an item on the target. Directory file
+// sources are expanded at load time, so a file contribution is always one plain
+// file.
 type Contribution struct {
 	// Kind selects the contribution kind.
 	Kind ContributionKind
@@ -87,6 +90,12 @@ type Contribution struct {
 	To string
 	// Template opts the contribution into variable substitution.
 	Template bool
+}
+
+// SourcePath returns the absolute path of the source file of one contribution.
+// It is the key contributions' contents are passed to the planner under.
+func (it *Item) SourcePath(c Contribution) string {
+	return filepath.Join(it.Dir, filepath.FromSlash(c.Src))
 }
 
 // ItemKey returns the identity of an item: the kit name and the item id. Items with
@@ -288,10 +297,59 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool, fail fu
 			fail(file, field+".to", "%s contributions may target only files listed in the kit's shared", kind)
 			continue
 		}
-		it.Contributes = append(it.Contributes, Contribution{Kind: kind, Src: src, To: c.To, Template: c.Template})
+		it.Contributes = append(it.Contributes, resolveSource(dir, kind, src, c.To, c.Template, field, file, fail)...)
 	}
 
 	return it
+}
+
+// resolveSource checks that a contribution's source exists and expands directory
+// file sources into one contribution per file, so every contribution names one
+// plain file. Problems are reported through fail and leave the contribution out.
+func resolveSource(itemDir string, kind ContributionKind, src, to string, template bool, field, file string, fail func(file, field, format string, args ...any)) []Contribution {
+	path := filepath.Join(itemDir, filepath.FromSlash(src))
+	info, err := os.Stat(path)
+	if err != nil {
+		fail(file, field+"."+string(kind), "source %q cannot be read: %v", src, err)
+		return nil
+	}
+	if info.IsDir() {
+		if kind != KindFile {
+			fail(file, field+"."+string(kind), "source %q is a directory, but only file contributions may use directories", src)
+			return nil
+		}
+		var out []Contribution
+		err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(path, p)
+			if err != nil {
+				return err
+			}
+			out = append(out, Contribution{
+				Kind:     KindFile,
+				Src:      filepath.ToSlash(filepath.Join(src, rel)),
+				To:       to + "/" + filepath.ToSlash(rel),
+				Template: template,
+			})
+			return nil
+		})
+		if err != nil {
+			fail(file, field+".file", "source %q cannot be read: %v", src, err)
+			return nil
+		}
+		if len(out) == 0 {
+			fail(file, field+".file", "source directory %q holds no files", src)
+			return nil
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].To < out[j].To })
+		return out
+	}
+	return []Contribution{{Kind: kind, Src: src, To: to, Template: template}}
 }
 
 // contributionSource returns the source path, its kind, and how many kind keys are
@@ -345,6 +403,38 @@ func contains(list []string, s string) bool {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+// ReadSources reads the source file of every contribution of the selected items,
+// keyed by the path SourcePath produces. The planner receives this map instead of
+// reading kit files itself, and apply writes action content only, so the content is
+// validated once, before the first write.
+func ReadSources(kits []*Kit, selection []string) (map[string][]byte, error) {
+	index := map[string]*Item{}
+	for _, k := range kits {
+		for _, it := range k.Items {
+			index[ItemKey(k.Name, it.ID)] = it
+		}
+	}
+	out := map[string][]byte{}
+	for _, key := range selection {
+		it, ok := index[key]
+		if !ok {
+			continue
+		}
+		for _, c := range it.Contributes {
+			path := it.SourcePath(c)
+			if _, done := out[path]; done {
+				continue
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("%s: read %s: %w", key, c.Src, err)
+			}
+			out[path] = data
+		}
+	}
+	return out, nil
 }
 
 // decodeFile reads one YAML file into out. A file that cannot be read or parsed

@@ -71,8 +71,9 @@ with a target form prefilled from `target_hint`, item list with select and insta
 markers, apply with a results screen; target picker when several targets are
 registered.
 **Definition of done:** `go build` produces a binary that runs the register → list →
-select → apply flow against a fixture kit; manual smoke test performed.
-**Status:** Pending
+select → apply flow against a fixture kit; a headless model test drives the same
+flow, and the binary starts.
+**Status:** Done
 
 ### TASK-08 `integration-slice`
 **Description:** End-to-end test without the TUI: load a kit, register it, snapshot

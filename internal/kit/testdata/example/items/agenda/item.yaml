@@ -1,0 +1,6 @@
+id: agenda
+version: 0.1.0
+description: Standing agenda block for the shared notes
+contributes:
+  - section: agenda.md
+    to: AGENTS.md

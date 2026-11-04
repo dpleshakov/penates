@@ -110,15 +110,17 @@ func TestInstallEndToEnd(t *testing.T) {
 	}
 }
 
-// TestInstallSectionEndToEnd installs the gh-note item of the fixture example kit
+// TestInstallSectionEndToEnd installs the agenda item of the fixture example kit
 // into an empty target: the section contribution must create the shared AGENTS.md
 // with the marked block, the lock must record the block and the created shared file,
-// and a second pass over the same selection must plan nothing.
+// and a second pass over the same selection must plan nothing. The agenda item is
+// section-only, so the item is plannable before json contributions are supported;
+// gh-note keeps the fixture's json contribution for the json slices.
 func TestInstallSectionEndToEnd(t *testing.T) {
 	dataDir := t.TempDir()
 	targetDir := filepath.Join(t.TempDir(), "harness")
 	kitDir := filepath.Join("..", "kit", "testdata", "example")
-	note, err := os.ReadFile(filepath.Join(kitDir, "items", "gh-note", "note.md"))
+	fragment, err := os.ReadFile(filepath.Join(kitDir, "items", "agenda", "agenda.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +140,7 @@ func TestInstallSectionEndToEnd(t *testing.T) {
 	}
 
 	locks := lock.NewStore(dataDir)
-	selection := []string{"example/gh-note"}
+	selection := []string{"example/agenda"}
 	selected := map[string]bool{}
 	for _, key := range selection {
 		selected[key] = true
@@ -203,7 +205,7 @@ func TestInstallSectionEndToEnd(t *testing.T) {
 	}
 
 	// The shared file did not exist: it now holds the marked block alone.
-	want := "<!-- penates:begin example/gh-note -->\n" + string(note) + "\n<!-- penates:end example/gh-note -->\n"
+	want := "<!-- penates:begin example/agenda -->\n" + string(fragment) + "\n<!-- penates:end example/agenda -->\n"
 	got, err := os.ReadFile(filepath.Join(targetDir, "AGENTS.md"))
 	if err != nil || string(got) != want {
 		t.Fatalf("AGENTS.md = %q, %v; want %q", got, err, want)
@@ -218,21 +220,21 @@ func TestInstallSectionEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := fresh.Items["example/gh-note"]
+	rec := fresh.Items["example/agenda"]
 	if rec == nil {
-		t.Fatalf("lock holds no example/gh-note: %v", fresh.Items)
+		t.Fatalf("lock holds no example/agenda: %v", fresh.Items)
 	}
 	if rec.Version != "0.1.0" {
 		t.Errorf("lock version = %q, want 0.1.0", rec.Version)
 	}
-	sum := sha256.Sum256(note)
+	sum := sha256.Sum256(fragment)
 	wantHash := "sha256:" + hex.EncodeToString(sum[:])
 	sec, ok := rec.Sections["AGENTS.md"]
 	if !ok {
 		t.Fatalf("lock sections = %v, want AGENTS.md", rec.Sections)
 	}
-	if sec.Block != "example/gh-note" || sec.Hash != wantHash {
-		t.Errorf("lock section = %q %q, want block example/gh-note hash %q", sec.Block, sec.Hash, wantHash)
+	if sec.Block != "example/agenda" || sec.Hash != wantHash {
+		t.Errorf("lock section = %q %q, want block example/agenda hash %q", sec.Block, sec.Hash, wantHash)
 	}
 	if len(fresh.CreatedSharedFiles) != 1 || fresh.CreatedSharedFiles[0] != "AGENTS.md" {
 		t.Errorf("created shared files = %v, want [AGENTS.md]", fresh.CreatedSharedFiles)

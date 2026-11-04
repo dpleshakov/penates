@@ -29,11 +29,11 @@ func TestLoadValid(t *testing.T) {
 	for _, it := range k.Items {
 		ids = append(ids, it.ID)
 	}
-	if diff := cmp.Diff([]string{"gh-note", "writing"}, ids); diff != "" {
+	if diff := cmp.Diff([]string{"agenda", "gh-note", "writing"}, ids); diff != "" {
 		t.Errorf("items (-want +got):\n%s", diff)
 	}
 
-	writing := k.Items[1]
+	writing := k.Items[2]
 	if !writing.HasChangelog {
 		t.Error("writing: HasChangelog = false, want true")
 	}
@@ -45,11 +45,14 @@ func TestLoadValid(t *testing.T) {
 		t.Errorf("writing contributions (-want +got):\n%s", diff)
 	}
 
-	ghNote := k.Items[0]
+	ghNote := k.Items[1]
 	if ghNote.HasChangelog {
 		t.Error("gh-note: HasChangelog = true, want false")
 	}
-	want = []Contribution{{Kind: KindSection, Src: "note.md", To: "AGENTS.md"}}
+	want = []Contribution{
+		{Kind: KindSection, Src: "note.md", To: "AGENTS.md"},
+		{Kind: KindJSON, Src: "perms.jsonc", To: "config.jsonc"},
+	}
 	if diff := cmp.Diff(want, ghNote.Contributes); diff != "" {
 		t.Errorf("gh-note contributions (-want +got):\n%s", diff)
 	}

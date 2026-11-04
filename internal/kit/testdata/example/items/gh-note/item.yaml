@@ -4,3 +4,5 @@ description: House rules for working with gh
 contributes:
   - section: note.md
     to: AGENTS.md
+  - json: perms.jsonc
+    to: config.jsonc

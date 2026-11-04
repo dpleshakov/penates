@@ -36,7 +36,7 @@ stored outside the target, keyed by the target path; ownership queries needed fo
 file installation.
 **Definition of done:** a lock with one installed item round-trips through JSON; file
 ownership and created-directory queries answer correctly; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `target-snapshot`
 **Description:** `internal/target`: read target file state — existence and SHA-256

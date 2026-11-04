@@ -43,7 +43,7 @@ ownership and created-directory queries answer correctly; tests pass.
 content hashes for a given list of paths — into a plain value for the planner.
 **Definition of done:** snapshot of a fixture target reports existence and hashes of
 listed paths; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-05 `file-planner`
 **Description:** `internal/plan`: pure planning of installs for items with `file`

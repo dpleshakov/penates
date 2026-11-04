@@ -105,6 +105,40 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	}
 }
 
+// TestRegisterFormTyping checks that the register form accepts editing: clear
+// the prefilled hint, type another target, and confirm.
+func TestRegisterFormTyping(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "chosen")
+	kitDir := writeFixtureKit(t, filepath.Join(t.TempDir(), "hinted"))
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(target)})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	lm := m.(*model)
+	if lm.screen != screenList {
+		t.Fatalf("screen after register = %v, want list", lm.screen)
+	}
+	if lm.target != target {
+		t.Errorf("target = %q, want the typed %q", lm.target, target)
+	}
+	st, err := stateStore.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := st.KitTarget("ex"); !ok || got != target {
+		t.Errorf("registered target = %q, %v; want %q", got, ok, target)
+	}
+}
+
 // writeFixtureKit writes a kit with one installable item and one that uses
 // variables, proposing target as its target hint.
 func writeFixtureKit(t *testing.T, target string) string {

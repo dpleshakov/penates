@@ -55,6 +55,7 @@ func (a *App) Initial(kitPath string) tea.Model {
 		m.pendingKit = k
 		m.input.Placeholder = "target directory"
 		m.input.SetValue(expandHome(k.TargetHint))
+		m.input.Focus()
 		m.screen = screenRegister
 		return m
 	}

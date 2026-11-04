@@ -137,7 +137,7 @@ func TestBuild(t *testing.T) {
 		"variables are not supported yet": {
 			kits: []*kit.Kit{{Name: "k", Items: []*kit.Item{{
 				ID: "one", Version: "1.0.0",
-				Vars: []kit.Var{{ID: "path", Required: true}},
+				Vars:        []kit.Var{{ID: "path", Required: true}},
 				Contributes: []kit.Contribution{{Kind: kit.KindFile, Src: "s", To: "skills/one/SKILL.md"}},
 			}}}},
 			selection: []string{"k/one"},

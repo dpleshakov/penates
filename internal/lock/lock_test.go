@@ -16,9 +16,9 @@ func TestRoundTrip(t *testing.T) {
 		Target: target,
 		Items: map[string]*Item{
 			"example/git-via-gh": {
-				Version: "1.2.0",
-				Answers: map[string]string{"path": "/somewhere"},
-				Files:   map[string]string{"skills/git-via-gh/SKILL.md": "sha256:9ab2"},
+				Version:     "1.2.0",
+				Answers:     map[string]string{"path": "/somewhere"},
+				Files:       map[string]string{"skills/git-via-gh/SKILL.md": "sha256:9ab2"},
 				DirsCreated: []string{"skills/git-via-gh"},
 				Sections: map[string]Section{
 					"AGENTS.md": {Block: "example/git-via-gh", Hash: "sha256:41c0"},

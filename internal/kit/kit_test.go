@@ -64,14 +64,14 @@ func TestLoadValid(t *testing.T) {
 
 func TestLoadInvalid(t *testing.T) {
 	validKit := map[string]string{
-		"kit.yaml": "name: example\ntarget_hint: ~/t\nshared:\n  - AGENTS.md\n",
+		"kit.yaml":          "name: example\ntarget_hint: ~/t\nshared:\n  - AGENTS.md\n",
 		"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/a/f\n",
-		"items/a/f":          "content\n",
+		"items/a/f":         "content\n",
 	}
 
 	tests := map[string]struct {
-		files    map[string]string // written on top of a copy of validKit; nil value deletes
-		wantErr  string
+		files   map[string]string // written on top of a copy of validKit; nil value deletes
+		wantErr string
 	}{
 		"missing kit.yaml": {
 			files:   map[string]string{"kit.yaml": ""},
@@ -105,7 +105,7 @@ func TestLoadInvalid(t *testing.T) {
 			wantErr: "no items found",
 		},
 		"item without item.yaml": {
-			files: map[string]string{"items/a/item.yaml": ""},
+			files:   map[string]string{"items/a/item.yaml": ""},
 			wantErr: "items/a/item.yaml: cannot be read",
 		},
 		"bad item id": {

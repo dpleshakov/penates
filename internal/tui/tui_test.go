@@ -111,11 +111,11 @@ func writeFixtureKit(t *testing.T, target string) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"kit.yaml": "name: ex\ntarget_hint: " + target + "\n",
-		"items/good/item.yaml": "id: good\nversion: 1.0.0\ndescription: Good item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n",
-		"items/good/skill/SKILL.md":   "good skill\n",
-		"items/varitem/item.yaml":     "id: varitem\nversion: 0.1.0\nvars:\n  - {id: p, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n",
-		"items/varitem/v.md":          "var item\n",
+		"kit.yaml":                  "name: ex\ntarget_hint: " + target + "\n",
+		"items/good/item.yaml":      "id: good\nversion: 1.0.0\ndescription: Good item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n",
+		"items/good/skill/SKILL.md": "good skill\n",
+		"items/varitem/item.yaml":   "id: varitem\nversion: 0.1.0\nvars:\n  - {id: p, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n",
+		"items/varitem/v.md":        "var item\n",
 	}
 	for path, content := range files {
 		full := filepath.Join(dir, filepath.FromSlash(path))

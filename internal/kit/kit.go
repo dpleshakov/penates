@@ -122,11 +122,11 @@ type kitFile struct {
 }
 
 type itemFile struct {
-	ID          string            `yaml:"id"`
-	Version     string            `yaml:"version"`
-	Description string            `yaml:"description"`
-	Tags        []string          `yaml:"tags"`
-	Vars        []varFile         `yaml:"vars"`
+	ID          string             `yaml:"id"`
+	Version     string             `yaml:"version"`
+	Description string             `yaml:"description"`
+	Tags        []string           `yaml:"tags"`
+	Vars        []varFile          `yaml:"vars"`
 	Contributes []contributionFile `yaml:"contributes"`
 }
 

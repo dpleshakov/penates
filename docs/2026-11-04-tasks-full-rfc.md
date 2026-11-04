@@ -65,7 +65,7 @@ object members and array elements by RFC 6901 pointer — preserving comments an
 formatting of untouched parts.
 **Definition of done:** table tests cover edit-in-place with comments
 preserved, pointers with special characters, and array-element operations.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-06 `json-planning`
 **Description:** Planner implements RFC 7.4: fragments decompose into leaf

@@ -17,7 +17,7 @@ holds no notable project named penates (RFC, open question 1).
 | Language and distribution | Go 1.27, single static binary | Fixed by the RFC (section 11). Cross-compiles to Windows, Linux, and macOS without runtime dependencies. |
 | TUI | [Bubble Tea](https://github.com/charmbracelet/bubbletea) with `bubbles` and `lipgloss` | The screens are forms and lists driven by application state (register target, select items, apply); the update/view loop models this directly. `tview` targets widget-heavy dashboards and pulls a larger dependency graph; `tcell` alone would mean hand-rolling lists and inputs. |
 | YAML | [goccy/go-yaml](https://github.com/goccy/go-yaml) | Actively maintained; decode errors carry positions, which validation messages shown to the kit author need. `gopkg.in/yaml.v3` is frozen upstream. |
-| JSONC | [hujson](https://github.com/tailscale/hujson) | Parses JSONC into a comment-preserving value tree and re-emits it, which partial edits of shared files require (RFC 7.4). |
+| JSONC | [hujson](https://github.com/tailscale/hujson) wrapped by `internal/jsonc` | Parses JSONC into a comment-preserving value tree and re-emits it, which partial edits of shared files require (RFC 7.4). The wrapper edits the tree in place, so parts no edit touched pack back byte for byte; hujson's own patch pipeline recommends reformatting the whole file and would not preserve the original bytes. |
 | Version ordering | `golang.org/x/mod/semver` | Canonical implementation; the RFC needs comparison only (section 8). |
 | Tests | standard `testing` + [`go-cmp`](https://github.com/google/go-cmp) | Table-driven tests; `go-cmp` for readable diffs of plans, locks, and snapshots. |
 | Lint and format | `golangci-lint` with `gofmt` and `goimports` | One runner for vet, staticcheck, revive, gosec, and formatting; enforced in CI through `make check`. |
@@ -26,11 +26,14 @@ holds no notable project named penates (RFC, open question 1).
 
 Known risks:
 
-- After a `json` contribution is applied, the formatting of untouched parts of a JSONC
-  file is whatever hujson's printer produces, not the original bytes. Golden tests with
-  realistic fixtures pin the output; if the drift proves unacceptable in practice, the
-  fallback is a position-preserving editor behind the same interface in
-  `internal/target`.
+- `internal/jsonc` inserts and removes members through hujson's value tree and
+  packs untouched parts back byte for byte. Two choices are heuristic: a new
+  member or element takes the line layout of its neighbor (two-space indent on
+  a new line when the composite is empty), and a comment sitting between a
+  removed member and its neighbor is removed with it, because the parser
+  attaches it to the neighbor. Golden tests with realistic fixtures pin the
+  output; if the choices prove unacceptable in practice, the fallback is a
+  configurable formatter behind the same interface.
 - `to` paths are slash-separated data (RFC 6.2). They are converted to platform paths
   only at the file-system boundary, in `internal/target` and `internal/apply`; the
   Windows leg of the CI matrix guards the conversion.
@@ -49,6 +52,8 @@ only client.
 | `internal/state` | Application state (RFC 6.7): registered kits and targets, the kit-to-target mapping, the last selection, variable answers. Persists under `os.UserConfigDir()/penates`. |
 | `internal/lock` | The per-target lock (RFC 6.7): read, write, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
+| `internal/markdown` | Pure text manipulation over managed blocks in shared Markdown files: parses the block layout and performs the append and replace operations section contributions are planned with (RFC 7.3). Knows no file system. |
+| `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (RFC 7.4). Knows no file system. |
 | `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, errors per item. Implements the three-state conflict model (RFC 7). Performs no I/O. |
 | `internal/apply` | Executes a plan: applies an item completely or not at all, writes atomically (temp file and rename), updates the lock on success, reconciles after an interruption (RFC 7.7). |
 | `internal/tui` | The Bubble Tea client: registration, item list, variable forms, apply summary (RFC 10). The only package that knows about the terminal. |
@@ -64,9 +69,11 @@ flowchart LR
     PL -- types and values only --> KIT
     PL --> LK["internal/lock"]
     PL --> TG["internal/target"]
+    PL --> JC["internal/jsonc"]
     AP --> LK
     AP --> TG
     AP --> KIT
+    AP --> JC
 ```
 
 Rules:

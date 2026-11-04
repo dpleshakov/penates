@@ -37,7 +37,7 @@ blocks (id between `penates:begin/end` markers) with content hashes, headings
 outside managed blocks, existence.
 **Definition of done:** parsing fixture shared files answers block ids, block
 content hashes, outside headings; table tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `section-planning`
 **Description:** Planner implements RFC 7.3 for `section` contributions: append

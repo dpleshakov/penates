@@ -71,7 +71,7 @@ func TestInstallEndToEnd(t *testing.T) {
 				}
 			}
 		}
-		snap, err := target.SnapshotFiles(targetDir, paths)
+		snap, err := target.Read(targetDir, paths, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

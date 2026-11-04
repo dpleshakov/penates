@@ -15,14 +15,14 @@ func TestSnapshotFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snap, err := SnapshotFiles(root, []string{
+	snap, err := Read(root, []string{
 		"skills/one/SKILL.md",
 		"AGENTS.md",
 		"agents",        // a directory where a file could be expected
 		"missing/x.txt", // never created
-	})
+	}, nil)
 	if err != nil {
-		t.Fatalf("SnapshotFiles: %v", err)
+		t.Fatalf("Snapshot: %v", err)
 	}
 
 	got := snap.File("skills/one/SKILL.md")
@@ -39,7 +39,7 @@ func TestSnapshotFiles(t *testing.T) {
 
 	// A changed file yields a different hash.
 	write(t, filepath.Join(root, "AGENTS.md"), "changed\n")
-	changed, err := SnapshotFiles(root, []string{"AGENTS.md"})
+	changed, err := Read(root, []string{"AGENTS.md"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +48,44 @@ func TestSnapshotFiles(t *testing.T) {
 	}
 }
 
+func TestSnapshotShared(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "AGENTS.md"),
+		"# Notes\n\n<!-- penates:begin kit/one -->\n## House rules\n\nbody\n<!-- penates:end kit/one -->\n\ntail\n")
+
+	snap, err := Read(root, nil, []string{"AGENTS.md", "missing/Shared.md"})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	shared := snap.SharedFile("AGENTS.md")
+	if !shared.Exists || shared.IsDir {
+		t.Errorf("shared file: %+v", shared)
+	}
+	if !strings.Contains(shared.Content, "# Notes") || !strings.Contains(shared.Content, "<!-- penates:begin kit/one -->") {
+		t.Errorf("content = %q", shared.Content)
+	}
+	h, ok := shared.BlockHash("kit/one")
+	if !ok || !strings.HasPrefix(h, "sha256:") {
+		t.Errorf("block hash = %q, %v", h, ok)
+	}
+	if len(shared.Headings) != 1 || shared.Headings[0] != "notes" {
+		t.Errorf("headings = %q, want only the outside \"notes\"", shared.Headings)
+	}
+
+	missing := snap.SharedFile("missing/Shared.md")
+	if missing.Exists || missing.Content != "" || len(missing.Blocks) != 0 {
+		t.Errorf("missing shared file: %+v", missing)
+	}
+}
+
 func TestSnapshotRejectsBadPaths(t *testing.T) {
 	for _, p := range []string{"", "/abs", "../x", "a/../b", `a\b`, "C:x"} {
-		if _, err := SnapshotFiles(t.TempDir(), []string{p}); err == nil {
-			t.Errorf("path %q was accepted", p)
+		if _, err := Read(t.TempDir(), []string{p}, nil); err == nil {
+			t.Errorf("file path %q was accepted", p)
+		}
+		if _, err := Read(t.TempDir(), nil, []string{p}); err == nil {
+			t.Errorf("shared path %q was accepted", p)
 		}
 	}
 }

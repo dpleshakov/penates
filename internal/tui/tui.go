@@ -267,6 +267,16 @@ func (m *model) apply() {
 	var selection []string
 	var paths []string
 	seen := map[string]bool{}
+	sharedSeen := map[string]bool{}
+	var sharedPaths []string
+	for _, k := range m.kits {
+		for _, s := range k.Shared {
+			if !sharedSeen[s] {
+				sharedSeen[s] = true
+				sharedPaths = append(sharedPaths, s)
+			}
+		}
+	}
 	for _, r := range m.rows {
 		if !r.selected {
 			continue
@@ -292,7 +302,7 @@ func (m *model) apply() {
 	}
 	sort.Strings(paths)
 
-	snap, err := target.SnapshotFiles(m.target, paths)
+	snap, err := target.Read(m.target, paths, sharedPaths)
 	if err != nil {
 		m.lastResults = "apply failed: " + err.Error()
 		m.screen = screenResults

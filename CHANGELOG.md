@@ -10,3 +10,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Selected items with file contributions install from a kit into a harness configuration directory, and a per-target lock records every file that penates writes.
 - Starting with a kit path registers the kit and its target directory; without arguments, the registered target opens directly.
+
+### Fixed
+- Applying into a target directory that does not exist yet no longer fails when an item writes a file directly into the target root.

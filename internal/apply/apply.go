@@ -161,6 +161,12 @@ func mkdirAllTracking(root, dir string) ([]string, error) {
 		return nil, err
 	}
 	if rel == "." {
+		// The action targets the root itself; create it when it is missing. The
+		// root is the user's chosen target, not a directory penates created for
+		// the item, so it is not recorded.
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	var missing []string

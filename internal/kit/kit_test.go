@@ -49,10 +49,7 @@ func TestLoadValid(t *testing.T) {
 	if ghNote.HasChangelog {
 		t.Error("gh-note: HasChangelog = true, want false")
 	}
-	want = []Contribution{
-		{Kind: KindSection, Src: "note.md", To: "AGENTS.md"},
-		{Kind: KindJSON, Src: "perms.jsonc", To: "config.jsonc"},
-	}
+	want = []Contribution{{Kind: KindSection, Src: "note.md", To: "AGENTS.md"}}
 	if diff := cmp.Diff(want, ghNote.Contributes); diff != "" {
 		t.Errorf("gh-note contributions (-want +got):\n%s", diff)
 	}

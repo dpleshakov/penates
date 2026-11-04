@@ -56,7 +56,7 @@ without touching anything else; the lock records `sections` and
 `created_shared_files`.
 **Definition of done:** applying a fixture kit writes the marked blocks into a
 shared file and round-trips through the lock; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-05 `jsonc-package`
 **Description:** `internal/jsonc`: a wrapper over hujson that reads a JSONC

@@ -1,0 +1,16 @@
+# Binaries
+/penates
+/penates.exe
+/dist/
+
+# Test and coverage artifacts
+*.test
+coverage.out
+coverage.html
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Local agent tooling, not part of the published project
+.agents/

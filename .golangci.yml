@@ -1,0 +1,14 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt
+
+linters:
+  enable:
+    - copyloopvar
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+    - unconvert

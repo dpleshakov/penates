@@ -63,7 +63,7 @@ write files through temp-and-rename, record hashes and created directories in th
 lock, save the lock after each item.
 **Definition of done:** applying a plan installs files and updates the lock; an item
 that fails mid-way writes no files and leaves the lock unchanged; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-07 `tui-shell`
 **Description:** `internal/tui` + `cmd/penates`: minimal client — kit registration

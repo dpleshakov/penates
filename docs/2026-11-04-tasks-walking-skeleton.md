@@ -8,7 +8,9 @@ Walking skeleton of penates: the smallest end-to-end path — start with a kit p
 register the kit and its target, list items, install an item that contributes files
 only, record the lock. `section` and `json` contributions, variables, updates,
 removal, and interruption reconciliation are out of scope; items using them are
-reported as not supported yet. Spec: docs/rfc-penates.md; module rules:
+reported as not supported yet. The update rows of the RFC 7.2 table — "owned by this
+item" — belong to the update slice: during a first install the item owns nothing yet,
+so those rows are unreachable here. Spec: docs/rfc-penates.md; module rules:
 docs/architecture.md.
 
 ---
@@ -47,11 +49,13 @@ listed paths; tests pass.
 
 ### TASK-05 `file-planner`
 **Description:** `internal/plan`: pure planning of installs for items with `file`
-contributions only, implementing the RFC 7.2 state table, cross-item file conflicts,
-and the not-supported-yet errors for other contribution kinds and variables.
-**Definition of done:** table tests cover every row of the RFC 7.2 table plus conflict
-and unsupported-kind errors; the planner performs no I/O.
-**Status:** Pending
+contributions only, implementing the install-reachable rows of the RFC 7.2 state
+table, cross-item file conflicts, and the not-supported-yet errors for other
+contribution kinds and variables.
+**Definition of done:** table tests cover the reachable rows of the RFC 7.2 table
+(absent; present and unowned; owned by another item) plus cross-item file conflicts
+and the unsupported-kind and variable errors; the planner performs no I/O.
+**Status:** Done
 
 ### TASK-06 `apply-writer`
 **Description:** `internal/apply`: execute a plan per item — create directories,

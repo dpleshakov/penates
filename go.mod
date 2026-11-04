@@ -1,3 +1,3 @@
 module github.com/dpleshakov/penates
 
-go 1.27
+go 1.27.0

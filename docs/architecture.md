@@ -20,8 +20,8 @@ holds no notable project named penates (RFC, open question 1).
 | JSONC | [hujson](https://github.com/tailscale/hujson) | Parses JSONC into a comment-preserving value tree and re-emits it, which partial edits of shared files require (RFC 7.4). |
 | Version ordering | `golang.org/x/mod/semver` | Canonical implementation; the RFC needs comparison only (section 8). |
 | Tests | standard `testing` + [`go-cmp`](https://github.com/google/go-cmp) | Table-driven tests; `go-cmp` for readable diffs of plans, locks, and snapshots. |
-| Lint and format | `golangci-lint` with `gofumpt` | One runner for vet, staticcheck, and formatting; enforced in CI. |
-| CI | GitHub Actions | `go test` on a Linux/macOS/Windows matrix (Windows is first-class, RFC 4), `golangci-lint`, and a secret scan with gitleaks. |
+| Lint and format | `golangci-lint` with `gofmt` and `goimports` | One runner for vet, staticcheck, revive, gosec, and formatting; enforced in CI through `make check`. |
+| CI | GitHub Actions | `make check` on Linux — the same target a developer runs, so local and CI results cannot diverge; `go test` additionally on a macOS/Windows matrix (Windows is first-class, RFC 4); a secret scan with gitleaks. |
 | License | MIT | Small permissive default for a public Go tool; nothing in the design binds to a larger obligation. |
 
 Known risks:

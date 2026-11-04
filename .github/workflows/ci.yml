@@ -1,42 +1,58 @@
 name: CI
 
+# Pull requests are the normal path, but the project is worked on solo and may
+# have none, so pushes to main are checked as well.
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
-  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          # Matches the go directive in go.mod.
+          go-version-file: go.mod
+
+      # The action only installs the linter; the Makefile decides how it runs,
+      # so that `make check` behaves the same here and on a developer machine.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13
+          install-mode: binary
+          install-only: true
+
+      # Everything the project verifies, in exactly the form a developer runs.
+      - run: make check
+
+  # Windows is a first-class platform (RFC, section 4), so the tests run on
+  # every release platform; `make` is not assumed outside ubuntu.
+  matrix:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: go build ./...
       - run: go test ./...
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
-
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2

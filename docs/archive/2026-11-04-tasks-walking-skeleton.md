@@ -1,6 +1,6 @@
 # 2026-11-04-tasks-walking-skeleton.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -80,4 +80,4 @@ flow, and the binary starts.
 the target, plan, apply, verify files and the lock, re-plan and observe no actions.
 **Definition of done:** the test passes and covers install plus the no-action
 re-plan; CHANGELOG gains an `Unreleased` entry for the install path.
-**Status:** Pending
+**Status:** Done

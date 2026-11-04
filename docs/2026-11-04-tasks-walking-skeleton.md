@@ -20,7 +20,7 @@ versions, source and target paths, and shared-file targets; validation errors na
 the file and field.
 **Definition of done:** `Load` accepts a fixture kit with `file`, `section`, and `json`
 contributions and rejects invalid kits with precise messages; table tests cover both.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-02 `state-store`
 **Description:** `internal/state`: application state — registered kits with paths,

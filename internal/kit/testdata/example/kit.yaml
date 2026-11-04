@@ -1,0 +1,6 @@
+name: example
+description: Example kit used by tests and the manual smoke test
+target_hint: ~/.config/example-harness
+shared:
+  - AGENTS.md
+  - config.jsonc

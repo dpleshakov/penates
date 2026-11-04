@@ -1,0 +1,6 @@
+{
+  // Permissions the gh-note item contributes.
+  "permission": {
+    "bash": ["gh *"]
+  }
+}

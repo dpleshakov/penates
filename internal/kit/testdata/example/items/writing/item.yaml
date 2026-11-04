@@ -1,0 +1,8 @@
+id: writing
+version: 1.0.0
+description: Text editing skill
+tags: [writing]
+vars: []
+contributes:
+  - file: skill/SKILL.md
+    to: skills/writing/SKILL.md

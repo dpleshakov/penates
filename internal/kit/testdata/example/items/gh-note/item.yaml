@@ -1,0 +1,8 @@
+id: gh-note
+version: 0.1.0
+description: House rules for working with gh
+contributes:
+  - section: note.md
+    to: AGENTS.md
+  - json: perms.jsonc
+    to: config.jsonc

@@ -183,33 +183,94 @@ func writeSource(t *testing.T, kitDir, rel, content string) {
 	}
 }
 
-// TestApplyRefusesJSONActions pins the interim boundary: planning already
-// emits json actions, applying them is the next change. The refused item
-// leaves no file and no lock record.
-func TestApplyRefusesJSONActions(t *testing.T) {
+// TestApplyInstallsJSON applies an item whose json action carries the composed
+// shared file: the file is written, the lock records the owned locations and
+// the created shared file.
+func TestApplyInstallsJSON(t *testing.T) {
 	root := t.TempDir()
 	store := lock.NewStore(t.TempDir())
 	lk, err := store.Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	content := "{\n  \"editor\": \"vim\",\n  \"permission\": {\n    \"bash\": [\"gh *\"]\n  }\n}\n"
+	loc := plan.Location{Pointer: "/permission/bash", Hash: hashOf([]byte(`["gh *"]`))}
 	p := &plan.Plan{Items: []*plan.ItemPlan{{
 		Key: "k/one", KitName: "k", ItemID: "one", Version: "1.0.0", Status: plan.StatusInstall,
 		Actions: []plan.Action{{
 			Kind:    plan.ActionJSON,
-			To:      "config.json",
-			Content: []byte(`{"a":1}`),
+			To:      "config.jsonc",
+			Content: []byte(content),
 			Reason:  "fragment values are written into the shared file",
 		}},
+		JSONLocations: map[string][]plan.Location{"config.jsonc": {loc}},
 	}}}
 	results := Apply(root, p, lk, store)
-	if len(results) != 1 || results[0].Err == nil || !strings.Contains(results[0].Err.Error(), "json actions are not applied yet") {
+	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("results = %+v", results)
 	}
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash("config.json"))); !os.IsNotExist(err) {
-		t.Errorf("config.json exists after the refused action: %v", err)
+	data, err := os.ReadFile(filepath.Join(root, "config.jsonc"))
+	if err != nil || string(data) != content {
+		t.Fatalf("config.jsonc = %q, %v", data, err)
 	}
-	if len(lk.Items) != 0 {
-		t.Errorf("lock items = %v, want none", lk.Items)
+	reloaded, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reloaded.Items["k/one"]
+	if rec == nil {
+		t.Fatalf("lock holds no k/one: %v", reloaded.Items)
+	}
+	locs := rec.JSON["config.jsonc"]
+	if len(locs) != 1 || locs[0].Pointer != loc.Pointer || locs[0].Hash != loc.Hash {
+		t.Errorf("lock locations = %v, want %v", locs, loc)
+	}
+	if len(reloaded.CreatedSharedFiles) != 1 || reloaded.CreatedSharedFiles[0] != "config.jsonc" {
+		t.Errorf("created shared files = %v, want [config.jsonc]", reloaded.CreatedSharedFiles)
+	}
+}
+
+// TestApplyRecordsCoOwnershipWithoutWrites pins the satisfied install: every
+// location of the item is already present and co-owned, so the plan carries no
+// action at all, the file is untouched, and the lock still records the item as
+// a co-owner (RFC 7.4).
+func TestApplyRecordsCoOwnershipWithoutWrites(t *testing.T) {
+	root := t.TempDir()
+	before := "{ // kept\n  \"theme\": \"dark\"\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "config.jsonc"), []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := lock.NewStore(t.TempDir())
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc := plan.Location{Pointer: "/theme", Hash: hashOf([]byte(`"dark"`))}
+	p := &plan.Plan{Items: []*plan.ItemPlan{{
+		Key: "k/two", KitName: "k", ItemID: "two", Version: "1.0.0", Status: plan.StatusInstall,
+		JSONLocations: map[string][]plan.Location{"config.jsonc": {loc}},
+	}}}
+	results := Apply(root, p, lk, store)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("results = %+v", results)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "config.jsonc"))
+	if err != nil || string(data) != before {
+		t.Fatalf("config.jsonc changed: %q, %v", data, err)
+	}
+	reloaded, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reloaded.Items["k/two"]
+	if rec == nil {
+		t.Fatalf("lock holds no k/two: %v", reloaded.Items)
+	}
+	locs := rec.JSON["config.jsonc"]
+	if len(locs) != 1 || locs[0] != (lock.Location{Pointer: loc.Pointer, Hash: loc.Hash}) {
+		t.Errorf("lock locations = %v, want co-ownership at %v", locs, loc)
+	}
+	if len(reloaded.CreatedSharedFiles) != 0 {
+		t.Errorf("created shared files = %v, want none: the file existed", reloaded.CreatedSharedFiles)
 	}
 }

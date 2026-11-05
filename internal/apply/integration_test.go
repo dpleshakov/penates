@@ -249,3 +249,138 @@ func TestInstallSectionEndToEnd(t *testing.T) {
 		t.Errorf("re-plan verdict = %q %q", p.Items[0].Status, p.Items[0].Reason)
 	}
 }
+
+// TestInstallJSONEndToEnd installs the gh-note item of the fixture example kit
+// into a target whose config.jsonc the user wrote by hand: the section creates
+// AGENTS.md, the json values are inserted into the existing JSONC with its
+// comment untouched, the reloaded lock records the owned location, and a second
+// pass over the same selection plans nothing.
+func TestInstallJSONEndToEnd(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "harness")
+	kitDir := filepath.Join("..", "kit", "testdata", "example")
+	userConfig := "{\n  // editor the user chose by hand\n  \"editor\": \"vim\"\n}\n"
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "config.jsonc"), []byte(userConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := stateStore.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RegisterKit("example", kitDir, targetDir)
+	if err := stateStore.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	locks := lock.NewStore(dataDir)
+	selection := []string{"example/gh-note"}
+
+	runApply := func() *plan.Plan {
+		t.Helper()
+		reloaded, err := stateStore.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var kits []*kit.Kit
+		for _, name := range reloaded.KitsForTarget(targetDir) {
+			k, err := kit.Load(reloaded.Kits[name])
+			if err != nil {
+				t.Fatal(err)
+			}
+			kits = append(kits, k)
+		}
+		lk, err := locks.Load(targetDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var paths, sharedPaths []string
+		for _, k := range kits {
+			sharedPaths = append(sharedPaths, k.Shared...)
+			for _, it := range k.Items {
+				for _, c := range it.Contributes {
+					if c.Kind == kit.KindFile {
+						paths = append(paths, c.To)
+					}
+				}
+			}
+		}
+		snap, err := target.Read(targetDir, paths, sharedPaths)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources, err := kit.ReadSources(kits, selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources})
+		results := Apply(targetDir, p, lk, locks)
+		for _, r := range results {
+			if r.Err != nil {
+				t.Fatalf("apply %s: %v", r.Key, r.Err)
+			}
+		}
+		return p
+	}
+
+	p := runApply()
+	if len(p.Installable()) != 1 {
+		t.Fatalf("plan installable = %v", p.Installable())
+	}
+
+	// The user's JSONC kept its bytes and gained the fragment's values.
+	wantConfig := "{\n  // editor the user chose by hand\n  \"editor\": \"vim\",\n  \"permission\": {\n    \"bash\": [\"gh *\"]\n  }\n}\n"
+	got, err := os.ReadFile(filepath.Join(targetDir, "config.jsonc"))
+	if err != nil || string(got) != wantConfig {
+		t.Fatalf("config.jsonc =\n%q\n%v\nwant\n%q", got, err, wantConfig)
+	}
+	fragment, err := os.ReadFile(filepath.Join(kitDir, "items", "gh-note", "note.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAgents := "<!-- penates:begin example/gh-note -->\n" + string(fragment) + "\n<!-- penates:end example/gh-note -->\n"
+	gotAgents, err := os.ReadFile(filepath.Join(targetDir, "AGENTS.md"))
+	if err != nil || string(gotAgents) != wantAgents {
+		t.Fatalf("AGENTS.md = %q, %v; want %q", gotAgents, err, wantAgents)
+	}
+
+	// The reloaded lock records the block, the owned location with the hash of
+	// its value, and the shared file penates created; the user's config.jsonc
+	// is not among them.
+	fresh, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := fresh.Items["example/gh-note"]
+	if rec == nil {
+		t.Fatalf("lock holds no example/gh-note: %v", fresh.Items)
+	}
+	sum := sha256.Sum256([]byte(`"gh *"`))
+	wantLoc := lock.Location{Pointer: "/permission/bash", Hash: "sha256:" + hex.EncodeToString(sum[:])}
+	locs := rec.JSON["config.jsonc"]
+	if len(locs) != 1 || locs[0] != wantLoc {
+		t.Errorf("lock json = %v, want [%v]", locs, wantLoc)
+	}
+	if sec, ok := rec.Sections["AGENTS.md"]; !ok || sec.Block != "example/gh-note" {
+		t.Errorf("lock sections = %v", rec.Sections)
+	}
+	if len(fresh.CreatedSharedFiles) != 1 || fresh.CreatedSharedFiles[0] != "AGENTS.md" {
+		t.Errorf("created shared files = %v, want [AGENTS.md]", fresh.CreatedSharedFiles)
+	}
+
+	// The second pass over the same selection plans nothing.
+	p = runApply()
+	if len(p.Installable()) != 0 {
+		t.Errorf("re-plan still installable: %v", p.Installable())
+	}
+	if p.Items[0].Status != plan.StatusNoAction || !strings.Contains(p.Items[0].Reason, "already installed") {
+		t.Errorf("re-plan verdict = %q %q", p.Items[0].Status, p.Items[0].Reason)
+	}
+}

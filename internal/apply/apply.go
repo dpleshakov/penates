@@ -76,7 +76,9 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		case plan.ActionSection:
 			sections[a.To] = lock.Section{Block: a.Block, Hash: a.BlockHash}
 		case plan.ActionJSON:
-			return fail(fmt.Errorf("write %s: json actions are not applied yet", a.To))
+			// The composed file bytes are staged and renamed like every other
+			// action; the locations the item owns are recorded from the item
+			// plan, which covers satisfied and co-owned values without actions.
 		default:
 			files[a.To] = hashOf(a.Content)
 		}
@@ -94,7 +96,8 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	// they exist (RFC 6.7).
 	var createdShared []string
 	for _, a := range ip.Actions {
-		if a.Kind == plan.ActionSection && !existed[a.To] && !containsPath(lk.CreatedSharedFiles, a.To) {
+		sharedKind := a.Kind == plan.ActionSection || a.Kind == plan.ActionJSON
+		if sharedKind && !existed[a.To] && !containsPath(lk.CreatedSharedFiles, a.To) {
 			createdShared = append(createdShared, a.To)
 		}
 	}
@@ -109,11 +112,30 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		Files:       files,
 		DirsCreated: createdDirs,
 		Sections:    sections,
+		JSON:        jsonLocations(ip.JSONLocations),
 	})
 	if err := store.Save(lk); err != nil {
 		return fail(fmt.Errorf("save lock: %w", err))
 	}
 	return nil
+}
+
+// jsonLocations converts the plan's owned locations into their lock form. An
+// item may own locations in a file it did not write: values found satisfied
+// and made co-owned bring no action, yet the lock records them (RFC 7.4).
+func jsonLocations(locs map[string][]plan.Location) map[string][]lock.Location {
+	if len(locs) == 0 {
+		return nil
+	}
+	out := make(map[string][]lock.Location, len(locs))
+	for file, list := range locs {
+		converted := make([]lock.Location, len(list))
+		for i, loc := range list {
+			converted[i] = lock.Location{Pointer: loc.Pointer, Hash: loc.Hash}
+		}
+		out[file] = converted
+	}
+	return out
 }
 
 func hashOf(data []byte) string {

@@ -84,7 +84,7 @@ recorded.
 **Definition of done:** applying a fixture kit writes the values into a JSONC
 file with comments of untouched parts intact and round-trips through the lock;
 tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-08 `variables`
 **Description:** RFC 6.4 end to end: answers stored in the application state

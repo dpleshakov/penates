@@ -1408,6 +1408,24 @@ func TestPlanJSONUpdates(t *testing.T) {
 				}
 			},
 		},
+		"a location the update drops is released with its value kept": {
+			current: "{\n  \"a\": 1,\n  \"b\": [2]\n}\n", source: `{"a":3}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				// The thinner fragment releases /b: its value stays in the
+				// composed file, but the item no longer owns it.
+				content := string(ip.Actions[0].Content)
+				if !strings.Contains(content, `"a": 3`) || !strings.Contains(content, `"b": [2]`) {
+					t.Errorf("content =\n%s", content)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("3"))}) {
+					t.Errorf("locations = %v, want only the still-declared /a", locs)
+				}
+			},
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {

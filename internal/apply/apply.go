@@ -108,7 +108,7 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 
 	lk.SetItem(ip.Key, &lock.Item{
 		Version:     ip.Version,
-		Answers:     map[string]string{},
+		Answers:     answersOf(ip),
 		Files:       files,
 		DirsCreated: createdDirs,
 		Sections:    sections,
@@ -120,8 +120,16 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	return nil
 }
 
-// jsonLocations converts the plan's owned locations into their lock form. An
-// item may own locations in a file it did not write: values found satisfied
+// answersOf normalizes the plan's answers for the lock: an item with no
+// variables records an empty, not a null, map (RFC 6.4).
+func answersOf(ip *plan.ItemPlan) map[string]string {
+	if ip.Answers == nil {
+		return map[string]string{}
+	}
+	return ip.Answers
+}
+
+// jsonLocations converts the plan's owned locations into their lock form. An// item may own locations in a file it did not write: values found satisfied
 // and made co-owned bring no action, yet the lock records them (RFC 7.4).
 func jsonLocations(locs map[string][]plan.Location) map[string][]lock.Location {
 	if len(locs) == 0 {

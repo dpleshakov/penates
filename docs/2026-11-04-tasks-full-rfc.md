@@ -95,7 +95,7 @@ not installable; optional empty substitutes as empty; the lock records answers.
 **Definition of done:** a headless TUI test answers a form and the installed
 content carries the substitution; unknown-placeholder and missing-required
 tests pass; answers reuse on a second apply without a form.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-09 `updates`
 **Description:** RFC 8 with the update rows of the 7.2 table: version

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/markdown"
@@ -170,20 +172,6 @@ func TestBuild(t *testing.T) {
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
 				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was not provided to the planner") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
-				}
-			},
-		},
-		"variables are not supported yet": {
-			kits: []*kit.Kit{{Name: "k", Items: []*kit.Item{{
-				ID: "one", Version: "1.0.0",
-				Vars:        []kit.Var{{ID: "path", Required: true}},
-				Contributes: []kit.Contribution{{Kind: kit.KindFile, Src: "s", To: "skills/one/SKILL.md"}},
-			}}}},
-			selection: []string{"k/one"},
-			want: func(t *testing.T, p *Plan) {
-				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "variables are not supported yet") {
 					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
 				}
 			},
@@ -861,5 +849,229 @@ func TestJSONOwnedAction(t *testing.T) {
 				t.Errorf("jsonOwnedAction = %v, %q; want write %v, conflict %v", write, conflict, tt.write, tt.conflict)
 			}
 		})
+	}
+}
+
+// varItem builds a kit item around one templated or plain file contribution
+// from the source "s", with the declared variables.
+func varItem(id string, template bool, vars ...kit.Var) *kit.Item {
+	return &kit.Item{
+		ID:      id,
+		Version: "1.0.0",
+		Vars:    vars,
+		Contributes: []kit.Contribution{{
+			Kind:     kit.KindFile,
+			Src:      "s",
+			To:       "skills/" + id + "/SKILL.md",
+			Template: template,
+		}},
+	}
+}
+
+// TestPlanVars walks the rules of RFC 6.4: substitution only where the
+// contribution opts in, unknown placeholders as errors, required and optional
+// variables without values, and the answers the plan records for the lock.
+func TestPlanVars(t *testing.T) {
+	tests := map[string]struct {
+		item    *kit.Item
+		source  string
+		answers map[string]string
+		want    func(*testing.T, *Plan)
+	}{
+		"templated file content is substituted and answers recorded": {
+			item:    varItem("one", true, kit.Var{ID: "root", Prompt: "root path", Required: true}),
+			source:  "root: {{root}}\n",
+			answers: map[string]string{"root": "/opt/x"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if got := string(ip.Actions[0].Content); got != "root: /opt/x\n" {
+					t.Errorf("content = %q", got)
+				}
+				if diff := cmp.Diff(map[string]string{"root": "/opt/x"}, ip.Answers); diff != "" {
+					t.Errorf("answers (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"a plain contribution keeps its braces": {
+			item:    varItem("one", false, kit.Var{ID: "root", Required: true}),
+			source:  "{{root}} stays\n",
+			answers: map[string]string{"root": "/x"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if got := string(ip.Actions[0].Content); got != "{{root}} stays\n" {
+					t.Errorf("content = %q, want the braces verbatim", got)
+				}
+			},
+		},
+		"an unknown placeholder is an error": {
+			item:    varItem("one", true, kit.Var{ID: "root", Required: true}),
+			source:  "{{nope}}\n",
+			answers: map[string]string{"root": "/x"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "holds the unknown placeholder {{nope}}") {
+					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none", ip.Actions)
+				}
+			},
+		},
+		"a required variable without a value is not installable": {
+			item:   varItem("one", true, kit.Var{ID: "root", Prompt: "root path", Required: true}),
+			source: "{{root}}\n",
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `required variable "root" has no value`) {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"an optional variable without a value substitutes as empty": {
+			item:   varItem("one", true, kit.Var{ID: "opt"}),
+			source: "a{{opt}}b\n",
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if got := string(ip.Actions[0].Content); got != "ab\n" {
+					t.Errorf("content = %q, want the empty substitution", got)
+				}
+				if diff := cmp.Diff(map[string]string{"opt": ""}, ip.Answers); diff != "" {
+					t.Errorf("answers (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"an answer is substituted once, not rescanned": {
+			item:    varItem("one", true, kit.Var{ID: "root", Required: true}),
+			source:  "{{root}}\n",
+			answers: map[string]string{"root": "see {{root}}"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if got := string(ip.Actions[0].Content); got != "see {{root}}\n" {
+					t.Errorf("content = %q, want the answer verbatim", got)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := Build(Input{
+				Kits:      oneKit("k", tc.item),
+				Selection: []string{"k/" + tc.item.ID},
+				Lock:      newLock(nil),
+				Snapshot:  snapOf(nil),
+				Sources:   map[string][]byte{"s": []byte(tc.source)},
+				Answers:   map[string]map[string]string{"k/" + tc.item.ID: tc.answers},
+			})
+			if len(p.Items) == 0 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p)
+		})
+	}
+}
+
+// TestPlanVarsShared covers substitution in the shared-file contributions: the
+// section block and the json fragment are templated like files, and their
+// hashes are taken over the substituted content.
+func TestPlanVarsShared(t *testing.T) {
+	frag := []byte("## Templated\n\nfor {{root}}\n")
+	section := &kit.Item{
+		ID: "one", Version: "1.0.0",
+		Vars: []kit.Var{{ID: "root", Required: true}},
+		Contributes: []kit.Contribution{{
+			Kind: kit.KindSection, Src: "note.md", To: "AGENTS.md", Template: true,
+		}},
+	}
+	p := Build(Input{
+		Kits:      oneKit("k", section),
+		Selection: []string{"k/one"},
+		Lock:      newLock(nil),
+		Snapshot:  sharedOf(map[string]target.SharedFileState{"AGENTS.md": {Exists: true, Content: "# Notes\n"}}),
+		Sources:   map[string][]byte{"note.md": frag},
+		Answers:   map[string]map[string]string{"k/one": {"root": "the machine"}},
+	})
+	ip := p.Items[0]
+	if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+		t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+	}
+	if !strings.Contains(string(ip.Actions[0].Content), "for the machine") {
+		t.Errorf("block =\n%s", ip.Actions[0].Content)
+	}
+	if strings.Contains(string(ip.Actions[0].Content), "{{root}}") {
+		t.Errorf("block keeps the placeholder:\n%s", ip.Actions[0].Content)
+	}
+
+	json := &kit.Item{
+		ID: "two", Version: "1.0.0",
+		Vars: []kit.Var{{ID: "root", Required: true}},
+		Contributes: []kit.Contribution{{
+			Kind: kit.KindJSON, Src: "perm.jsonc", To: "config.jsonc", Template: true,
+		}},
+	}
+	p = Build(Input{
+		Kits:      oneKit("k", json),
+		Selection: []string{"k/two"},
+		Lock:      newLock(nil),
+		Snapshot:  sharedOf(map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{\n  \"editor\": \"vim\"\n}\n"}}),
+		Sources:   map[string][]byte{"perm.jsonc": []byte("{\"root\": \"{{root}}\"}")},
+		Answers:   map[string]map[string]string{"k/two": {"root": "/opt/x"}},
+	})
+	ip = p.Items[0]
+	if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+		t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+	}
+	if !strings.Contains(string(ip.Actions[0].Content), `"root": "/opt/x"`) {
+		t.Errorf("config =\n%s", ip.Actions[0].Content)
+	}
+}
+
+// TestResolveVars pins the merge the update flow will drive through Build:
+// a fresh answer wins over the recorded one, an answer of a variable the item
+// no longer declares is discarded, and missing required variables are
+// reported sorted.
+func TestResolveVars(t *testing.T) {
+	it := &kit.Item{Vars: []kit.Var{
+		{ID: "b", Required: true},
+		{ID: "a", Required: true},
+		{ID: "opt"},
+	}}
+	lk := newLock(map[string]*lock.Item{"k/one": {
+		Version: "1.0.0",
+		Answers: map[string]string{"b": "recorded", "gone": "discarded"},
+	}})
+
+	answers, missing := resolveVars("k/one", it, lk, map[string]map[string]string{
+		"k/one": {"b": "fresh"},
+	})
+	if diff := cmp.Diff([]string{"a"}, missing); diff != "" {
+		t.Errorf("missing (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(map[string]string{"b": "fresh", "a": "", "opt": ""}, answers); diff != "" {
+		t.Errorf("answers (-want +got):\n%s", diff)
+	}
+
+	// Without a fresh answer the recorded one is reused.
+	answers, missing = resolveVars("k/one", it, lk, nil)
+	if len(missing) != 1 || missing[0] != "a" {
+		t.Errorf("missing = %v", missing)
+	}
+	if answers["b"] != "recorded" {
+		t.Errorf("recorded answer lost: %v", answers)
+	}
+	if _, kept := answers["gone"]; kept {
+		t.Errorf("answer of the removed variable %q survived", "gone")
 	}
 }

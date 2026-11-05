@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
 )
@@ -204,6 +206,7 @@ func TestApplyInstallsJSON(t *testing.T) {
 			Reason:  "fragment values are written into the shared file",
 		}},
 		JSONLocations: map[string][]plan.Location{"config.jsonc": {loc}},
+		Answers:       map[string]string{"root": "/opt/x"},
 	}}}
 	results := Apply(root, p, lk, store)
 	if len(results) != 1 || results[0].Err != nil {
@@ -224,6 +227,9 @@ func TestApplyInstallsJSON(t *testing.T) {
 	locs := rec.JSON["config.jsonc"]
 	if len(locs) != 1 || locs[0].Pointer != loc.Pointer || locs[0].Hash != loc.Hash {
 		t.Errorf("lock locations = %v, want %v", locs, loc)
+	}
+	if diff := cmp.Diff(map[string]string{"root": "/opt/x"}, rec.Answers); diff != "" {
+		t.Errorf("recorded answers (-want +got):\n%s", diff)
 	}
 	if len(reloaded.CreatedSharedFiles) != 1 || reloaded.CreatedSharedFiles[0] != "config.jsonc" {
 		t.Errorf("created shared files = %v, want [config.jsonc]", reloaded.CreatedSharedFiles)

@@ -83,6 +83,7 @@ const (
 	screenRegister
 	screenPicker
 	screenList
+	screenForm
 	screenResults
 )
 
@@ -93,6 +94,13 @@ type row struct {
 	description string
 	installed   bool
 	selected    bool
+}
+
+// formField is one missing required variable the variable form asks for.
+type formField struct {
+	key    string
+	varID  string
+	prompt string
 }
 
 type model struct {
@@ -111,6 +119,9 @@ type model struct {
 	rows    []row
 	cursor  int
 
+	formFields  []formField
+	formCursor  int
+	answers     map[string]map[string]string
 	lastResults string
 }
 
@@ -119,7 +130,7 @@ func fatalModel(err error) tea.Model {
 }
 
 func (m *model) Init() tea.Cmd {
-	if m.screen == screenRegister {
+	if m.screen == screenRegister || m.screen == screenForm {
 		return textinput.Blink
 	}
 	return nil
@@ -130,9 +141,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc", "q":
-			if m.screen == screenRegister && msg.String() == "esc" {
-				m.screen = screenUsage
-				return m, nil
+			if msg.String() == "esc" {
+				switch m.screen {
+				case screenRegister:
+					m.screen = screenUsage
+					return m, nil
+				case screenForm:
+					m.screen = screenList
+					return m, nil
+				}
 			}
 			return m, tea.Quit
 		}
@@ -146,6 +163,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePicker(msg)
 		case screenList:
 			return m.updateList(msg)
+		case screenForm:
+			return m.updateForm(msg)
 		case screenResults:
 			m.enterList(m.target)
 		}
@@ -214,6 +233,31 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.apply()
 	}
 	return m, nil
+}
+
+// updateForm feeds the current field; enter records the answer and moves on,
+// and the last one resumes the apply the form interrupted.
+func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
+		f := m.formFields[m.formCursor]
+		if m.answers == nil {
+			m.answers = map[string]map[string]string{}
+		}
+		if m.answers[f.key] == nil {
+			m.answers[f.key] = map[string]string{}
+		}
+		m.answers[f.key][f.varID] = strings.TrimSpace(m.input.Value())
+		m.formCursor++
+		if m.formCursor < len(m.formFields) {
+			m.input.Reset()
+			return m, textinput.Blink
+		}
+		m.apply()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 // enterList loads everything the item list shows: the kits registered for the
@@ -302,6 +346,24 @@ func (m *model) apply() {
 	}
 	sort.Strings(paths)
 
+	// The form collects the required variables neither the lock nor this
+	// session's answers provide; apply resumes once they are in (RFC 6.4,
+	// 10.2). A required variable answered with an empty string stays missing,
+	// so the form asks for it again.
+	if missing := plan.MissingVars(m.kits, selection, m.lk, m.answers); len(missing) > 0 {
+		m.formFields = nil
+		for _, key := range selection {
+			for _, v := range missing[key] {
+				m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
+			}
+		}
+		m.formCursor = 0
+		m.input = textinput.New()
+		m.input.Focus()
+		m.screen = screenForm
+		return
+	}
+
 	snap, err := target.Read(m.target, paths, sharedPaths)
 	if err != nil {
 		m.lastResults = "apply failed: " + err.Error()
@@ -314,7 +376,14 @@ func (m *model) apply() {
 		m.screen = screenResults
 		return
 	}
-	p := plan.Build(plan.Input{Kits: m.kits, Selection: selection, Lock: m.lk, Snapshot: snap, Sources: sources})
+	p := plan.Build(plan.Input{
+		Kits:      m.kits,
+		Selection: selection,
+		Lock:      m.lk,
+		Snapshot:  snap,
+		Sources:   sources,
+		Answers:   m.answers,
+	})
 	results := apply.Apply(m.target, p, m.lk, m.app.Locks)
 	errors := map[string]string{}
 	for _, r := range results {
@@ -417,6 +486,27 @@ func (m *model) View() string {
 			fmt.Fprintf(&b, "%s[%s] %-24s %-10s %s%s\n", cursor, mark, r.key, r.version, r.description, installed)
 		}
 		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    i  installed    a  apply    q  quit"))
+	case screenForm:
+		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
+		fmt.Fprintf(&b, "required variables:\n\n")
+		for i, f := range m.formFields {
+			if i < m.formCursor {
+				continue
+			}
+			cursor := "  "
+			if i == m.formCursor {
+				cursor = "> "
+			}
+			if f.prompt != "" {
+				fmt.Fprintf(&b, "%s%s\n", cursor, f.prompt)
+			} else {
+				fmt.Fprintf(&b, "%s%s\n", cursor, f.varID)
+			}
+			if i == m.formCursor {
+				fmt.Fprintf(&b, "  %s\n", m.input.View())
+			}
+		}
+		fmt.Fprintf(&b, "\n%s\n", styleDim.Render(fmt.Sprintf("variable %d of %d    enter  next    esc  cancel", m.formCursor+1, len(m.formFields))))
 	case screenResults:
 		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("apply"))
 		b.WriteString(m.lastResults)

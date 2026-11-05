@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/state"
@@ -65,23 +66,35 @@ func TestRegisterListApplyFlow(t *testing.T) {
 		}
 	}
 
-	// Select both items and apply: the good one installs, the one with variables is
-	// excluded as not supported yet.
+	// Select both items and apply: the form asks for the varitem's required
+	// variable first.
 	m = drive(t, m, "space", "down", "space", "a")
+	fm := m.(*model)
+	if fm.screen != screenForm {
+		t.Fatalf("screen after apply = %v, want form", fm.screen)
+	}
+	if len(fm.formFields) != 1 || fm.formFields[0].key != "ex/varitem" || fm.formFields[0].varID != "p" || fm.formFields[0].prompt != "pick a word" {
+		t.Fatalf("form fields = %+v", fm.formFields)
+	}
+
+	// The answer resumes the apply: both items install, the templated file
+	// carries the substitution, and the lock records the answers.
+	m = drive(t, m, "answered", "enter")
 	rm := m.(*model)
 	if rm.screen != screenResults {
-		t.Fatalf("screen after apply = %v, want results", rm.screen)
+		t.Fatalf("screen after form = %v, want results", rm.screen)
 	}
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Errorf("results miss the applied item:\n%s", rm.lastResults)
-	}
-	if !strings.Contains(rm.lastResults, "excluded ex/varitem") || !strings.Contains(rm.lastResults, "variables are not supported yet") {
-		t.Errorf("results miss the excluded item:\n%s", rm.lastResults)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
+		t.Errorf("results miss the applied items:\n%s", rm.lastResults)
 	}
 
 	installed, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
 	if err != nil || string(installed) != "good skill\n" {
 		t.Errorf("installed file = %q, %v", installed, err)
+	}
+	templated, err := os.ReadFile(filepath.Join(target, "skills", "varitem", "v.md"))
+	if err != nil || string(templated) != "var item answered\n" {
+		t.Errorf("templated file = %q, %v; want the substituted content", templated, err)
 	}
 	lk, err := lock.NewStore(dataDir).Load(target)
 	if err != nil {
@@ -90,17 +103,24 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	if lk.Items["ex/good"] == nil {
 		t.Errorf("lock items = %v", lk.Items)
 	}
+	if diff := cmp.Diff(map[string]string{"p": "answered"}, lk.Items["ex/varitem"].Answers); diff != "" {
+		t.Errorf("recorded answers (-want +got):\n%s", diff)
+	}
 
-	// Back to the list: the applied item is now marked installed, and applying the
-	// same selection again keeps it.
+	// Back to the list: the applied items are marked installed, and applying
+	// the same selection again reuses the recorded answers — no form, straight
+	// to the results that keep everything.
 	m = drive(t, m, "enter")
 	lm = m.(*model)
-	if !lm.rows[0].installed || !lm.rows[0].selected {
-		t.Errorf("after apply: %+v", lm.rows[0])
+	if !lm.rows[0].installed || !lm.rows[0].selected || !lm.rows[1].installed {
+		t.Errorf("after apply: %+v %+v", lm.rows[0], lm.rows[1])
 	}
 	m = drive(t, m, "a")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") {
+	if rm.screen != screenResults {
+		t.Fatalf("re-apply screen = %v, want results without a form", rm.screen)
+	}
+	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") || !strings.Contains(rm.lastResults, "kept     ex/varitem: already installed") {
 		t.Errorf("re-apply results:\n%s", rm.lastResults)
 	}
 }
@@ -139,8 +159,8 @@ func TestRegisterFormTyping(t *testing.T) {
 	}
 }
 
-// writeFixtureKit writes a kit with one installable item and one that uses
-// variables, proposing target as its target hint.
+// writeFixtureKit writes a kit with one installable item and one that uses a
+// required variable in a templated file, proposing target as its target hint.
 func writeFixtureKit(t *testing.T, target string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -148,8 +168,8 @@ func writeFixtureKit(t *testing.T, target string) string {
 		"kit.yaml":                  "name: ex\ntarget_hint: " + target + "\n",
 		"items/good/item.yaml":      "id: good\nversion: 1.0.0\ndescription: Good item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n",
 		"items/good/skill/SKILL.md": "good skill\n",
-		"items/varitem/item.yaml":   "id: varitem\nversion: 0.1.0\nvars:\n  - {id: p, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n",
-		"items/varitem/v.md":        "var item\n",
+		"items/varitem/item.yaml":   "id: varitem\nversion: 0.1.0\nvars:\n  - {id: p, prompt: pick a word, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n    template: true\n",
+		"items/varitem/v.md":        "var item {{p}}\n",
 	}
 	for path, content := range files {
 		full := filepath.Join(dir, filepath.FromSlash(path))

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -17,14 +19,17 @@ import (
 
 // TestInstallEndToEnd walks the core path a client drives: register a kit, load the
 // kits of a target, snapshot it, plan a selection, apply it, and plan again. The TUI
-// is deliberately absent: this is the core contract.
+// is deliberately absent: this is the core contract. The item declares a required
+// variable, so the client passes its form answers into planning; the templated
+// file installs substituted and the lock records the answers for reuse.
 func TestInstallEndToEnd(t *testing.T) {
 	dataDir := t.TempDir()
 	targetDir := filepath.Join(t.TempDir(), "harness")
 	kitDir := t.TempDir()
 	writeSource(t, kitDir, "items/one/item.yaml",
-		"id: one\nversion: 1.0.0\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/one/SKILL.md\n")
+		"id: one\nversion: 1.0.0\nvars:\n  - id: root\n    prompt: Root path\n    required: true\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/one/SKILL.md\n  - file: conf.md\n    to: skills/one/conf.md\n    template: true\n")
 	writeSource(t, kitDir, "items/one/skill/SKILL.md", "one skill\n")
+	writeSource(t, kitDir, "items/one/conf.md", "root: {{root}}\n")
 	writeSource(t, kitDir, "kit.yaml", "name: demo\n")
 
 	// Register the kit for the target, the way a client does.
@@ -44,7 +49,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	locks := lock.NewStore(dataDir)
 	selection := []string{"demo/one"}
 
-	runApply := func() *plan.Plan {
+	runApply := func(fresh map[string]map[string]string) *plan.Plan {
 		t.Helper()
 		reloaded, err := stateStore.Load()
 		if err != nil {
@@ -81,7 +86,7 @@ func TestInstallEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources})
+		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources, Answers: fresh})
 		results := Apply(targetDir, p, lk, locks)
 		for _, r := range results {
 			if r.Err != nil {
@@ -91,7 +96,14 @@ func TestInstallEndToEnd(t *testing.T) {
 		return p
 	}
 
-	p := runApply()
+	// The form answers carry the required variable; without them the item
+	// would be excluded.
+	p := runApply(nil)
+	if ip := p.Items[0]; ip.Status != plan.StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `required variable "root" has no value`) {
+		t.Fatalf("plan without answers = %q %v", ip.Status, ip.Reasons)
+	}
+
+	p = runApply(map[string]map[string]string{"demo/one": {"root": "/opt/x"}})
 	if len(p.Installable()) != 1 {
 		t.Fatalf("first plan installable = %v", p.Installable())
 	}
@@ -99,9 +111,21 @@ func TestInstallEndToEnd(t *testing.T) {
 	if err != nil || string(data) != "one skill\n" {
 		t.Fatalf("installed file = %q, %v", data, err)
 	}
+	conf, err := os.ReadFile(filepath.Join(targetDir, "skills", "one", "conf.md"))
+	if err != nil || string(conf) != "root: /opt/x\n" {
+		t.Fatalf("templated file = %q, %v; want the substituted content", conf, err)
+	}
+	lk, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(map[string]string{"root": "/opt/x"}, lk.Items["demo/one"].Answers); diff != "" {
+		t.Errorf("recorded answers (-want +got):\n%s", diff)
+	}
 
-	// The second pass over the same selection plans nothing.
-	p = runApply()
+	// The second pass over the same selection plans nothing, and needs no
+	// answers: the item is installed.
+	p = runApply(nil)
 	if len(p.Installable()) != 0 {
 		t.Errorf("re-plan still installable: %v", p.Installable())
 	}

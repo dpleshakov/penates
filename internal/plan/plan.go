@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,6 +58,11 @@ type ItemPlan struct {
 	// install an item whose locations are all satisfied or co-owned without
 	// writing any byte.
 	JSONLocations map[string][]Location
+	// Answers are the values the plan substituted into the item's templated
+	// contributions: the client's fresh answers over the recorded ones, for
+	// the declared variables only (RFC 6.4). Apply records them in the lock;
+	// an item with no variables carries none.
+	Answers map[string]string
 }
 
 // ActionKind distinguishes what an action writes: a whole file or a managed
@@ -140,6 +146,107 @@ type Input struct {
 	// items, keyed by kit.Item.SourcePath. The caller reads the files; the
 	// planner hashes and composes them.
 	Sources map[string][]byte
+	// Answers holds the variable values the client collected in its forms,
+	// keyed by item key and variable id. They win over the answers recorded in
+	// the lock; a required variable neither knows about is a missing value
+	// (RFC 6.4).
+	Answers map[string]map[string]string
+}
+
+// MissingVars returns the required variables of the selected, not installed
+// items that neither the lock nor fresh answers give a value, keyed by item
+// key in declaration order. The client requests them before planning and
+// passes the answers back in Input.Answers (RFC 6.4, 10.2).
+func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[string]map[string]string) map[string][]kit.Var {
+	index := map[string]*kit.Item{}
+	for _, k := range kits {
+		for _, it := range k.Items {
+			index[kit.ItemKey(k.Name, it.ID)] = it
+		}
+	}
+	out := map[string][]kit.Var{}
+	seen := map[string]bool{}
+	for _, key := range selection {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		it, ok := index[key]
+		if !ok || lk.Items[key] != nil {
+			continue
+		}
+		for _, v := range it.Vars {
+			if !v.Required {
+				continue
+			}
+			if a, answered := answerOf(key, v.ID, lk, fresh); !answered || a == "" {
+				out[key] = append(out[key], v)
+			}
+		}
+	}
+	return out
+}
+
+// answerOf returns the value of one variable: a fresh answer the client
+// collected wins over the answer recorded in the lock (RFC 6.4). answered is
+// false when neither holds one.
+func answerOf(key, varID string, lk *lock.Lock, fresh map[string]map[string]string) (value string, answered bool) {
+	if a, ok := fresh[key][varID]; ok {
+		return a, true
+	}
+	if rec, installed := lk.Items[key]; installed {
+		a, ok := rec.Answers[varID]
+		return a, ok
+	}
+	return "", false
+}
+
+// resolveVars merges fresh answers with the recorded ones for the item's
+// declared variables: an answer of a variable the item no longer declares is
+// discarded (RFC 6.4). It reports the required variables left without a
+// value, sorted.
+func resolveVars(key string, it *kit.Item, lk *lock.Lock, fresh map[string]map[string]string) (map[string]string, []string) {
+	if len(it.Vars) == 0 {
+		return nil, nil
+	}
+	answers := make(map[string]string, len(it.Vars))
+	var missing []string
+	for _, v := range it.Vars {
+		a, _ := answerOf(key, v.ID, lk, fresh)
+		answers[v.ID] = a
+		if v.Required && a == "" {
+			missing = append(missing, v.ID)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+	}
+	return answers, missing
+}
+
+// placeholder matches one {{var_id}} substitution site.
+var placeholder = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+
+// substitute replaces every {{var_id}} with the answer of the declared
+// variable and returns the first placeholder no declared variable covers
+// (RFC 6.4). The content of an answer is never rescanned: a value that
+// itself contains braces lands verbatim.
+func substitute(src []byte, answers map[string]string) (out []byte, unknown string) {
+	out = placeholder.ReplaceAllFunc(src, func(m []byte) []byte {
+		name := string(m[2 : len(m)-2])
+		a, ok := answers[name]
+		if !ok {
+			if unknown == "" {
+				unknown = name
+			}
+			return m
+		}
+		return []byte(a)
+	})
+	if unknown != "" {
+		return src, unknown
+	}
+	return out, ""
 }
 
 // Build plans the installation of the selected items. Items that fail validation are
@@ -420,6 +527,44 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 	}
 
 	var errs []string
+
+	// A required variable without a value stops the item here: the content of
+	// its templated contributions is undefined without one (RFC 6.4).
+	answers, missing := resolveVars(key, it, lk, in.Answers)
+	if len(missing) > 0 {
+		for _, id := range missing {
+			errs = append(errs, fmt.Sprintf("required variable %q has no value", id))
+		}
+		ip.Status = StatusError
+		ip.Reasons = errs
+		return ip
+	}
+	if answers != nil {
+		ip.Answers = answers
+	}
+
+	// The substituted content of the item's templated contributions, keyed by
+	// source path. A source that holds an unknown placeholder is not here: its
+	// reason is recorded and the contribution is skipped (RFC 6.4).
+	resolved := map[string][]byte{}
+	failed := map[string]bool{}
+	for _, c := range it.Contributes {
+		if !c.Template {
+			continue
+		}
+		src, ok := in.Sources[it.SourcePath(c)]
+		if !ok {
+			continue // the missing-source reason fires where the content is read
+		}
+		out, unknown := substitute(src, answers)
+		if unknown != "" {
+			errs = append(errs, fmt.Sprintf("%s holds the unknown placeholder {{%s}}", c.Src, unknown))
+			failed[it.SourcePath(c)] = true
+			continue
+		}
+		resolved[it.SourcePath(c)] = out
+	}
+
 	sectionFiles := map[string]bool{}
 	jsonLocs := newJSONRecord()
 	for _, c := range it.Contributes {
@@ -442,6 +587,12 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 			if !ok {
 				errs = append(errs, fmt.Sprintf("source %s was not provided to the planner", c.Src))
 				continue
+			}
+			if c.Template {
+				if failed[it.SourcePath(c)] {
+					continue // the unknown-placeholder reason is already recorded
+				}
+				content = resolved[it.SourcePath(c)]
 			}
 			ip.Actions = append(ip.Actions, Action{
 				Kind:    ActionFile,
@@ -468,7 +619,10 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 				continue
 			}
 			sectionFiles[c.To] = true
-			a, err := planSection(key, c, it, in, shared)
+			if c.Template && failed[it.SourcePath(c)] {
+				continue // the unknown-placeholder reason is already recorded
+			}
+			a, err := planSection(key, c, it, in, resolved, shared)
 			if err != nil {
 				errs = append(errs, err.Error())
 				continue
@@ -483,7 +637,10 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 				errs = append(errs, fmt.Sprintf("%s is owned as a whole file by installed item %s", c.To, owner))
 				continue
 			}
-			a, err := planJSON(key, c, it, in, claims, shared, jsonLocs)
+			if c.Template && failed[it.SourcePath(c)] {
+				continue // the unknown-placeholder reason is already recorded
+			}
+			a, err := planJSON(key, c, it, in, resolved, claims, shared, jsonLocs)
 			if err != nil {
 				errs = append(errs, err.Error())
 				continue
@@ -495,9 +652,6 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 	}
 	if locs := jsonLocs.sorted(); len(locs) > 0 {
 		ip.JSONLocations = locs
-	}
-	if len(it.Vars) > 0 {
-		errs = append(errs, "variables are not supported yet")
 	}
 
 	if len(errs) > 0 {
@@ -512,8 +666,9 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 
 // planSection evaluates one section contribution under the rules of RFC 7.3. The
 // managed block identifier is the item key: one item owns at most one block per
-// shared file, and the lock records the block under the item.
-func planSection(key string, c kit.Contribution, it *kit.Item, in Input, shared *sharedFiles) (*Action, error) {
+// shared file, and the lock records the block under the item. resolved carries
+// the substituted content of the item's templated contributions.
+func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, shared *sharedFiles) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
 		return nil, fmt.Errorf("%s is a directory", c.To)
@@ -522,6 +677,9 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, shared 
 	fragment, ok := in.Sources[it.SourcePath(c)]
 	if !ok {
 		return nil, fmt.Errorf("source %s was not provided to the planner", c.Src)
+	}
+	if sub, ok := resolved[it.SourcePath(c)]; ok {
+		fragment = sub
 	}
 
 	base := shared.base(in.Snapshot, c.To)
@@ -624,8 +782,9 @@ func (r *jsonRecord) sorted() map[string][]Location {
 // is decided against the file as the items planned earlier leave it, and the
 // action carries the composed file. The action is nil when every location is
 // satisfied or co-owned and no byte changes; the item still takes ownership of
-// the co-owned locations through rec.
-func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, claims *claimSet, shared *sharedFiles, rec *jsonRecord) (*Action, error) {
+// the co-owned locations through rec. resolved carries the substituted
+// content of the item's templated contributions.
+func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, claims *claimSet, shared *sharedFiles, rec *jsonRecord) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
 		return nil, fmt.Errorf("%s is a directory", c.To)
@@ -633,6 +792,9 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, claims *cl
 	src, ok := in.Sources[it.SourcePath(c)]
 	if !ok {
 		return nil, fmt.Errorf("source %s was not provided to the planner", c.Src)
+	}
+	if sub, ok := resolved[it.SourcePath(c)]; ok {
+		src = sub
 	}
 	frag, err := jsonc.Parse(src)
 	if err != nil {

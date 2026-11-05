@@ -106,7 +106,7 @@ kept, modified-plus-changed-incoming conflict); explicit reset-to-kit (7.6)
 planned only on user request; the TUI shows `1.2.0 > 1.3.0` style versions.
 **Definition of done:** table tests cover the version table and every update
 row for all three contribution kinds, plus reset; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-10 `removal`
 **Description:** RFC 9: planning and applying removal of installed items —

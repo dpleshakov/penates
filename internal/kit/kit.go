@@ -376,6 +376,13 @@ func validVersion(v string) bool {
 	return semver.IsValid(x) && semver.Canonical(x) == x
 }
 
+// CompareVersions orders two validated semantic versions: -1 when a is lower,
+// 0 when they are equal, 1 when a is higher. It is the ordering of RFC 8: the
+// version declared in item.yaml against the one recorded in the lock.
+func CompareVersions(a, b string) int {
+	return semver.Compare("v"+a, "v"+b)
+}
+
 // validRelPath reports whether p is a non-empty relative path of forward-slash-
 // separated elements, each a plain name: no absolute paths, no "." or ".." elements,
 // no backslashes, no drive letters.

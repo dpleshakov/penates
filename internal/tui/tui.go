@@ -89,11 +89,13 @@ const (
 
 // row is one item line in the list.
 type row struct {
-	key         string
-	version     string
-	description string
-	installed   bool
-	selected    bool
+	key              string
+	version          string
+	description      string
+	installed        bool
+	installedVersion string
+	selected         bool
+	reset            bool
 }
 
 // formField is one missing required variable the variable form asks for.
@@ -118,6 +120,7 @@ type model struct {
 	lk      *lock.Lock
 	rows    []row
 	cursor  int
+	resets  map[string]bool
 
 	formFields  []formField
 	formCursor  int
@@ -229,6 +232,22 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.rows) > 0 {
 			m.rows[m.cursor].selected = !m.rows[m.cursor].selected
 		}
+	case "r":
+		// Reset to kit is only ever a user request (RFC 7.6): it toggles on
+		// the row under the cursor, applies once, and clears.
+		if len(m.rows) > 0 && m.rows[m.cursor].installed {
+			key := m.rows[m.cursor].key
+			if m.resets == nil {
+				m.resets = map[string]bool{}
+			}
+			if m.resets[key] {
+				delete(m.resets, key)
+				m.rows[m.cursor].reset = false
+			} else {
+				m.resets[key] = true
+				m.rows[m.cursor].reset = true
+			}
+		}
 	case "a":
 		m.apply()
 	}
@@ -294,13 +313,19 @@ func (m *model) enterList(target string) {
 		}
 		m.kits = append(m.kits, k)
 		for _, it := range k.Items {
-			m.rows = append(m.rows, row{
-				key:         kit.ItemKey(k.Name, it.ID),
+			key := kit.ItemKey(k.Name, it.ID)
+			r := row{
+				key:         key,
 				version:     it.Version,
 				description: it.Description,
-				installed:   lk.Items[kit.ItemKey(k.Name, it.ID)] != nil,
-				selected:    selected[kit.ItemKey(k.Name, it.ID)],
-			})
+				selected:    selected[key],
+			}
+			if rec := lk.Items[key]; rec != nil {
+				r.installed = true
+				r.installedVersion = rec.Version
+				r.reset = m.resets[key]
+			}
+			m.rows = append(m.rows, r)
 		}
 	}
 }
@@ -383,7 +408,9 @@ func (m *model) apply() {
 		Snapshot:  snap,
 		Sources:   sources,
 		Answers:   m.answers,
+		Reset:     m.resets,
 	})
+	m.resets = nil
 	results := apply.Apply(m.target, p, m.lk, m.app.Locks)
 	errors := map[string]string{}
 	for _, r := range results {
@@ -483,9 +510,12 @@ func (m *model) View() string {
 			if r.installed {
 				installed = styleDim.Render(" installed")
 			}
-			fmt.Fprintf(&b, "%s[%s] %-24s %-10s %s%s\n", cursor, mark, r.key, r.version, r.description, installed)
+			if r.reset {
+				installed += styleDim.Render(" reset")
+			}
+			fmt.Fprintf(&b, "%s[%s] %-24s %-16s %s%s\n", cursor, mark, r.key, m.versionLabel(r), r.description, installed)
 		}
-		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    i  installed    a  apply    q  quit"))
+		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    i  installed    r  reset    a  apply    q  quit"))
 	case screenForm:
 		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
 		fmt.Fprintf(&b, "required variables:\n\n")
@@ -513,6 +543,21 @@ func (m *model) View() string {
 		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("any key  back"))
 	}
 	return b.String()
+}
+
+// versionLabel renders the version column: installed and kit versions joined
+// by the direction of the change when they differ (RFC 8).
+func (m *model) versionLabel(r row) string {
+	if !r.installed || r.installedVersion == r.version {
+		return r.version
+	}
+	switch kit.CompareVersions(r.version, r.installedVersion) {
+	case 1:
+		return r.installedVersion + " > " + r.version
+	case -1:
+		return r.installedVersion + " < " + r.version
+	}
+	return r.version
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

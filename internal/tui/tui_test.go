@@ -182,3 +182,101 @@ func writeFixtureKit(t *testing.T, target string) string {
 	}
 	return dir
 }
+
+// TestUpdateAndResetFlow walks the version display of RFC 8 and the reset
+// request of 7.6: an update shows `1.0.0 > 1.1.0`, a downgrade shows
+// `1.1.0 < 0.9.0`, a re-apply without a reset keeps the user's modification,
+// and with the reset requested the kit content replaces it.
+func TestUpdateAndResetFlow(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("first apply:\n%s", rm.lastResults)
+	}
+
+	// The kit publishes 1.1.0 with new content: the list shows the update.
+	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
+	m = drive(t, m, "enter")
+	lm := m.(*model)
+	if lm.rows[0].installedVersion != "1.0.0" {
+		t.Fatalf("installed version = %q", lm.rows[0].installedVersion)
+	}
+	if got := lm.versionLabel(lm.rows[0]); got != "1.0.0 > 1.1.0" {
+		t.Errorf("version label = %q, want the update arrow", got)
+	}
+
+	// The persisted selection applies the update.
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
+		t.Fatalf("update apply:\n%s", rm.lastResults)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
+	if err != nil || string(data) != "good skill v2\n" {
+		t.Fatalf("updated file = %q, %v", data, err)
+	}
+
+	// The kit publishes 0.9.0: shown as a downgrade.
+	bumpKit(t, kitDir, "0.9.0", "good skill v2\n")
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if got := lm.versionLabel(lm.rows[0]); got != "1.1.0 < 0.9.0" {
+		t.Errorf("version label = %q, want the downgrade arrow", got)
+	}
+
+	// The user modifies the installed file while the kit content is
+	// unchanged; a fresh run applies nothing and keeps the modification.
+	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
+	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if lm.screen != screenList || !lm.rows[0].selected {
+		t.Fatalf("restarted screen = %v selected %v", lm.screen, lm.rows[0].selected)
+	}
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") {
+		t.Fatalf("apply over a user modification:\n%s", rm.lastResults)
+	}
+	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
+	if err != nil || string(data) != "user change\n" {
+		t.Fatalf("user modification overwritten without a reset: %q, %v", data, err)
+	}
+
+	// With the reset requested, the kit content replaces the user's change.
+	m = drive(t, m, "enter", "r", "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
+		t.Fatalf("reset apply:\n%s", rm.lastResults)
+	}
+	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
+	if err != nil || string(data) != "good skill v2\n" {
+		t.Fatalf("reset file = %q, %v; want the kit content back", data, err)
+	}
+}
+
+// bumpKit rewrites the good item's version and skill content in the fixture
+// kit, the way a kit author publishes a new version.
+func bumpKit(t *testing.T, kitDir, version, skill string) {
+	t.Helper()
+	itemYaml := "id: good\nversion: " + version + "\ndescription: Good item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n"
+	if err := os.WriteFile(filepath.Join(kitDir, "items", "good", "item.yaml"), []byte(itemYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kitDir, "items", "good", "skill", "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

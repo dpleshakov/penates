@@ -127,10 +127,25 @@ func TestBuild(t *testing.T) {
 		"already installed item needs no action": {
 			kits:      oneKit("k", item("one", "skills/one/SKILL.md")),
 			selection: []string{"k/one"},
-			lockItems: map[string]*lock.Item{"k/one": {Version: "1.0.0"}},
+			lockItems: map[string]*lock.Item{"k/one": {Version: "1.0.0", Files: map[string]string{
+				"skills/one/SKILL.md": hashOf([]byte("content\n")),
+			}}},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
 				if ip.Status != StatusNoAction || ip.Reason != "already installed" {
+					t.Errorf("status %q reason %q", ip.Status, ip.Reason)
+				}
+			},
+		},
+		"equal version with changed content warns without an update": {
+			kits:      oneKit("k", item("one", "skills/one/SKILL.md")),
+			selection: []string{"k/one"},
+			lockItems: map[string]*lock.Item{"k/one": {Version: "1.0.0", Files: map[string]string{
+				"skills/one/SKILL.md": "sha256:bf4774b3c9cc",
+			}}},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusNoAction || !strings.Contains(ip.Reason, "content changed without a version change") {
 					t.Errorf("status %q reason %q", ip.Status, ip.Reason)
 				}
 			},
@@ -824,10 +839,10 @@ func TestPlanJSON(t *testing.T) {
 	}
 }
 
-// TestJSONOwnedAction covers the table row "owned by this item", which the
-// three-state rules of RFC 7.2 decide. No plan reaches it while installed
-// items are skipped as a whole; the update flow will.
-func TestJSONOwnedAction(t *testing.T) {
+// TestOwnedAction covers the table row "owned by this item", which the
+// three-state rules of RFC 7.2 decide. Every contribution kind runs its owned
+// content through it.
+func TestOwnedAction(t *testing.T) {
 	base := hashOf([]byte(`"base"`))
 	tests := []struct {
 		name     string
@@ -844,9 +859,9 @@ func TestJSONOwnedAction(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			write, conflict := jsonOwnedAction(tt.base, tt.current, tt.incoming)
+			write, conflict := ownedAction(tt.base, tt.current, tt.incoming)
 			if write != tt.write || (conflict != "") != tt.conflict {
-				t.Errorf("jsonOwnedAction = %v, %q; want write %v, conflict %v", write, conflict, tt.write, tt.conflict)
+				t.Errorf("ownedAction = %v, %q; want write %v, conflict %v", write, conflict, tt.write, tt.conflict)
 			}
 		})
 	}
@@ -1073,5 +1088,348 @@ func TestResolveVars(t *testing.T) {
 	}
 	if _, kept := answers["gone"]; kept {
 		t.Errorf("answer of the removed variable %q survived", "gone")
+	}
+}
+
+// TestPlanUpdateVersions walks the version table of RFC 8 against the lock.
+func TestPlanUpdateVersions(t *testing.T) {
+	const v1 = "installed body\n"
+	const v2 = "kit body\n"
+	base := hashOf([]byte(v1))
+	tests := map[string]struct {
+		kitVersion  string
+		lockVersion string
+		source      string
+		want        func(*testing.T, *ItemPlan)
+	}{
+		"higher version updates": {
+			kitVersion: "1.1.0", lockVersion: "1.0.0", source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || ip.Downgrade {
+					t.Fatalf("status %q downgrade %v", ip.Status, ip.Downgrade)
+				}
+				if len(ip.Actions) != 1 || ip.Actions[0].Reason != "update replaces the owned file" {
+					t.Errorf("actions = %v", ip.Actions)
+				}
+			},
+		},
+		"lower version plans a downgrade": {
+			kitVersion: "0.9.0", lockVersion: "1.0.0", source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || !ip.Downgrade {
+					t.Fatalf("status %q downgrade %v, want a planned downgrade", ip.Status, ip.Downgrade)
+				}
+				if len(ip.Actions) != 1 {
+					t.Errorf("actions = %v", ip.Actions)
+				}
+			},
+		},
+		"equal version with equal content needs no action": {
+			kitVersion: "1.0.0", lockVersion: "1.0.0", source: v1,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusNoAction || ip.Reason != "already installed" {
+					t.Errorf("status %q reason %q", ip.Status, ip.Reason)
+				}
+			},
+		},
+		"equal version with changed content warns": {
+			kitVersion: "1.0.0", lockVersion: "1.0.0", source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusNoAction || !strings.Contains(ip.Reason, "content changed without a version change") {
+					t.Errorf("status %q reason %q", ip.Status, ip.Reason)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none: no update is offered", ip.Actions)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			it := item("one", "skills/one/SKILL.md")
+			it.Version = tc.kitVersion
+			p := Build(Input{
+				Kits:      oneKit("k", it),
+				Selection: []string{"k/one"},
+				Lock: newLock(map[string]*lock.Item{"k/one": {
+					Version: tc.lockVersion,
+					Files:   map[string]string{"skills/one/SKILL.md": base},
+				}}),
+				Snapshot: snapOf(map[string]target.FileState{"skills/one/SKILL.md": {Exists: true, Hash: base}}),
+				Sources:  map[string][]byte{it.SourcePath(it.Contributes[0]): []byte(tc.source)},
+			})
+			if len(p.Items) != 1 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p.Items[0])
+		})
+	}
+}
+
+// TestPlanFileUpdates walks the update rows of the 7.2 table for an owned
+// file, plus the reset row of 7.6.
+func TestPlanFileUpdates(t *testing.T) {
+	const v1 = "installed content\n"
+	const v2 = "kit content\n"
+	base := hashOf([]byte(v1))
+	tests := map[string]struct {
+		reset   bool
+		current string // the file content the target holds now
+		source  string // the content the kit provides
+		want    func(*testing.T, *ItemPlan)
+	}{
+		"unchanged file is replaced by the update": {
+			current: v1, source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 || ip.Actions[0].Reason != "update replaces the owned file" {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if string(ip.Actions[0].Content) != v2 {
+					t.Errorf("content = %q", ip.Actions[0].Content)
+				}
+			},
+		},
+		"user modification with equal incoming is kept": {
+			current: "user content\n", source: v1,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 0 {
+					t.Fatalf("status %q actions %v, want nothing written", ip.Status, ip.Actions)
+				}
+			},
+		},
+		"user modification with different incoming is a conflict": {
+			current: "user content\n", source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
+					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none", ip.Actions)
+				}
+			},
+		},
+		"reset overwrites the user's modification": {
+			reset: true, current: "user content\n", source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 || ip.Actions[0].Reason != "reset to kit replaces the owned file" {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if string(ip.Actions[0].Content) != v2 {
+					t.Errorf("content = %q", ip.Actions[0].Content)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			it := item("one", "skills/one/SKILL.md")
+			it.Version = "1.1.0"
+			p := Build(Input{
+				Kits:      oneKit("k", it),
+				Selection: []string{"k/one"},
+				Lock: newLock(map[string]*lock.Item{"k/one": {
+					Version: "1.0.0",
+					Files:   map[string]string{"skills/one/SKILL.md": base},
+				}}),
+				Snapshot: snapOf(map[string]target.FileState{"skills/one/SKILL.md": {Exists: true, Hash: hashOf([]byte(tc.current))}}),
+				Sources:  map[string][]byte{it.SourcePath(it.Contributes[0]): []byte(tc.source)},
+				Reset:    map[string]bool{"k/one": tc.reset},
+			})
+			if len(p.Items) != 1 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p.Items[0])
+		})
+	}
+}
+
+// TestPlanSectionUpdates walks the update rows of the 7.2 table for an owned
+// block, plus the reset row of 7.6.
+func TestPlanSectionUpdates(t *testing.T) {
+	const v1 = "installed fragment\n"
+	const v2 = "kit fragment\n"
+	const user = "user fragment\n"
+	base := hashOf([]byte(v1))
+	file := func(block string) string {
+		return "# Notes\n\n" + markdown.BlockText("k/one", block)
+	}
+	tests := map[string]struct {
+		reset   bool
+		current string
+		source  string
+		want    func(*testing.T, *ItemPlan)
+	}{
+		"unchanged block is replaced by the update": {
+			current: file(v1), source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 || ip.Actions[0].Reason != "update replaces the owned block" {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if got := string(ip.Actions[0].Content); got != file(v2) {
+					t.Errorf("content =\n%q\nwant\n%q", got, file(v2))
+				}
+			},
+		},
+		"user modification with equal incoming is kept": {
+			current: file(user), source: v1,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 0 {
+					t.Fatalf("status %q actions %v, want nothing written", ip.Status, ip.Actions)
+				}
+			},
+		},
+		"user modification with different incoming is a conflict": {
+			current: file(user), source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
+					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"reset overwrites the user's modification": {
+			reset: true, current: file(user), source: v2,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 || ip.Actions[0].Reason != "reset to kit replaces the owned block" {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if got := string(ip.Actions[0].Content); got != file(v2) {
+					t.Errorf("content =\n%q", got)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			it := sectionItem("one", "note.md", "AGENTS.md")
+			it.Version = "1.1.0"
+			p := Build(Input{
+				Kits:      oneKit("k", it),
+				Selection: []string{"k/one"},
+				Lock: newLock(map[string]*lock.Item{"k/one": {
+					Version:  "1.0.0",
+					Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: base}},
+				}}),
+				Snapshot: sharedOf(map[string]target.SharedFileState{
+					"AGENTS.md": {Exists: true, Content: tc.current, Blocks: map[string]string{"k/one": hashOf([]byte(blockContent(tc.current, "k/one")))}},
+				}),
+				Sources: map[string][]byte{it.SourcePath(it.Contributes[0]): []byte(tc.source)},
+				Reset:   map[string]bool{"k/one": tc.reset},
+			})
+			if len(p.Items) != 1 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p.Items[0])
+		})
+	}
+}
+
+// blockContent returns the content between the markers of the block id in the
+// shared file text, for the snapshot's block hashes.
+func blockContent(file, id string) string {
+	for _, b := range markdown.Parse(file).Blocks {
+		if b.ID == id {
+			return b.Content
+		}
+	}
+	return ""
+}
+
+// TestPlanJSONUpdates walks the update rows of the 7.2 table for an owned
+// json location, plus the reset row of 7.6.
+func TestPlanJSONUpdates(t *testing.T) {
+	one := hashOf([]byte("1"))
+	two := hashOf([]byte("2"))
+	tests := map[string]struct {
+		reset   bool
+		current string // the shared file content the target holds now
+		source  string // the fragment the kit provides
+		want    func(*testing.T, *ItemPlan)
+	}{
+		"unchanged owned value is replaced by the update": {
+			current: "{\n  \"a\": 1\n}\n", source: `{"a":2}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if !strings.Contains(string(ip.Actions[0].Content), `"a": 2`) {
+					t.Errorf("content =\n%s", ip.Actions[0].Content)
+				}
+				if locs := ip.JSONLocations["config.jsonc"]; len(locs) != 1 || locs[0] != (Location{Pointer: "/a", Hash: two}) {
+					t.Errorf("locations = %v", locs)
+				}
+			},
+		},
+		"user modification with equal incoming is kept": {
+			current: "{\n  \"a\": 99 // user\n}\n", source: `{"a":1}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 0 {
+					t.Fatalf("status %q actions %v, want nothing written", ip.Status, ip.Actions)
+				}
+				if locs := ip.JSONLocations["config.jsonc"]; len(locs) != 1 || locs[0] != (Location{Pointer: "/a", Hash: one}) {
+					t.Errorf("locations = %v, want the recorded value owned", locs)
+				}
+			},
+		},
+		"user modification with different incoming is a conflict": {
+			current: "{\n  \"a\": 99\n}\n", source: `{"a":2}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
+					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none", ip.Actions)
+				}
+			},
+		},
+		"reset overwrites the user's modification": {
+			reset: true, current: "{\n  \"a\": 99\n}\n", source: `{"a":2}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if !strings.Contains(string(ip.Actions[0].Content), `"a": 2`) {
+					t.Errorf("content =\n%s", ip.Actions[0].Content)
+				}
+			},
+		},
+		"a location the update adds is inserted": {
+			current: "{\n  \"a\": 1\n}\n", source: `{"a":1,"b":[2]}`,
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				content := string(ip.Actions[0].Content)
+				if !strings.Contains(content, `"a": 1`) || !strings.Contains(content, `"b": [2]`) {
+					t.Errorf("content =\n%s", content)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 2 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("1"))}) || locs[1] != (Location{Pointer: "/b", Hash: hashOf([]byte("2"))}) {
+					t.Errorf("locations = %v, want the kept /a and the new /b", locs)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			it := jsonItem("one", "perm.jsonc", "config.jsonc")
+			it.Version = "1.1.0"
+			p := Build(Input{
+				Kits:      oneKit("k", it),
+				Selection: []string{"k/one"},
+				Lock: newLock(map[string]*lock.Item{"k/one": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/a", Hash: one}}},
+				}}),
+				Snapshot: sharedOf(map[string]target.SharedFileState{
+					"config.jsonc": {Exists: true, Content: tc.current},
+				}),
+				Sources: map[string][]byte{"perm.jsonc": []byte(tc.source)},
+				Reset:   map[string]bool{"k/one": tc.reset},
+			})
+			if len(p.Items) != 1 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p.Items[0])
+		})
 	}
 }

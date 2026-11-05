@@ -63,6 +63,10 @@ type ItemPlan struct {
 	// the declared variables only (RFC 6.4). Apply records them in the lock;
 	// an item with no variables carries none.
 	Answers map[string]string
+	// Downgrade marks an item whose kit version is lower than the installed
+	// one (RFC 8). The plan is complete, but the client shows it as a
+	// downgrade and never selects it by default.
+	Downgrade bool
 }
 
 // ActionKind distinguishes what an action writes: a whole file or a managed
@@ -151,12 +155,18 @@ type Input struct {
 	// the lock; a required variable neither knows about is a missing value
 	// (RFC 6.4).
 	Answers map[string]map[string]string
+	// Reset names the installed items the user asked to reset to the kit
+	// content (RFC 7.6): their owned content is replaced with the incoming
+	// content even where the user modified it. A reset is never part of a
+	// regular update plan.
+	Reset map[string]bool
 }
 
-// MissingVars returns the required variables of the selected, not installed
-// items that neither the lock nor fresh answers give a value, keyed by item
-// key in declaration order. The client requests them before planning and
-// passes the answers back in Input.Answers (RFC 6.4, 10.2).
+// MissingVars returns the required variables of the selected items that
+// neither the lock nor fresh answers give a value, keyed by item key in
+// declaration order. Installed items take part: an update may introduce a
+// variable the installation never answered (RFC 6.4, 8). The client requests
+// them before planning and passes the answers back in Input.Answers.
 func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[string]map[string]string) map[string][]kit.Var {
 	index := map[string]*kit.Item{}
 	for _, k := range kits {
@@ -172,7 +182,7 @@ func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[s
 		}
 		seen[key] = true
 		it, ok := index[key]
-		if !ok || lk.Items[key] != nil {
+		if !ok {
 			continue
 		}
 		for _, v := range it.Vars {
@@ -520,12 +530,6 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 	ip.Version = it.Version
 	lk := in.Lock
 
-	if _, installed := lk.Items[key]; installed {
-		ip.Status = StatusNoAction
-		ip.Reason = "already installed"
-		return ip
-	}
-
 	var errs []string
 
 	// A required variable without a value stops the item here: the content of
@@ -543,11 +547,42 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 		ip.Answers = answers
 	}
 
-	// The substituted content of the item's templated contributions, keyed by
-	// source path. A source that holds an unknown placeholder is not here: its
-	// reason is recorded and the contribution is skipped (RFC 6.4).
-	resolved := map[string][]byte{}
-	failed := map[string]bool{}
+	resolved, failed := substituteSources(it, answers, in, &errs)
+
+	// An installed item is re-decided by the version table of RFC 8: a higher
+	// kit version updates, a lower one plans a downgrade the client never
+	// selects by default, an equal version needs nothing or warns, and an
+	// explicit reset bypasses the table entirely.
+	reset := false
+	if rec, installed := lk.Items[key]; installed {
+		reset = in.Reset[key]
+		if !reset {
+			switch kit.CompareVersions(it.Version, rec.Version) {
+			case 0:
+				if contentUnchanged(it, rec, in, resolved) {
+					ip.Status = StatusNoAction
+					ip.Reason = "already installed"
+				} else {
+					ip.Status = StatusNoAction
+					ip.Reason = "content changed without a version change; no update is offered"
+				}
+				return ip
+			case -1:
+				ip.Downgrade = true
+			}
+		}
+	}
+
+	return planContributions(key, it, in, claims, shared, ip, resolved, failed, reset, errs)
+}
+
+// substituteSources resolves the substituted content of the item's templated
+// contributions, keyed by source path. A source that holds an unknown
+// placeholder is not in the result: its reason is recorded and the
+// contribution is skipped (RFC 6.4).
+func substituteSources(it *kit.Item, answers map[string]string, in Input, errs *[]string) (resolved map[string][]byte, failed map[string]bool) {
+	resolved = map[string][]byte{}
+	failed = map[string]bool{}
 	for _, c := range it.Contributes {
 		if !c.Template {
 			continue
@@ -558,12 +593,135 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 		}
 		out, unknown := substitute(src, answers)
 		if unknown != "" {
-			errs = append(errs, fmt.Sprintf("%s holds the unknown placeholder {{%s}}", c.Src, unknown))
+			*errs = append(*errs, fmt.Sprintf("%s holds the unknown placeholder {{%s}}", c.Src, unknown))
 			failed[it.SourcePath(c)] = true
 			continue
 		}
 		resolved[it.SourcePath(c)] = out
 	}
+	return resolved, failed
+}
+
+// contentUnchanged reports whether every contribution of the installed item
+// would install exactly the content the lock recorded at installation (RFC 8):
+// the kit changed nothing under an unchanged version.
+func contentUnchanged(it *kit.Item, rec *lock.Item, in Input, resolved map[string][]byte) bool {
+	for _, c := range it.Contributes {
+		src, ok := in.Sources[it.SourcePath(c)]
+		if !ok {
+			return false
+		}
+		if sub, ok := resolved[it.SourcePath(c)]; ok {
+			src = sub
+		}
+		switch c.Kind {
+		case kit.KindFile:
+			if rec.Files[c.To] != hashOf(src) {
+				return false
+			}
+		case kit.KindSection:
+			if rec.Sections[c.To].Hash != hashOf(src) {
+				return false
+			}
+		case kit.KindJSON:
+			if !jsonUnchanged(c, rec, in, src) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// jsonUnchanged reports whether the fragment would change nothing in the
+// shared file: every location recorded in the lock comes back with its
+// recorded value, every location the fragment drops counts as a change, and
+// every unrecorded one is already satisfied by the target, so planning would
+// write nothing (RFC 8).
+func jsonUnchanged(c kit.Contribution, rec *lock.Item, in Input, src []byte) bool {
+	frag, err := jsonc.Parse(src)
+	if err != nil {
+		return false
+	}
+	members := map[string]map[string]bool{}
+	elements := map[string]map[string]bool{}
+	collect := func(ptr string, element bool, hash string) error {
+		set := members
+		if element {
+			set = elements
+		}
+		if set[ptr] == nil {
+			set[ptr] = map[string]bool{}
+		}
+		set[ptr][hash] = true
+		return nil
+	}
+	if walkJSON(frag, collect) != nil {
+		return false
+	}
+
+	// Every recorded location must come back with its recorded value.
+	recorded := map[string]map[string]bool{}
+	for _, loc := range rec.JSON[c.To] {
+		if recorded[loc.Pointer] == nil {
+			recorded[loc.Pointer] = map[string]bool{}
+		}
+		recorded[loc.Pointer][loc.Hash] = true
+		if !members[loc.Pointer][loc.Hash] && !elements[loc.Pointer][loc.Hash] {
+			return false // dropped from the fragment, or changed
+		}
+	}
+
+	// Unrecorded locations: satisfied only when the target holds the same
+	// value. A file the fragment would create is a change by definition.
+	state := in.Snapshot.SharedFile(c.To)
+	if !state.Exists || strings.TrimSpace(state.Content) == "" {
+		return false
+	}
+	doc, err := jsonc.Parse([]byte(state.Content))
+	if err != nil {
+		return false
+	}
+	for ptr, hashes := range members {
+		for hash := range hashes {
+			if recorded[ptr][hash] {
+				continue
+			}
+			tmin, found, err := doc.Get(ptr)
+			if err != nil || !found || hashOf(tmin) != hash {
+				return false
+			}
+		}
+	}
+	for ptr, hashes := range elements {
+		for hash := range hashes {
+			if recorded[ptr][hash] {
+				continue
+			}
+			elems, found, err := doc.Elements(ptr)
+			if err != nil || !found {
+				return false
+			}
+			present := false
+			for _, e := range elems {
+				if hashOf(e) == hash {
+					present = true
+					break
+				}
+			}
+			if !present {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// planContributions evaluates every contribution of the item into ip: the
+// planned writes, the owned JSON locations, and the errors (RFC 7). reset
+// marks an explicit reset to kit (7.6), which overwrites the item's owned
+// content even where the user modified it.
+func planContributions(key string, it *kit.Item, in Input, claims *claimSet, shared *sharedFiles, ip *ItemPlan, resolved map[string][]byte, failed map[string]bool, reset bool, errs []string) *ItemPlan {
+	lk := in.Lock
 
 	sectionFiles := map[string]bool{}
 	jsonLocs := newJSONRecord()
@@ -572,15 +730,6 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 		case kit.KindFile:
 			if others := claims.fileRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is also contributed by %s", c.To, strings.Join(others, ", ")))
-				continue
-			}
-			state := in.Snapshot.File(c.To)
-			if state.Exists {
-				if owner, _, owned := lk.FileOwner(c.To); owned {
-					errs = append(errs, fmt.Sprintf("%s is owned by installed item %s", c.To, owner))
-				} else {
-					errs = append(errs, fmt.Sprintf("%s exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user", c.To))
-				}
 				continue
 			}
 			content, ok := in.Sources[it.SourcePath(c)]
@@ -594,13 +743,54 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 				}
 				content = resolved[it.SourcePath(c)]
 			}
-			ip.Actions = append(ip.Actions, Action{
-				Kind:    ActionFile,
-				To:      c.To,
-				Content: content,
-				Src:     c.Src,
-				Reason:  "target file is absent",
-			})
+			state := in.Snapshot.File(c.To)
+			if !state.Exists {
+				ip.Actions = append(ip.Actions, Action{
+					Kind:    ActionFile,
+					To:      c.To,
+					Content: content,
+					Src:     c.Src,
+					Reason:  "target file is absent",
+				})
+				continue
+			}
+			if state.Hash == "" {
+				// A directory occupies the path: the snapshot gives it no hash.
+				errs = append(errs, fmt.Sprintf("%s is a directory", c.To))
+				continue
+			}
+			owner, base, owned := lk.FileOwner(c.To)
+			if !owned {
+				errs = append(errs, fmt.Sprintf("%s exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user", c.To))
+				continue
+			}
+			if owner != key {
+				errs = append(errs, fmt.Sprintf("%s is owned by installed item %s", c.To, owner))
+				continue
+			}
+			// Owned by this item: the three-state rules of RFC 7.2 decide,
+			// and a reset overwrites whatever the user changed.
+			if reset {
+				ip.Actions = append(ip.Actions, Action{
+					Kind:    ActionFile,
+					To:      c.To,
+					Content: content,
+					Src:     c.Src,
+					Reason:  "reset to kit replaces the owned file",
+				})
+				continue
+			}
+			if write, conflict := ownedAction(base, state.Hash, hashOf(content)); conflict != "" {
+				errs = append(errs, fmt.Sprintf("%s was modified after installation, and the kit provides different content", c.To))
+			} else if write {
+				ip.Actions = append(ip.Actions, Action{
+					Kind:    ActionFile,
+					To:      c.To,
+					Content: content,
+					Src:     c.Src,
+					Reason:  "update replaces the owned file",
+				})
+			}
 		case kit.KindSection:
 			if others := claims.sharedRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is contributed as a file by %s", c.To, strings.Join(others, ", ")))
@@ -622,12 +812,14 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 			if c.Template && failed[it.SourcePath(c)] {
 				continue // the unknown-placeholder reason is already recorded
 			}
-			a, err := planSection(key, c, it, in, resolved, shared)
+			a, err := planSection(key, c, it, in, resolved, shared, reset)
 			if err != nil {
 				errs = append(errs, err.Error())
 				continue
 			}
-			ip.Actions = append(ip.Actions, *a)
+			if a != nil {
+				ip.Actions = append(ip.Actions, *a)
+			}
 		case kit.KindJSON:
 			if others := claims.jsonRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is also contributed as a file or section by %s; one shared file is either Markdown or JSON", c.To, strings.Join(others, ", ")))
@@ -640,7 +832,7 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 			if c.Template && failed[it.SourcePath(c)] {
 				continue // the unknown-placeholder reason is already recorded
 			}
-			a, err := planJSON(key, c, it, in, resolved, claims, shared, jsonLocs)
+			a, err := planJSON(key, c, it, in, resolved, claims, shared, jsonLocs, reset)
 			if err != nil {
 				errs = append(errs, err.Error())
 				continue
@@ -667,8 +859,11 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 // planSection evaluates one section contribution under the rules of RFC 7.3. The
 // managed block identifier is the item key: one item owns at most one block per
 // shared file, and the lock records the block under the item. resolved carries
-// the substituted content of the item's templated contributions.
-func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, shared *sharedFiles) (*Action, error) {
+// the substituted content of the item's templated contributions. The action is
+// nil when the item's own block is up to date or the user's modification is
+// kept (RFC 7.2), and on an explicit reset the owned block is replaced
+// regardless (7.6).
+func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, shared *sharedFiles, reset bool) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
 		return nil, fmt.Errorf("%s is a directory", c.To)
@@ -703,7 +898,34 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolve
 		}
 	}
 	if present {
-		if owner, _, owned := in.Lock.SectionOwner(c.To, key); owned {
+		owner, installedBase, owned := in.Lock.SectionOwner(c.To, key)
+		if owned && owner == key {
+			// Owned by this item: the three-state rules of RFC 7.2 decide,
+			// and a reset overwrites whatever the user changed.
+			if !reset {
+				if write, conflict := ownedAction(installedBase, state.Blocks[key], hashOf(fragment)); conflict != "" {
+					return nil, fmt.Errorf("block %s in %s was modified after installation, and the kit provides different content", key, c.To)
+				} else if !write {
+					return nil, nil
+				}
+			}
+			content, _ := markdown.Replace(base, key, string(fragment))
+			shared.record(c.To, content)
+			reason := "update replaces the owned block"
+			if reset {
+				reason = "reset to kit replaces the owned block"
+			}
+			return &Action{
+				Kind:      ActionSection,
+				To:        c.To,
+				Content:   []byte(content),
+				Block:     key,
+				BlockHash: hashOf(fragment),
+				Src:       c.Src,
+				Reason:    reason,
+			}, nil
+		}
+		if owned {
 			return nil, fmt.Errorf("block %s in %s is owned by installed item %s", key, c.To, owner)
 		}
 		return nil, fmt.Errorf("%s holds block %s that is not recorded in the lock; refusing to touch content that may belong to the user", c.To, key)
@@ -783,8 +1005,9 @@ func (r *jsonRecord) sorted() map[string][]Location {
 // action carries the composed file. The action is nil when every location is
 // satisfied or co-owned and no byte changes; the item still takes ownership of
 // the co-owned locations through rec. resolved carries the substituted
-// content of the item's templated contributions.
-func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, claims *claimSet, shared *sharedFiles, rec *jsonRecord) (*Action, error) {
+// content of the item's templated contributions; reset marks an explicit
+// reset to kit (7.6).
+func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, claims *claimSet, shared *sharedFiles, rec *jsonRecord, reset bool) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
 		return nil, fmt.Errorf("%s is a directory", c.To)
@@ -816,7 +1039,7 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 		return nil, fmt.Errorf("%s is claimed at %s with a different value by %s", c.To, ptr, strings.Join(rivals, ", "))
 	}
 
-	w := &jsonPlanner{key: key, file: c.To, frag: frag, in: in, shared: shared, rec: rec}
+	w := &jsonPlanner{key: key, file: c.To, frag: frag, in: in, shared: shared, rec: rec, reset: reset}
 
 	baseContent, pending := shared.pending[c.To]
 	if !pending {
@@ -863,7 +1086,7 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 
 // jsonPlanner places one json contribution into the working document of its
 // shared file, deciding every location by the table of RFC 7.4 and composing
-// the file bytes apply will write.
+// the file bytes apply will write. reset marks an explicit reset to kit.
 type jsonPlanner struct {
 	key    string
 	file   string
@@ -872,6 +1095,7 @@ type jsonPlanner struct {
 	in     Input
 	shared *sharedFiles
 	rec    *jsonRecord
+	reset  bool
 	wrote  int
 }
 
@@ -926,14 +1150,22 @@ func (w *jsonPlanner) placeLeaf(ptr, fmin, tmin string) error {
 	incoming := hashOf([]byte(fmin))
 	current := hashOf([]byte(tmin))
 	if w.in.Lock.OwnsJSONPointer(w.key, w.file, ptr) {
-		// Owned by this item: the three-state rules of RFC 7.2 decide.
-		write, conflict := jsonOwnedAction(w.baseHash(ptr), current, incoming)
+		// Owned by this item: the three-state rules of RFC 7.2 decide,
+		// and a reset overwrites whatever the user changed.
+		if w.reset {
+			return w.overwrite(ptr, incoming)
+		}
+		write, conflict := ownedAction(w.baseHash(ptr), current, incoming)
 		if conflict != "" {
 			return fmt.Errorf("%s holds a value at %s that was modified after installation, and the kit provides different content", w.file, quoteLoc(ptr))
 		}
 		if write {
 			return w.overwrite(ptr, incoming)
 		}
+		// The value stays as it stands and stays owned: the update replaces
+		// the whole lock record, so the kept location must be in it.
+		w.rec.add(w.file, ptr, incoming)
+		w.shared.ownJSON(w.file, ptr, incoming, w.key)
 		return nil
 	}
 	if string(tmin) == string(fmin) {
@@ -1057,12 +1289,12 @@ func (w *jsonPlanner) differentError(ptr string) error {
 	return fmt.Errorf("%s holds a different value at %s", w.file, quoteLoc(ptr))
 }
 
-// jsonOwnedAction resolves the table row "owned by this item" by the
-// three-state rules of RFC 7.2: base is the hash recorded at installation,
-// current the hash in the target now, incoming the hash the kit provides. It
-// reports whether the incoming value is written, and names the conflict when
-// the item is in conflict.
-func jsonOwnedAction(base, current, incoming string) (write bool, conflict string) {
+// ownedAction resolves the table row "owned by this item" by the three-state
+// rules of RFC 7.2: base is the hash recorded at installation, current the
+// hash in the target now, incoming the hash the kit provides. It reports
+// whether the incoming value is written, and names the conflict when the item
+// is in conflict. Every contribution kind runs its owned content through it.
+func ownedAction(base, current, incoming string) (write bool, conflict string) {
 	if current == base {
 		// Unchanged since installation: an update replaces the content, and
 		// an equal incoming value needs no write.

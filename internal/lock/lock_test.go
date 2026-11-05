@@ -109,3 +109,45 @@ func TestOwnership(t *testing.T) {
 		t.Error("FileOwner found a file of a removed item")
 	}
 }
+
+func TestJSONOwnership(t *testing.T) {
+	l := &Lock{
+		Target: "/target",
+		Items: map[string]*Item{
+			"alpha/one": {Version: "1.0.0", JSON: map[string][]Location{
+				"opencode.json": {
+					{Pointer: "/theme", Hash: "sha256:aa"},
+					{Pointer: "/tags", Hash: "sha256:bb"},
+				},
+			}},
+			"beta/two": {Version: "1.0.0", JSON: map[string][]Location{
+				"opencode.json": {{Pointer: "/theme", Hash: "sha256:aa"}},
+			}},
+		},
+	}
+
+	if got := l.JSONOwners("opencode.json", "/theme", "sha256:aa"); cmp.Diff([]string{"alpha/one", "beta/two"}, got) != "" {
+		t.Errorf("JSONOwners of a co-owned value = %v, want both items sorted", got)
+	}
+	if got := l.JSONOwners("opencode.json", "/tags", "sha256:bb"); cmp.Diff([]string{"alpha/one"}, got) != "" {
+		t.Errorf("JSONOwners of a singly owned element = %v", got)
+	}
+	if got := l.JSONOwners("opencode.json", "/theme", "sha256:zz"); got != nil {
+		t.Errorf("JSONOwners of a value nobody owns = %v, want none", got)
+	}
+	if !l.OwnsJSON("alpha/one", "opencode.json", "/tags", "sha256:bb") {
+		t.Error("OwnsJSON denied the owner")
+	}
+	if l.OwnsJSON("beta/two", "opencode.json", "/tags", "sha256:bb") {
+		t.Error("OwnsJSON claimed another item's element")
+	}
+	if !l.OwnsJSONPointer("alpha/one", "opencode.json", "/tags") {
+		t.Error("OwnsJSONPointer denied the owner")
+	}
+	if l.OwnsJSONPointer("beta/two", "opencode.json", "/tags") {
+		t.Error("OwnsJSONPointer claimed a pointer another item does not own")
+	}
+	if l.OwnsJSONPointer("gone/none", "opencode.json", "/theme") {
+		t.Error("OwnsJSONPointer claimed for an item that is not installed")
+	}
+}

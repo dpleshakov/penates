@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // Item records one installed item and everything it owns in the target. Path-like
@@ -160,6 +161,53 @@ func (l *Lock) SectionOwner(file, block string) (itemKey, hash string, ok bool) 
 		}
 	}
 	return "", "", false
+}
+
+// OwnsJSON reports whether an item owns one exact location of a shared JSON
+// file: pointer and value hash. Array elements are recorded under the pointer
+// of their array (RFC 7.4), so the pair identifies the element.
+func (l *Lock) OwnsJSON(itemKey, file, pointer, hash string) bool {
+	item, ok := l.Items[itemKey]
+	if !ok {
+		return false
+	}
+	for _, loc := range item.JSON[file] {
+		if loc.Pointer == pointer && loc.Hash == hash {
+			return true
+		}
+	}
+	return false
+}
+
+// JSONOwners lists the item keys that own one exact location of a shared JSON
+// file — the co-owners included — sorted. An empty list means the location, as
+// it stands, is not recorded in the lock.
+func (l *Lock) JSONOwners(file, pointer, hash string) []string {
+	var owners []string
+	for key := range l.Items {
+		if l.OwnsJSON(key, file, pointer, hash) {
+			owners = append(owners, key)
+		}
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+// OwnsJSONPointer reports whether an item owns any value at one pointer of a
+// shared JSON file: the pointer of a member it wrote, or of an array it owns
+// elements in. It is the basis of the three-state evaluation of an owned
+// member, which runs on the pointer whatever value it holds now.
+func (l *Lock) OwnsJSONPointer(itemKey, file, pointer string) bool {
+	item, ok := l.Items[itemKey]
+	if !ok {
+		return false
+	}
+	for _, loc := range item.JSON[file] {
+		if loc.Pointer == pointer {
+			return true
+		}
+	}
+	return false
 }
 
 // CreatedDir reports whether an item had a directory created for it.

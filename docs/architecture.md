@@ -54,7 +54,7 @@ only client.
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
 | `internal/markdown` | Pure text manipulation over managed blocks in shared Markdown files: parses the block layout and performs the append and replace operations section contributions are planned with (RFC 7.3). Knows no file system. |
 | `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (RFC 7.4). Knows no file system. |
-| `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, errors per item. Implements the three-state conflict model (RFC 7). Performs no I/O. |
+| `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, errors per item, and the JSON locations each item owns. Implements the three-state conflict model (RFC 7), the per-location table for json contributions (7.4), and the cross-item conflicts (7.5). Performs no I/O. |
 | `internal/apply` | Executes a plan: applies an item completely or not at all, writes atomically (temp file and rename), updates the lock on success, reconciles after an interruption (RFC 7.7). |
 | `internal/tui` | The Bubble Tea client: registration, item list, variable forms, apply summary (RFC 10). The only package that knows about the terminal. |
 
@@ -73,7 +73,6 @@ flowchart LR
     AP --> LK
     AP --> TG
     AP --> KIT
-    AP --> JC
 ```
 
 Rules:

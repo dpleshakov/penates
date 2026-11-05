@@ -182,3 +182,34 @@ func writeSource(t *testing.T, kitDir, rel, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestApplyRefusesJSONActions pins the interim boundary: planning already
+// emits json actions, applying them is the next change. The refused item
+// leaves no file and no lock record.
+func TestApplyRefusesJSONActions(t *testing.T) {
+	root := t.TempDir()
+	store := lock.NewStore(t.TempDir())
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plan.Plan{Items: []*plan.ItemPlan{{
+		Key: "k/one", KitName: "k", ItemID: "one", Version: "1.0.0", Status: plan.StatusInstall,
+		Actions: []plan.Action{{
+			Kind:    plan.ActionJSON,
+			To:      "config.json",
+			Content: []byte(`{"a":1}`),
+			Reason:  "fragment values are written into the shared file",
+		}},
+	}}}
+	results := Apply(root, p, lk, store)
+	if len(results) != 1 || results[0].Err == nil || !strings.Contains(results[0].Err.Error(), "json actions are not applied yet") {
+		t.Fatalf("results = %+v", results)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash("config.json"))); !os.IsNotExist(err) {
+		t.Errorf("config.json exists after the refused action: %v", err)
+	}
+	if len(lk.Items) != 0 {
+		t.Errorf("lock items = %v, want none", lk.Items)
+	}
+}

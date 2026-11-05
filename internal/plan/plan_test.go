@@ -148,7 +148,7 @@ func TestBuild(t *testing.T) {
 				}
 			},
 		},
-		"unsupported contribution kind: json": {
+		"json fragment that is not JSON is an error": {
 			kits: []*kit.Kit{{Name: "k", Items: []*kit.Item{{
 				ID: "one", Version: "1.0.0",
 				Contributes: []kit.Contribution{
@@ -158,7 +158,7 @@ func TestBuild(t *testing.T) {
 			selection: []string{"k/one"},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if !strings.Contains(strings.Join(ip.Reasons, "; "), "json contributions are not supported yet") {
+				if !strings.Contains(strings.Join(ip.Reasons, "; "), "does not hold a JSON document") {
 					t.Errorf("reasons %v", ip.Reasons)
 				}
 			},
@@ -466,4 +466,400 @@ func newLock(items map[string]*lock.Item) *lock.Lock {
 		items = map[string]*lock.Item{}
 	}
 	return &lock.Lock{Target: "/target", Items: items}
+}
+
+// jsonItem builds a kit item around one json contribution.
+func jsonItem(id, src, to string) *kit.Item {
+	return &kit.Item{
+		ID:          id,
+		Version:     "1.0.0",
+		Contributes: []kit.Contribution{{Kind: kit.KindJSON, Src: src, To: to}},
+	}
+}
+
+// TestPlanJSON walks the RFC 7.4 table for json contributions: every row of
+// the per-location decision, arrays as sets, co-ownership, the conflicts of
+// 7.5, and the byte preservation of the untouched file parts.
+func TestPlanJSON(t *testing.T) {
+	darkHash := hashOf([]byte(`"dark"`))
+	aHash := hashOf([]byte(`"a"`))
+	bHash := hashOf([]byte(`"b"`))
+	tests := map[string]struct {
+		kits      []*kit.Kit
+		selection []string
+		lockItems map[string]*lock.Item
+		shared    map[string]target.SharedFileState
+		sources   map[string][]byte
+		want      func(*testing.T, *Plan)
+	}{
+		"absent shared file is created with the fragment": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"theme": "dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				if a.Kind != ActionJSON || a.To != "config.jsonc" || string(a.Content) != `{"theme": "dark"}` {
+					t.Errorf("action = %+v", a)
+				}
+				if a.Reason != "shared file is absent; it will be created with the fragment" {
+					t.Errorf("reason = %q", a.Reason)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/theme", Hash: darkHash}) {
+					t.Errorf("locations = %v", locs)
+				}
+			},
+		},
+		"absent member is inserted and owned, untouched bytes survive": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{\n  // about the editor\n  \"editor\": \"vim\",\n}\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"theme":"dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				a := ip.Actions[0]
+				want := "{\n  // about the editor\n  \"editor\": \"vim\",\n  \"theme\": \"dark\",\n}\n"
+				if string(a.Content) != want {
+					t.Errorf("content =\n%q\nwant\n%q", a.Content, want)
+				}
+				if a.Reason != "fragment values are written into the shared file" {
+					t.Errorf("reason = %q", a.Reason)
+				}
+				if locs := ip.JSONLocations["config.jsonc"]; len(locs) != 1 || locs[0].Pointer != "/theme" {
+					t.Errorf("locations = %v", locs)
+				}
+			},
+		},
+		"equal unowned value is satisfied without owning it": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{ \"theme\": \"dark\" }\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"theme": "dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none", ip.Actions)
+				}
+				if len(ip.JSONLocations) != 0 {
+					t.Errorf("locations = %v, want none: a satisfied value is never owned", ip.JSONLocations)
+				}
+			},
+		},
+		"equal value owned by another item makes the item a co-owner": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			lockItems: map[string]*lock.Item{"other/two": {Version: "1.0.0", JSON: map[string][]lock.Location{
+				"config.jsonc": {{Pointer: "/theme", Hash: darkHash}},
+			}}},
+			shared:  map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark"}`}},
+			sources: map[string][]byte{"perm.jsonc": []byte(`{"theme":"dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if len(ip.Actions) != 0 {
+					t.Errorf("actions = %v, want none", ip.Actions)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/theme", Hash: darkHash}) {
+					t.Errorf("locations = %v, want co-ownership", locs)
+				}
+			},
+		},
+		"a different unowned value is an error": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "light"}`}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"theme":"dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `holds a different value at "/theme"`) {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"array elements are a set: missing appended and owned, equal satisfied": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"tags": ["a"]}`}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"tags":["a","b"]}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if want := `{"tags": ["a", "b"]}`; string(ip.Actions[0].Content) != want {
+					t.Errorf("content = %q, want %q", ip.Actions[0].Content, want)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/tags", Hash: bHash}) {
+					t.Errorf("locations = %v, want only the appended element", locs)
+				}
+			},
+		},
+		"missing array is inserted whole and its elements owned": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{\n  \"editor\": \"vim\"\n}\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"tags":["a"]}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				content := string(ip.Actions[0].Content)
+				if !strings.Contains(content, `"tags": ["a"]`) || !strings.Contains(content, `"editor": "vim"`) {
+					t.Errorf("content =\n%s", content)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/tags", Hash: aHash}) {
+					t.Errorf("locations = %v", locs)
+				}
+			},
+		},
+		"array element owned by another item is co-owned": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			lockItems: map[string]*lock.Item{"other/two": {Version: "1.0.0", JSON: map[string][]lock.Location{
+				"config.jsonc": {{Pointer: "/tags", Hash: aHash}},
+			}}},
+			shared:  map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"tags": ["a"]}`}},
+			sources: map[string][]byte{"perm.jsonc": []byte(`{"tags":["a"]}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall || len(ip.Actions) != 0 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/tags", Hash: aHash}) {
+					t.Errorf("locations = %v, want co-ownership of the element", locs)
+				}
+			},
+		},
+		"a nested subtree is inserted at the highest missing ancestor": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{\n  \"a\": {},\n}\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":{"b":{"c":1}}}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				content := string(ip.Actions[0].Content)
+				if !strings.Contains(content, `"b": {"c":1}`) {
+					t.Errorf("content =\n%s", content)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/a/b/c", Hash: hashOf([]byte("1"))}) {
+					t.Errorf("locations = %v, want the leaf under the inserted subtree", locs)
+				}
+			},
+		},
+		"an object cannot be placed where a scalar sits": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"a": 5}`}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":{"b":1}}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `different value at "/a"`) {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"root of a different kind is a different value": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "[1]\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":1}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "different value at the root") {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"comments inside an inserted subtree survive, hashes stay minimal": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "{}\n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":{"b": 1 /* inner */}}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall {
+					t.Fatalf("status = %q, reasons %v", ip.Status, ip.Reasons)
+				}
+				if !strings.Contains(string(ip.Actions[0].Content), "/* inner */") {
+					t.Errorf("content =\n%s", ip.Actions[0].Content)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 1 || locs[0] != (Location{Pointer: "/a/b", Hash: hashOf([]byte("1"))}) {
+					t.Errorf("locations = %v", locs)
+				}
+			},
+		},
+		"an empty shared file is filled with the fragment": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: "  \n"}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a": 1}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				a := ip.Actions[0]
+				if string(a.Content) != `{"a": 1}` || a.Reason != "shared file is empty; the fragment becomes its content" {
+					t.Errorf("action = %+v", a)
+				}
+			},
+		},
+		"directory in place of the shared file": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"config.jsonc": {Exists: true, IsDir: true}},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "is a directory") {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"one item may plan file, section, and json contributions together": {
+			kits: []*kit.Kit{{Name: "k", Items: []*kit.Item{{
+				ID: "one", Version: "1.0.0",
+				Contributes: []kit.Contribution{
+					{Kind: kit.KindFile, Src: "f", To: "skills/one/SKILL.md"},
+					{Kind: kit.KindSection, Src: "note.md", To: "AGENTS.md"},
+					{Kind: kit.KindJSON, Src: "perm.jsonc", To: "config.jsonc"},
+				},
+			}}}},
+			selection: []string{"k/one"},
+			shared:    map[string]target.SharedFileState{"AGENTS.md": {Exists: true, Content: "# Notes\n"}},
+			sources:   map[string][]byte{"f": []byte("body\n"), "note.md": []byte("## Rules\n\nbody\n"), "perm.jsonc": []byte(`{"a":1}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusInstall || len(ip.Actions) != 3 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				kinds := []ActionKind{ip.Actions[0].Kind, ip.Actions[1].Kind, ip.Actions[2].Kind}
+				if kinds[0] != ActionFile || kinds[1] != ActionSection || kinds[2] != ActionJSON {
+					t.Errorf("action kinds = %v", kinds)
+				}
+			},
+		},
+		"two items claiming one location with different values conflict both ways": {
+			kits:      oneKit("k", jsonItem("one", "a.jsonc", "config.jsonc"), jsonItem("two", "b.jsonc", "config.jsonc")),
+			selection: []string{"k/one", "k/two"},
+			sources:   map[string][]byte{"a.jsonc": []byte(`{"theme":"dark"}`), "b.jsonc": []byte(`{"theme":"light"}`)},
+			want: func(t *testing.T, p *Plan) {
+				for _, ip := range p.Items {
+					joined := strings.Join(ip.Reasons, "; ")
+					if ip.Status != StatusError || !strings.Contains(joined, `is claimed at /theme with a different value by`) {
+						t.Errorf("%s: status %q reasons %v", ip.Key, ip.Status, ip.Reasons)
+					}
+				}
+			},
+		},
+		"two items claiming one location with equal values share it": {
+			kits:      oneKit("k", jsonItem("one", "a.jsonc", "config.jsonc"), jsonItem("two", "b.jsonc", "config.jsonc")),
+			selection: []string{"k/one", "k/two"},
+			sources:   map[string][]byte{"a.jsonc": []byte(`{"theme":"dark"}`), "b.jsonc": []byte(`{"theme": "dark"}`)},
+			want: func(t *testing.T, p *Plan) {
+				for _, ip := range p.Items {
+					if ip.Status != StatusInstall {
+						t.Fatalf("%s: status %q reasons %v", ip.Key, ip.Status, ip.Reasons)
+					}
+				}
+				if len(p.Items[0].Actions) != 1 {
+					t.Errorf("first item actions = %v, want the file write", p.Items[0].Actions)
+				}
+				if len(p.Items[1].Actions) != 0 {
+					t.Errorf("second item actions = %v, want none", p.Items[1].Actions)
+				}
+				for _, ip := range p.Items {
+					locs := ip.JSONLocations["config.jsonc"]
+					if len(locs) != 1 || locs[0] != (Location{Pointer: "/theme", Hash: darkHash}) {
+						t.Errorf("%s: locations = %v", ip.Key, locs)
+					}
+				}
+			},
+		},
+		"json and section contributions cannot share one file": {
+			kits: []*kit.Kit{
+				{Name: "k1", Items: []*kit.Item{jsonItem("one", "perm.jsonc", "AGENTS.md")}},
+				{Name: "k2", Items: []*kit.Item{sectionItem("two", "note.md", "AGENTS.md")}},
+			},
+			selection: []string{"k1/one", "k2/two"},
+			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":1}`), "note.md": []byte("## Rules\n\nbody\n")},
+			want: func(t *testing.T, p *Plan) {
+				if !strings.Contains(strings.Join(p.Items[0].Reasons, "; "), "is also contributed as a file or section by k2/two") {
+					t.Errorf("json claimant reasons %v", p.Items[0].Reasons)
+				}
+				if !strings.Contains(strings.Join(p.Items[1].Reasons, "; "), "is also contributed as json by k1/one") {
+					t.Errorf("section claimant reasons %v", p.Items[1].Reasons)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := Build(Input{
+				Kits:      tc.kits,
+				Selection: tc.selection,
+				Lock:      newLock(tc.lockItems),
+				Snapshot:  sharedOf(tc.shared),
+				Sources:   tc.sources,
+			})
+			if len(p.Items) == 0 {
+				t.Fatal("plan has no items")
+			}
+			tc.want(t, p)
+		})
+	}
+}
+
+// TestJSONOwnedAction covers the table row "owned by this item", which the
+// three-state rules of RFC 7.2 decide. No plan reaches it while installed
+// items are skipped as a whole; the update flow will.
+func TestJSONOwnedAction(t *testing.T) {
+	base := hashOf([]byte(`"base"`))
+	tests := []struct {
+		name     string
+		base     string
+		current  string
+		incoming string
+		write    bool
+		conflict bool
+	}{
+		{"unchanged, incoming equal: no write", base, base, base, false, false},
+		{"unchanged, incoming differs: replace", base, base, hashOf([]byte(`"new"`)), true, false},
+		{"modified, incoming equals base: keep the user's content", base, hashOf([]byte(`"user"`)), base, false, false},
+		{"modified, incoming differs: conflict", base, hashOf([]byte(`"user"`)), hashOf([]byte(`"new"`)), false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			write, conflict := jsonOwnedAction(tt.base, tt.current, tt.incoming)
+			if write != tt.write || (conflict != "") != tt.conflict {
+				t.Errorf("jsonOwnedAction = %v, %q; want write %v, conflict %v", write, conflict, tt.write, tt.conflict)
+			}
+		})
+	}
 }

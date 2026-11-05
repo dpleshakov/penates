@@ -74,7 +74,7 @@ satisfied, equal-owned co-owner, different error, owned three-state); conflicts
 between selected items on the same location (7.5).
 **Definition of done:** table tests cover every 7.4 row and co-ownership; the
 planner performs no I/O.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-07 `json-apply`
 **Description:** Apply merges json actions into shared files through

@@ -75,6 +75,8 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		switch a.Kind {
 		case plan.ActionSection:
 			sections[a.To] = lock.Section{Block: a.Block, Hash: a.BlockHash}
+		case plan.ActionJSON:
+			return fail(fmt.Errorf("write %s: json actions are not applied yet", a.To))
 		default:
 			files[a.To] = hashOf(a.Content)
 		}

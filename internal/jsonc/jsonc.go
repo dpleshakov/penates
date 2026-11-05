@@ -40,6 +40,24 @@ func (d *Doc) Bytes() []byte {
 	return d.root.Pack()
 }
 
+// lookup resolves the pointer and reports whether it finds anything. op names
+// the calling operation for error messages; anything other than not-found —
+// a scalar in the middle of the path, a malformed pointer — is an error.
+func (d *Doc) lookup(op, pointer string) (*hujson.Value, bool, error) {
+	frags, err := splitPointer(pointer)
+	if err != nil {
+		return nil, false, fmt.Errorf("%s %q: %w", op, pointer, err)
+	}
+	v, err := d.resolve(frags)
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("%s %q: %w", op, pointer, err)
+	}
+	return v, true, nil
+}
+
 // Get returns the value at the pointer as minimal JSON: whitespace, comments,
 // and trailing commas inside it are stripped, so the result is fit for byte
 // comparison against other values returned by Get. found is false when the
@@ -47,20 +65,76 @@ func (d *Doc) Bytes() []byte {
 // index, or the "-" append token; malformed pointers are an error. If an
 // object holds duplicate names, the first member wins.
 func (d *Doc) Get(pointer string) (json.RawMessage, bool, error) {
-	frags, err := splitPointer(pointer)
-	if err != nil {
-		return nil, false, fmt.Errorf("get %q: %w", pointer, err)
-	}
-	v, err := d.resolve(frags)
-	if err != nil {
-		if errors.Is(err, errNotFound) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("get %q: %w", pointer, err)
+	v, found, err := d.lookup("get", pointer)
+	if err != nil || !found {
+		return nil, found, err
 	}
 	min := v.Clone()
 	min.Minimize()
 	return json.RawMessage(min.Pack()), true, nil
+}
+
+// Raw returns the value at the pointer as its source spells it, comments
+// inside it included; the whitespace and comments that surround the value —
+// before it and after it — are not part of the result. found is false when
+// the pointer resolves to nothing; malformed pointers are an error.
+func (d *Doc) Raw(pointer string) ([]byte, bool, error) {
+	v, found, err := d.lookup("raw", pointer)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	sub := v.Clone()
+	sub.BeforeExtra = nil
+	sub.AfterExtra = nil
+	return sub.Pack(), true, nil
+}
+
+// Members lists the names of the object at the pointer, in source order and
+// unescaped. found is false when the pointer resolves to nothing; an error
+// when it resolves to a value that is not an object.
+func (d *Doc) Members(pointer string) ([]string, bool, error) {
+	v, found, err := d.lookup("members", pointer)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	obj, ok := v.Value.(*hujson.Object)
+	if !ok {
+		return nil, true, fmt.Errorf("members %q: not an object", pointer)
+	}
+	var names []string
+	for _, m := range obj.Members {
+		lit, ok := m.Name.Value.(hujson.Literal)
+		if !ok {
+			continue
+		}
+		var name string
+		if json.Unmarshal(lit, &name) != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names, true, nil
+}
+
+// Elements lists the elements of the array at the pointer as minimal JSON, in
+// source order. found is false when the pointer resolves to nothing; an error
+// when it resolves to a value that is not an array.
+func (d *Doc) Elements(pointer string) ([][]byte, bool, error) {
+	v, found, err := d.lookup("elements", pointer)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	arr, ok := v.Value.(*hujson.Array)
+	if !ok {
+		return nil, true, fmt.Errorf("elements %q: not an array", pointer)
+	}
+	var out [][]byte
+	for i := range arr.Elements {
+		min := arr.Elements[i].Clone()
+		min.Minimize()
+		out = append(out, min.Pack())
+	}
+	return out, true, nil
 }
 
 // Insert places value at the pointer, which must not resolve to anything yet.
@@ -264,6 +338,14 @@ func (d *Doc) resolve(frags []string) (*hujson.Value, error) {
 		}
 	}
 	return cur, nil
+}
+
+// EscapeToken returns the RFC 6901 encoding of one reference token: "~"
+// becomes "~0" and "/" becomes "~1". Pointers built from unescaped tokens with
+// it are read back by every Doc operation.
+func EscapeToken(token string) string {
+	token = strings.ReplaceAll(token, "~", "~0")
+	return strings.ReplaceAll(token, "/", "~1")
 }
 
 // splitPointer splits an RFC 6901 pointer into its unescaped reference tokens.

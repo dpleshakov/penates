@@ -574,3 +574,111 @@ func TestSequence(t *testing.T) {
 		}
 	}
 }
+
+func TestRaw(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		doc    string
+		ptr    string
+		want   string
+		found  bool
+		wanErr bool
+	}{
+		{"scalar as written", "{\n  \"a\": 7 /* hmm */,\n}", "/a", "7", true, false},
+		{"object keeps inner comments", "{\n  \"a\": { // hi\n    \"b\": 1,\n  },\n}", "/a", "{ // hi\n    \"b\": 1\n  }", true, false},
+		{"array with trailing comma", "[\n  1,\n  2,\n]", "/0", "1", true, false},
+		{"root", "{\n  \"a\": 1\n}", "", "{\n  \"a\": 1\n}", true, false},
+		{"absent", `{"a": 1}`, "/z", "", false, false},
+		{"malformed pointer", `{"a": 1}`, "a", "", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			d := mustParse(t, tt.doc)
+			got, found, err := d.Raw(tt.ptr)
+			if tt.wanErr {
+				if err == nil {
+					t.Fatalf("Raw(%q) = %q, %v; want error", tt.ptr, got, found)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Raw(%q): %v", tt.ptr, err)
+			}
+			if found != tt.found {
+				t.Fatalf("Raw(%q) found = %v, want %v", tt.ptr, found, tt.found)
+			}
+			if diff := cmp.Diff(tt.want, string(got)); diff != "" {
+				t.Errorf("Raw(%q) (-want +got):\n%s", tt.ptr, diff)
+			}
+		})
+	}
+}
+
+func TestMembersAndElements(t *testing.T) {
+	t.Parallel()
+	d := mustParse(t, "{\n  \"a/b\": {\n    \"x\": 1,\n  },\n  \"list\": [\n    1,\n    \"two\",\n  ],\n}\n")
+
+	names, found, err := d.Members("")
+	if err != nil || !found {
+		t.Fatalf("Members(\"\") = %v, %v, %v", names, found, err)
+	}
+	if diff := cmp.Diff([]string{"a/b", "list"}, names); diff != "" {
+		t.Errorf("Members(\"\") (-want +got):\n%s", diff)
+	}
+
+	inner, found, err := d.Members("/a~1b")
+	if err != nil || !found {
+		t.Fatalf("Members(\"/a~1b\") = %v, %v, %v", inner, found, err)
+	}
+	if diff := cmp.Diff([]string{"x"}, inner); diff != "" {
+		t.Errorf("Members(\"/a~1b\") (-want +got):\n%s", diff)
+	}
+
+	elems, found, err := d.Elements("/list")
+	if err != nil || !found {
+		t.Fatalf("Elements(\"/list\") = %v, %v, %v", elems, found, err)
+	}
+	if diff := cmp.Diff([]string{"1", `"two"`}, []string{string(elems[0]), string(elems[1])}); diff != "" {
+		t.Errorf("Elements(\"/list\") (-want +got):\n%s", diff)
+	}
+
+	if _, found, err := d.Members("/z"); found || err != nil {
+		t.Errorf("Members of an absent member = %v, %v; want not found", found, err)
+	}
+	if _, found, err := d.Elements("/z"); found || err != nil {
+		t.Errorf("Elements of an absent member = %v, %v; want not found", found, err)
+	}
+	if _, _, err := d.Members("/list"); err == nil {
+		t.Error("Members of an array: want error")
+	}
+	if _, _, err := d.Elements("/a~1b"); err == nil {
+		t.Error("Elements of an object: want error")
+	}
+}
+
+func TestEscapeToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ token, want string }{
+		{"plain", "plain"},
+		{"a/b", "a~1b"},
+		{"a~b", "a~0b"},
+		{"a~/b", "a~0~1b"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := EscapeToken(tt.token); got != tt.want {
+			t.Errorf("EscapeToken(%q) = %q, want %q", tt.token, got, tt.want)
+		}
+		d := mustParse(t, `{}`)
+		if err := d.Insert("/"+EscapeToken(tt.token), []byte("0")); tt.token != "" && err != nil {
+			t.Errorf("Insert with the escaped token: %v", err)
+		}
+		if tt.token != "" {
+			if got, found, _ := d.Get("/" + EscapeToken(tt.token)); !found || string(got) != "0" {
+				t.Errorf("round trip of %q = %q, %v", tt.token, got, found)
+			}
+		}
+	}
+}

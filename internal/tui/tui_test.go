@@ -814,6 +814,18 @@ func TestListStatuses(t *testing.T) {
 		t.Errorf("no downgrade marker or arrow:\n%s", view)
 	}
 
+	// A major bump is marked for review (RFC 8): the row carries the major
+	// flag and the update marker takes the error style.
+	bumpStatusKit(t, kitDir, "2.0.0", "plain v2\n")
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].major || lm.rows[1].statusWord() != "update" {
+		t.Fatalf("major row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if view := lm.View(); !strings.Contains(view, "[update]") || !strings.Contains(view, "1.0.0 > 2.0.0") {
+		t.Errorf("no major update marker or arrow:\n%s", view)
+	}
+
 	// The same version with changed content warns while the item is
 	// selected: applying would keep everything.
 	bumpStatusKit(t, kitDir, "1.0.0", "plain v2 changed\n")

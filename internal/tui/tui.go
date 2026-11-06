@@ -108,9 +108,12 @@ type row struct {
 	conflict         bool
 	conflictReason   string
 	warning          bool
-	selected         bool
-	reset            bool
-	remove           bool
+	// major marks an update across the major version: RFC 8 has the TUI
+	// mark major updates for review, so the marker takes the error style.
+	major    bool
+	selected bool
+	reset    bool
+	remove   bool
 }
 
 // statusWord is the bracketed status the list renders for the row: the most
@@ -667,6 +670,9 @@ func (m *model) kitRow(k *kit.Kit, it *kit.Item, selected map[string]bool) row {
 	r.reset = m.resets[key]
 	r.modified = m.reconcil.ModifiedItem(key)
 	r.broken = m.reconcil.BrokenItem(key)
+	if it.Version != rec.Version && kit.MajorVersion(it.Version) != kit.MajorVersion(rec.Version) {
+		r.major = true
+	}
 	switch kit.CompareVersions(it.Version, rec.Version) {
 	case 1:
 		r.update = true
@@ -1188,6 +1194,11 @@ func (m *model) View() string {
 				mark := fmt.Sprintf("%-12s", "["+r.statusWord()+"]")
 				switch r.statusWord() {
 				case "conflict", "broken", "unavailable":
+					mark = styleErr.Render(mark)
+				}
+				if r.major {
+					// A major update is a behavior change: RFC 8 marks it
+					// for review.
 					mark = styleErr.Render(mark)
 				}
 				idcol := r.key

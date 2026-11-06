@@ -383,6 +383,14 @@ func CompareVersions(a, b string) int {
 	return semver.Compare("v"+a, "v"+b)
 }
 
+// MajorVersion returns the major component of a validated semantic version
+// with the prefix semver.Major prints, for example "v2". Two versions with
+// different majors are what RFC 8 calls a behavior change, which the TUI
+// marks for review.
+func MajorVersion(v string) string {
+	return semver.Major("v" + v)
+}
+
 // validRelPath reports whether p is a non-empty relative path of forward-slash-
 // separated elements, each a plain name: no absolute paths, no "." or ".." elements,
 // no backslashes, no drive letters.

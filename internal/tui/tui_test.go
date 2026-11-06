@@ -344,6 +344,48 @@ func TestRemoveFlow(t *testing.T) {
 	}
 }
 
+// TestRemoveReportsKeptContent pins the report of RFC 9.1: removing an item
+// whose file the user modified keeps the file, names it in the results, and
+// still drops the lock record.
+func TestRemoveReportsKeptContent(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := drive(t, app.Initial(kitDir), "enter", "space", "a", "enter")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// The user edits the installed file; the removal keeps it and says so.
+	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = drive(t, m, "enter", "d", "a", "enter")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "removed  ex/good") || !strings.Contains(rm.lastResults, "kept skills/good/SKILL.md: modified by the user") {
+		t.Fatalf("removal over a modification:\n%s", rm.lastResults)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
+	if err != nil || string(data) != "user edit\n" {
+		t.Errorf("file after removal = %q, %v; want the modification kept", data, err)
+	}
+	lk, err := lock.NewStore(dataDir).Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lk.Items) != 0 {
+		t.Errorf("lock items after removal = %v", lk.Items)
+	}
+}
+
 // TestOrphanRemoval walks the frozen-orphan flow of RFC 9.2: an installed
 // item no kit provides anymore stays in the list as an orphan and removes
 // from the lock and the target like any other item.

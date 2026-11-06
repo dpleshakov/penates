@@ -352,7 +352,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
  /  filter   space  select   i  details   a  apply   q  quit
 ```
 
-- Statuses: not installed, selected, installed, update available, downgrade available, modified, conflict, orphan, kit unavailable, warning.
+- Statuses: not installed, selected, installed, update available, downgrade available, modified, broken, conflict, orphan, kit unavailable, warning.
 - `/` filters by id, tags and description.
 - `i` shows the description, contributions, changelog, source kit and variable answers.
 - Forms request variables; answers are remembered.

@@ -1,6 +1,6 @@
 # 2026-11-04-tasks-full-rfc.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -158,5 +158,5 @@ and `CHANGELOG.md`, and archive this file.
 test or documented deviation; all tests, vet, and gofmt green.
 **Pile:** a registered kit that fails to load and holds no installed items
 renders no group at all, so its "kit did not load" note is lost from the list
-(TASK-12 review).
-**Status:** Pending
+(TASK-12 review). Moved to docs/backlog.md as `failed-kit-note`.
+**Status:** Done

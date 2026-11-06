@@ -1100,6 +1100,33 @@ func TestResolveVars(t *testing.T) {
 	}
 }
 
+// TestMissingVarsOnUpdate pins the update side of the variable flow (RFC
+// 6.4): a version that introduces a variable the installation never
+// answered leaves the item missing until the client answers, and an
+// answered variable asks no more.
+func TestMissingVarsOnUpdate(t *testing.T) {
+	it := &kit.Item{
+		ID:          "one",
+		Version:     "1.1.0",
+		Vars:        []kit.Var{{ID: "root", Prompt: "root path", Required: true}},
+		Contributes: []kit.Contribution{{Kind: kit.KindFile, Src: "s", To: "skills/one/SKILL.md", Template: true}},
+	}
+	lk := newLock(map[string]*lock.Item{"k/one": {
+		Version: "1.0.0",
+		Answers: map[string]string{"old": "discarded"},
+	}})
+
+	missing := MissingVars(oneKit("k", it), []string{"k/one"}, lk, nil)
+	if diff := cmp.Diff([]kit.Var{{ID: "root", Prompt: "root path", Required: true}}, missing["k/one"]); diff != "" {
+		t.Errorf("missing (-want +got):\n%s", diff)
+	}
+
+	missing = MissingVars(oneKit("k", it), []string{"k/one"}, lk, map[string]map[string]string{"k/one": {"root": "/opt/x"}})
+	if len(missing) != 0 {
+		t.Errorf("missing with a fresh answer = %v, want none", missing)
+	}
+}
+
 // TestPlanUpdateVersions walks the version table of RFC 8 against the lock.
 func TestPlanUpdateVersions(t *testing.T) {
 	const v1 = "installed body\n"

@@ -168,6 +168,12 @@ func TestLoadInvalid(t *testing.T) {
 			},
 			wantErr: "section contributions may target only files listed in the kit's shared",
 		},
+		"json contribution outside shared": {
+			files: map[string]string{
+				"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - json: f\n    to: NOTES.md\n",
+			},
+			wantErr: "json contributions may target only files listed in the kit's shared",
+		},
 		"duplicate variable": {
 			files: map[string]string{
 				"items/a/item.yaml": "id: a\nversion: 1.0.0\nvars:\n  - {id: p}\n  - {id: p}\n",
@@ -241,6 +247,17 @@ func TestLoadSources(t *testing.T) {
 	t.Run("section source may not be a directory", func(t *testing.T) {
 		dir := t.TempDir()
 		files := kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - section: skill\n    to: AGENTS.md\n")
+		files["kit.yaml"] = "name: example\nshared:\n  - AGENTS.md\n"
+		writeFiles(t, dir, files)
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "only file contributions may use directories") {
+			t.Fatalf("Load error = %v", err)
+		}
+	})
+
+	t.Run("json source may not be a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		files := kitWith("id: a\nversion: 1.0.0\ncontributes:\n  - json: skill\n    to: AGENTS.md\n")
 		files["kit.yaml"] = "name: example\nshared:\n  - AGENTS.md\n"
 		writeFiles(t, dir, files)
 		_, err := Load(dir)

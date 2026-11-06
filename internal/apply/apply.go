@@ -106,14 +106,38 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 		sort.Strings(lk.CreatedSharedFiles)
 	}
 
-	lk.SetItem(ip.Key, &lock.Item{
+	rec := &lock.Item{
 		Version:     ip.Version,
 		Answers:     answersOf(ip),
 		Files:       files,
 		DirsCreated: createdDirs,
 		Sections:    sections,
 		JSON:        jsonLocations(ip.JSONLocations),
-	})
+	}
+	// Content the plan keeps standing — a file or block recorded in the lock
+	// that this plan writes no action for — stays recorded with its
+	// installation base: the three-state rules of a later update must still
+	// see the user's modification against it (RFC 7.2). The directories of
+	// the earlier install stay recorded, so a removal still cleans them up
+	// while they are empty (RFC 9.1).
+	if old := lk.Items[ip.Key]; old != nil {
+		for path, hash := range old.Files {
+			if _, written := rec.Files[path]; !written {
+				rec.Files[path] = hash
+			}
+		}
+		for file, sec := range old.Sections {
+			if _, written := rec.Sections[file]; !written {
+				rec.Sections[file] = sec
+			}
+		}
+		for _, dir := range old.DirsCreated {
+			if !containsPath(rec.DirsCreated, dir) {
+				rec.DirsCreated = append(rec.DirsCreated, dir)
+			}
+		}
+	}
+	lk.SetItem(ip.Key, rec)
 	if err := store.Save(lk); err != nil {
 		return fail(fmt.Errorf("save lock: %w", err))
 	}

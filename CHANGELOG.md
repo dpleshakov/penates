@@ -16,4 +16,5 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Installed items are removed on request: unchanged owned files are deleted and user-modified ones are kept and reported, owned sections go with their markers or stay without them, json values go when their item is the last owner, directories and shared files penates created are cleaned up while the removal leaves them empty, and orphans — installed items no kit provides anymore — stay listed and removable.
 
 ### Fixed
+- An update that keeps a user-modified file or block no longer drops it from the lock record: content a plan leaves standing stays recorded with its installation base, so later updates and removals still see it.
 - Applying into a target directory that does not exist yet no longer fails when an item writes a file directly into the target root.

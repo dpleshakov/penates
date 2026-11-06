@@ -93,6 +93,73 @@ func TestApplyInstalls(t *testing.T) {
 	}
 }
 
+// TestApplyKeepsRecordedContent applies a plan that rewrites one recorded
+// file and writes nothing for the rest: the kept file and block stay recorded
+// with their installation base, so a later update still sees a user
+// modification against it, and the directories of the earlier install stay
+// recorded for the removal to clean up.
+func TestApplyKeepsRecordedContent(t *testing.T) {
+	root := t.TempDir()
+	dataDir := t.TempDir()
+	store := lock.NewStore(dataDir)
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The target as an earlier install left it: two owned files, one owned
+	// block, and the directories penates created.
+	if err := os.MkdirAll(filepath.Join(root, "skills", "one"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skills", "one", "kept.md"), []byte("user content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lk.SetItem("k/one", &lock.Item{
+		Version: "1.0.0",
+		Files: map[string]string{
+			"skills/one/SKILL.md": hashOf([]byte("installed content\n")),
+			"skills/one/kept.md":  hashOf([]byte("user content\n")),
+		},
+		DirsCreated: []string{"skills", "skills/one"},
+		Sections:    map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: hashOf([]byte("block\n"))}},
+	})
+
+	// The update plan replaces SKILL.md and keeps kept.md and the block.
+	p := &plan.Plan{Items: []*plan.ItemPlan{{
+		Key:     "k/one",
+		KitName: "k",
+		ItemID:  "one",
+		Version: "1.1.0",
+		Status:  plan.StatusInstall,
+		Actions: []plan.Action{{Kind: plan.ActionFile, To: "skills/one/SKILL.md", Content: []byte("updated\n")}},
+	}}}
+	results := Apply(root, p, lk, store)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("results = %+v", results)
+	}
+
+	reloaded, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := reloaded.Items["k/one"]
+	if rec == nil {
+		t.Fatal("lock holds no k/one after the update")
+	}
+	if got := rec.Files["skills/one/SKILL.md"]; got != hashOf([]byte("updated\n")) {
+		t.Errorf("updated file hash = %q", got)
+	}
+	if got := rec.Files["skills/one/kept.md"]; got != hashOf([]byte("user content\n")) {
+		t.Errorf("kept file hash = %q, want the recorded base kept", got)
+	}
+	if sec := rec.Sections["AGENTS.md"]; sec.Block != "k/one" || sec.Hash != hashOf([]byte("block\n")) {
+		t.Errorf("kept section = %+v, want the recorded base kept", sec)
+	}
+	if diff := cmp.Diff([]string{"skills", "skills/one"}, rec.DirsCreated); diff != "" {
+		t.Errorf("dirs created (-want +got):\n%s", diff)
+	}
+}
+
 func TestApplyFailureLeavesNothing(t *testing.T) {
 	root := t.TempDir()
 	kitDir := t.TempDir()

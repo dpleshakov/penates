@@ -307,6 +307,8 @@ The TUI marks major updates for review and displays `CHANGELOG.md` when present.
 
 Each installed item is pinned to its source kit. Updates come only from that kit. An item with the same id in another kit is a different item and never replaces the installed one.
 
+An update never releases ownership on its own. Content the item owns that the plan leaves standing — a file or block the user modified while the kit content is unchanged, or a location the new version stops declaring — stays recorded in the lock with its installation base, and a removal still takes it away (9.1). Ownership ends only when the item is removed.
+
 ## 9. Removal and orphans
 
 ### 9.1 Removal

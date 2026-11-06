@@ -1344,15 +1344,18 @@ func blockContent(file, id string) string {
 }
 
 // TestPlanJSONUpdates walks the update rows of the 7.2 table for an owned
-// json location, plus the reset row of 7.6.
+// json location, plus the reset row of 7.6 and the ownership of the
+// locations a thinner fragment stops declaring (RFC 8).
 func TestPlanJSONUpdates(t *testing.T) {
 	one := hashOf([]byte("1"))
 	two := hashOf([]byte("2"))
+	bHash := hashOf([]byte(`"b"`))
 	tests := map[string]struct {
-		reset   bool
-		current string // the shared file content the target holds now
-		source  string // the fragment the kit provides
-		want    func(*testing.T, *ItemPlan)
+		reset    bool
+		current  string          // the shared file content the target holds now
+		source   string          // the fragment the kit provides
+		recorded []lock.Location // the locations of the earlier install
+		want     func(*testing.T, *ItemPlan)
 	}{
 		"unchanged owned value is replaced by the update": {
 			current: "{\n  \"a\": 1\n}\n", source: `{"a":2}`,
@@ -1417,21 +1420,36 @@ func TestPlanJSONUpdates(t *testing.T) {
 				}
 			},
 		},
-		"a location the update drops is released with its value kept": {
+		"a location the update drops stays owned with its value standing": {
 			current: "{\n  \"a\": 1,\n  \"b\": [2]\n}\n", source: `{"a":3}`,
+			recorded: []lock.Location{{Pointer: "/a", Hash: one}, {Pointer: "/b", Hash: bHash}},
 			want: func(t *testing.T, ip *ItemPlan) {
 				if ip.Status != StatusInstall || len(ip.Actions) != 1 {
 					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
 				}
-				// The thinner fragment releases /b: its value stays in the
-				// composed file, but the item no longer owns it.
+				// The thinner fragment keeps /b owned: its value stays in the
+				// composed file, and the record keeps it until the item is
+				// removed (RFC 8, 9.1).
 				content := string(ip.Actions[0].Content)
 				if !strings.Contains(content, `"a": 3`) || !strings.Contains(content, `"b": [2]`) {
 					t.Errorf("content =\n%s", content)
 				}
 				locs := ip.JSONLocations["config.jsonc"]
-				if len(locs) != 1 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("3"))}) {
-					t.Errorf("locations = %v, want only the still-declared /a", locs)
+				if len(locs) != 2 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("3"))}) || locs[1] != (Location{Pointer: "/b", Hash: bHash}) {
+					t.Errorf("locations = %v, want the re-declared /a and the carried /b", locs)
+				}
+			},
+		},
+		"an array element the update drops stays owned": {
+			current: "{\n  \"a\": 1,\n  \"tags\": [\"b\", \"c\"]\n}\n", source: `{"a":3}`,
+			recorded: []lock.Location{{Pointer: "/a", Hash: one}, {Pointer: "/tags", Hash: bHash}},
+			want: func(t *testing.T, ip *ItemPlan) {
+				if ip.Status != StatusInstall {
+					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+				locs := ip.JSONLocations["config.jsonc"]
+				if len(locs) != 2 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("3"))}) || locs[1] != (Location{Pointer: "/tags", Hash: bHash}) {
+					t.Errorf("locations = %v, want the carried element kept owned", locs)
 				}
 			},
 		},
@@ -1440,12 +1458,15 @@ func TestPlanJSONUpdates(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			it := jsonItem("one", "perm.jsonc", "config.jsonc")
 			it.Version = "1.1.0"
+			if tc.recorded == nil {
+				tc.recorded = []lock.Location{{Pointer: "/a", Hash: one}}
+			}
 			p := Build(Input{
 				Kits:      oneKit("k", it),
 				Selection: []string{"k/one"},
 				Lock: newLock(map[string]*lock.Item{"k/one": {
 					Version: "1.0.0",
-					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/a", Hash: one}}},
+					JSON:    map[string][]lock.Location{"config.jsonc": tc.recorded},
 				}}),
 				Snapshot: sharedOf(map[string]target.SharedFileState{
 					"config.jsonc": {Exists: true, Content: tc.current},
@@ -1458,6 +1479,47 @@ func TestPlanJSONUpdates(t *testing.T) {
 			}
 			tc.want(t, p.Items[0])
 		})
+	}
+}
+
+// TestPlanJSONContributionDropped pins the carry for a json contribution the
+// update no longer declares: the locations of the earlier install stay owned
+// in the file the item stopped writing to (RFC 8).
+func TestPlanJSONContributionDropped(t *testing.T) {
+	one := hashOf([]byte("1"))
+	it := &kit.Item{
+		ID:      "one",
+		Version: "1.1.0",
+		Contributes: []kit.Contribution{
+			{Kind: kit.KindJSON, Src: "perm.jsonc", To: "config.jsonc"},
+		},
+	}
+	p := Build(Input{
+		Kits:      oneKit("k", it),
+		Selection: []string{"k/one"},
+		Lock: newLock(map[string]*lock.Item{"k/one": {
+			Version: "1.0.0",
+			JSON: map[string][]lock.Location{
+				"config.jsonc": {{Pointer: "/a", Hash: one}},
+				"other.json":   {{Pointer: "/gone", Hash: one}},
+			},
+		}}),
+		Snapshot: sharedOf(map[string]target.SharedFileState{
+			"config.jsonc": {Exists: true, Content: "{\n  \"a\": 1\n}\n"},
+			"other.json":   {Exists: true, Content: "{\n  \"gone\": 1\n}\n"},
+		}),
+		Sources: map[string][]byte{"perm.jsonc": []byte(`{"a":2}`)},
+	})
+	ip := p.Items[0]
+	if ip.Status != StatusInstall {
+		t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+	}
+	locs := ip.JSONLocations["other.json"]
+	if len(locs) != 1 || locs[0] != (Location{Pointer: "/gone", Hash: one}) {
+		t.Errorf("locations of the dropped contribution = %v, want the recorded pair carried", locs)
+	}
+	if locs := ip.JSONLocations["config.jsonc"]; len(locs) != 1 || locs[0] != (Location{Pointer: "/a", Hash: hashOf([]byte("2"))}) {
+		t.Errorf("locations of the declared contribution = %v", locs)
 	}
 }
 

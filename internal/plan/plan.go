@@ -60,9 +60,11 @@ type ItemPlan struct {
 	// JSONLocations lists, per shared file, the JSON locations the item takes
 	// ownership of when installed (RFC 7.4): the values it writes, and equal
 	// values owned by another item, which make the item a co-owner. Locations
-	// merely found satisfied are absent. The lock records them; a plan may
-	// install an item whose locations are all satisfied or co-owned without
-	// writing any byte.
+	// merely found satisfied are absent. An update also carries the locations
+	// of the earlier install that the new fragment stops declaring: ownership
+	// never ends but with the removal of the item (RFC 8). The lock records
+	// them; a plan may install an item whose locations are all satisfied,
+	// co-owned, or carried without writing any byte.
 	JSONLocations map[string][]Location
 	// Answers are the values the plan substituted into the item's templated
 	// contributions: the client's fresh answers over the recorded ones, for
@@ -1175,6 +1177,25 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 			}
 		}
 	}
+	// A json file the item no longer contributes to keeps its recorded
+	// locations: no fragment re-declares them, and apply replaces the whole
+	// lock record, so the plan carries them (RFC 8).
+	if old := lk.Items[key]; old != nil {
+		declared := map[string]bool{}
+		for _, c := range it.Contributes {
+			if c.Kind == kit.KindJSON {
+				declared[c.To] = true
+			}
+		}
+		for file, locs := range old.JSON {
+			if declared[file] {
+				continue // planJSON carries what the fragment leaves out
+			}
+			for _, loc := range locs {
+				jsonLocs.add(file, loc.Pointer, loc.Hash)
+			}
+		}
+	}
 	if locs := jsonLocs.sorted(); len(locs) > 0 {
 		ip.JSONLocations = locs
 	}
@@ -1357,12 +1378,20 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 		return nil, fmt.Errorf("source %s does not hold a JSON document: %w", c.Src, err)
 	}
 
-	// The member locations the fragment claims, for the conflicts of 7.5.
+	// The member locations the fragment claims, for the conflicts of 7.5,
+	// and the element pairs it declares, for the carry of the earlier
+	// install's locations below.
 	leaves := map[string]string{}
+	elements := map[string]map[string]bool{}
 	err = walkJSON(frag, func(pointer string, element bool, hash string) error {
-		if !element {
-			leaves[pointer] = hash
+		if element {
+			if elements[pointer] == nil {
+				elements[pointer] = map[string]bool{}
+			}
+			elements[pointer][hash] = true
+			return nil
 		}
+		leaves[pointer] = hash
 		return nil
 	})
 	if err != nil {
@@ -1370,6 +1399,24 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 	}
 	if ptr, rivals := claims.jsonConflict(c.To, key, leaves); len(rivals) > 0 {
 		return nil, conflictf("%s is claimed at %s with a different value by %s", c.To, ptr, strings.Join(rivals, ", "))
+	}
+
+	// Locations of the earlier install that this fragment no longer declares
+	// stay owned: apply replaces the item's whole lock record, so whatever
+	// the record must keep has to be in the plan (RFC 8). A member the
+	// fragment re-declares is superseded by the value the plan writes there;
+	// the elements of an array stand one by one, so an undeclared pair stays
+	// as recorded.
+	if old := in.Lock.Items[key]; old != nil {
+		for _, loc := range old.JSON[c.To] {
+			if _, member := leaves[loc.Pointer]; member {
+				continue
+			}
+			if elements[loc.Pointer][loc.Hash] {
+				continue
+			}
+			rec.add(c.To, loc.Pointer, loc.Hash)
+		}
 	}
 
 	w := &jsonPlanner{key: key, file: c.To, frag: frag, in: in, shared: shared, rec: rec, reset: reset}

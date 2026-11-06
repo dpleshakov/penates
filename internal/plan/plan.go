@@ -491,30 +491,29 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 	for _, loc := range sorted {
 		min, found, err := doc.Get(loc.Pointer)
 		if err != nil || !found {
-			continue // the value is gone already
+			continue // the value is gone already; the record dies with the item
 		}
 		// The lock records array elements under the pointer of their array
 		// (RFC 7.4): such a value stands while the array holds an element
 		// with the recorded hash. A member's value stands at the pointer
 		// itself and is compared by its hash.
-		element := min[0] == '[' && hashOf(min) != loc.Hash
 		present := hashOf(min) == loc.Hash
-		if element {
+		if !present && min[0] == '[' {
 			elems, _, err := doc.Elements(loc.Pointer)
-			if err != nil {
-				continue // not an array after all; nothing of the item's stands there
-			}
-			for _, e := range elems {
-				if hashOf(e) == loc.Hash {
-					present = true
-					break
+			if err == nil {
+				for _, e := range elems {
+					if hashOf(e) == loc.Hash {
+						present = true
+						break
+					}
 				}
 			}
 		}
 		if !present {
-			if element {
-				continue // the element is gone from the array already
-			}
+			// The location no longer holds the recorded value: whatever the
+			// user put there — another element, another value, a whole array
+			// in place of a scalar — it stays, and the removal says so
+			// (RFC 9.1).
 			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: modified by the user", quoteLoc(loc.Pointer), file))
 			continue
 		}

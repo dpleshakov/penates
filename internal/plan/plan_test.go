@@ -1747,6 +1747,65 @@ func TestBuildRemoval(t *testing.T) {
 				}
 			},
 		},
+		"an array element the user replaced is kept and reported": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/tags", Hash: bHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"tags": ["a", "c"]}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 0 {
+					t.Fatalf("actions = %v, want none: the array is the user's now", ip.Actions)
+				}
+				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/tags" in config.jsonc: modified by the user`) {
+					t.Errorf("reports = %v", ip.Reports)
+				}
+			},
+		},
+		"an array element the user removed is kept and reported": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/tags", Hash: bHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"tags": ["a"]}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 0 {
+					t.Fatalf("actions = %v, want none: the array is the user's now", ip.Actions)
+				}
+				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/tags" in config.jsonc: modified by the user`) {
+					t.Errorf("reports = %v", ip.Reports)
+				}
+			},
+		},
+		"a scalar the user replaced with an array holding it loses the value": {
+			// The lock records members and array elements under the same
+			// (pointer, hash) shape, so an array holding the recorded value
+			// reads as the item's element standing there: that element goes,
+			// the rest of the user's array stays.
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": ["dark", "light"]}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 || ip.Actions[0].Kind != ActionJSONRemove {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				got := string(ip.Actions[0].Content)
+				if strings.Contains(got, `"dark"`) || !strings.Contains(got, `"light"`) {
+					t.Errorf("content =\n%s\nwant the recorded value gone and the user's element kept", got)
+				}
+				if len(ip.Reports) != 0 {
+					t.Errorf("reports = %v, want none", ip.Reports)
+				}
+			},
+		},
 		"a json value that is gone already plans nothing": {
 			lockItems: map[string]*lock.Item{"k/one": {
 				Version: "1.0.0",

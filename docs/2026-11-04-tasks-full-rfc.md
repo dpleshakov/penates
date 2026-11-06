@@ -119,7 +119,7 @@ marks items for removal and the results report kept content.
 **Definition of done:** table tests cover every 9.1 row for all three
 contribution kinds plus the orphan flow; a headless TUI test removes an
 installed item.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-11 `reconciliation`
 **Description:** RFC 7.7: before planning, reconcile the lock with the target

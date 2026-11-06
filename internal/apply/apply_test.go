@@ -174,6 +174,135 @@ func TestFailureOfOneItemDoesNotBlockTheNext(t *testing.T) {
 	}
 }
 
+// TestRemoveExecutesThePlan walks the RFC 9.1 rows apply carries out: files
+// deleted, directories penates created for the item removed while empty and
+// kept while the user's files live in them, shared files rewritten, a created
+// shared file dropped from the lock with its deletion, and the item's record
+// dying with the removal.
+func TestRemoveExecutesThePlan(t *testing.T) {
+	root := t.TempDir()
+	store := lock.NewStore(t.TempDir())
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSource(t, root, "skills/one/SKILL.md", "skill\n")
+	writeSource(t, root, "skills/one/keep.md", "user file\n")
+	writeSource(t, root, "skills/two/lib.md", "lib\n")
+	writeSource(t, root, "AGENTS.md", "# Notes\n\n<!-- penates:begin k/three -->\nold\n<!-- penates:end k/three -->\n\n# Own\n")
+
+	lk.Items["k/one"] = &lock.Item{Version: "1.0.0", Files: map[string]string{
+		"skills/one/SKILL.md": hashOf([]byte("skill\n")),
+	}, DirsCreated: []string{"skills", "skills/one"}}
+	lk.Items["k/two"] = &lock.Item{Version: "1.0.0", Files: map[string]string{
+		"skills/two/lib.md": hashOf([]byte("lib\n")),
+	}, DirsCreated: []string{"skills/two"}}
+	lk.Items["k/three"] = &lock.Item{Version: "1.0.0", Sections: map[string]lock.Section{
+		"AGENTS.md": {Block: "k/three", Hash: "sha256:xx"},
+	}}
+	// config.jsonc is gone from the target already: the deletion is
+	// tolerated and the created list still forgets it.
+	lk.Items["k/four"] = &lock.Item{Version: "1.0.0"}
+	lk.CreatedSharedFiles = []string{"config.jsonc"}
+	if err := store.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &plan.Plan{Items: []*plan.ItemPlan{
+		{Key: "k/one", Status: plan.StatusRemove, Actions: []plan.Action{
+			{Kind: plan.ActionRemove, To: "skills/one/SKILL.md", Reason: "the owned file is removed unchanged"},
+		}},
+		{Key: "k/two", Status: plan.StatusRemove, Actions: []plan.Action{
+			{Kind: plan.ActionRemove, To: "skills/two/lib.md", Reason: "the owned file is removed unchanged"},
+		}},
+		{Key: "k/three", Status: plan.StatusRemove, Actions: []plan.Action{
+			{Kind: plan.ActionSectionRemove, To: "AGENTS.md", Content: []byte("# Notes\n\n# Own\n")},
+		}},
+		// config.jsonc is gone from the target already: the deletion is
+		// tolerated and the created list still forgets it.
+		{Key: "k/four", Status: plan.StatusRemove, Actions: []plan.Action{
+			{Kind: plan.ActionRemove, To: "config.jsonc"},
+		}},
+	}}
+	results := Remove(root, p, lk, store)
+	if len(results) != 4 {
+		t.Fatalf("results = %+v", results)
+	}
+	for _, r := range results {
+		if r.Err != nil {
+			t.Errorf("%s failed: %v", r.Key, r.Err)
+		}
+	}
+	// k/one: the owned file is gone, the user's file and its directory stay.
+	if _, err := os.Stat(filepath.Join(root, "skills", "one", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("owned file survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "skills", "one", "keep.md")); err != nil {
+		t.Errorf("the user's file was removed: %v", err)
+	}
+	// k/two: the directory penates created is gone with its last file.
+	if _, err := os.Stat(filepath.Join(root, "skills", "two")); !os.IsNotExist(err) {
+		t.Errorf("the emptied directory survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "skills")); err != nil {
+		t.Errorf("the shared parent directory was removed: %v", err)
+	}
+	// k/three: the shared file is rewritten without the block.
+	data, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || string(data) != "# Notes\n\n# Own\n" {
+		t.Errorf("AGENTS.md = %q, %v", data, err)
+	}
+	// The lock on disk holds no removed item and no created shared file.
+	reloaded, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Items) != 0 {
+		t.Errorf("lock items after removal = %v", reloaded.Items)
+	}
+	if len(reloaded.CreatedSharedFiles) != 0 {
+		t.Errorf("created shared files = %v, want empty", reloaded.CreatedSharedFiles)
+	}
+}
+
+// TestRemoveRejectsForeignActions pins the guard: a removal item that carries
+// an action which is not a removal fails without touching the target or the
+// lock.
+func TestRemoveRejectsForeignActions(t *testing.T) {
+	root := t.TempDir()
+	store := lock.NewStore(t.TempDir())
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSource(t, root, "skills/one/SKILL.md", "skill\n")
+	lk.Items["k/one"] = &lock.Item{Version: "1.0.0", Files: map[string]string{
+		"skills/one/SKILL.md": hashOf([]byte("skill\n")),
+	}}
+	if err := store.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &plan.Plan{Items: []*plan.ItemPlan{{
+		Key: "k/one", Status: plan.StatusRemove,
+		Actions: []plan.Action{{Kind: plan.ActionFile, To: "skills/one/SKILL.md", Content: []byte("x")}},
+	}}}
+	results := Remove(root, p, lk, store)
+	if len(results) != 1 || results[0].Err == nil {
+		t.Fatalf("results = %+v, want one failure", results)
+	}
+	if _, err := os.Stat(filepath.Join(root, "skills", "one", "SKILL.md")); err != nil {
+		t.Errorf("the file was touched by a failed removal: %v", err)
+	}
+	reloaded, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Items["k/one"] == nil {
+		t.Errorf("the lock lost the item to a failed removal: %v", reloaded.Items)
+	}
+}
+
 func writeSource(t *testing.T, kitDir, rel, content string) {
 	t.Helper()
 	full := filepath.Join(kitDir, filepath.FromSlash(rel))

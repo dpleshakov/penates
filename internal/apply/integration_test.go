@@ -134,6 +134,128 @@ func TestInstallEndToEnd(t *testing.T) {
 	}
 }
 
+// TestRemoveEndToEnd removes an installed item through the real planner and
+// executor: the owned file is deleted with the directory penates created for
+// it, the created shared Markdown file is deleted when the removal leaves it
+// without content, the user's JSONC keeps its bytes without the item's value,
+// and the reloaded lock holds no trace of the item (RFC 9.1).
+func TestRemoveEndToEnd(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "harness")
+	kitDir := t.TempDir()
+	userConfig := "{\n  // editor the user chose by hand\n  \"editor\": \"vim\"\n}\n"
+	writeSource(t, kitDir, "kit.yaml", "name: demo\nshared:\n  - AGENTS.md\n  - config.jsonc\n")
+	writeSource(t, kitDir, "items/one/item.yaml",
+		"id: one\nversion: 1.0.0\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/one/SKILL.md\n  - section: note.md\n    to: AGENTS.md\n  - json: perm.jsonc\n    to: config.jsonc\n")
+	writeSource(t, kitDir, "items/one/skill/SKILL.md", "one skill\n")
+	writeSource(t, kitDir, "items/one/note.md", "## Rules\n\nbody\n")
+	writeSource(t, kitDir, "items/one/perm.jsonc", `{"theme": "dark"}`)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSource(t, targetDir, "config.jsonc", userConfig)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := stateStore.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RegisterKit("demo", kitDir, targetDir)
+	if err := stateStore.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	locks := lock.NewStore(dataDir)
+	shared := []string{"AGENTS.md", "config.jsonc"}
+
+	// Install into the target: the item owns its file, creates AGENTS.md,
+	// and joins the user's config.jsonc.
+	k, err := kit.Load(kitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := target.Read(targetDir, []string{"skills/one/SKILL.md"}, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := kit.ReadSources([]*kit.Kit{k}, []string{"demo/one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plan.Build(plan.Input{
+		Kits:      []*kit.Kit{k},
+		Selection: []string{"demo/one"},
+		Lock:      lk,
+		Snapshot:  snap,
+		Sources:   sources,
+	})
+	results := Apply(targetDir, p, lk, locks)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("install results = %+v", results)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "skills", "one", "SKILL.md")); err != nil {
+		t.Fatalf("install left no owned file: %v", err)
+	}
+
+	// Remove the item from the lock and the target as the removal leaves them.
+	lk, err = locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk.Items["demo/one"] == nil {
+		t.Fatalf("install recorded no item: %v", lk.Items)
+	}
+	snap, err = target.Read(targetDir, []string{"skills/one/SKILL.md"}, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rp := plan.BuildRemoval(plan.Input{
+		Lock:     lk,
+		Snapshot: snap,
+		Remove:   map[string]bool{"demo/one": true},
+	})
+	if len(rp.Items) != 1 || rp.Items[0].Status != plan.StatusRemove {
+		t.Fatalf("removal plan = %+v", rp.Items)
+	}
+	results = Remove(targetDir, rp, lk, locks)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("removal results = %+v", results)
+	}
+
+	// The owned file and the directory penates created for it are gone.
+	if _, err := os.Stat(filepath.Join(targetDir, "skills", "one")); !os.IsNotExist(err) {
+		t.Errorf("the item's directory survived: %v", err)
+	}
+	// AGENTS.md was created by penates and left without content: deleted.
+	if _, err := os.Stat(filepath.Join(targetDir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("the created shared file survived: %v", err)
+	}
+	// The user's config.jsonc stays, with the item's value gone and the
+	// user's own bytes around it.
+	data, err := os.ReadFile(filepath.Join(targetDir, "config.jsonc"))
+	if err != nil {
+		t.Fatalf("config.jsonc: %v", err)
+	}
+	if strings.Contains(string(data), "theme") || !strings.Contains(string(data), `"editor": "vim"`) {
+		t.Errorf("config.jsonc after removal =\n%s", data)
+	}
+	// The reloaded lock holds no trace of the item.
+	fresh, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Items) != 0 || len(fresh.CreatedSharedFiles) != 0 {
+		t.Errorf("lock after removal = %+v created %v", fresh.Items, fresh.CreatedSharedFiles)
+	}
+}
+
 // TestInstallSectionEndToEnd installs the agenda item of the fixture example kit
 // into an empty target: the section contribution must create the shared AGENTS.md
 // with the marked block, the lock must record the block and the created shared file,

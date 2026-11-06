@@ -98,6 +98,54 @@ func Replace(s, id, content string) (string, bool) {
 	return s, false
 }
 
+// Remove deletes the managed block id together with its markers, keeping
+// everything else byte for byte. It reports whether the block was found.
+func Remove(s, id string) (string, bool) {
+	lines := strings.Split(s, "\n")
+	for i := 0; i < len(lines); i++ {
+		if m := beginRe.FindStringSubmatch(lines[i]); m != nil && m[1] == id {
+			for j := i + 1; j < len(lines); j++ {
+				if e := endRe.FindStringSubmatch(lines[j]); e != nil && e[1] == id {
+					out := make([]string, 0, len(lines))
+					out = append(out, lines[:i]...)
+					// A blank line kept the block separated from the text
+					// before it; it goes with the block.
+					if i > 0 && strings.TrimSpace(lines[i-1]) == "" {
+						out = out[:len(out)-1]
+					}
+					out = append(out, lines[j+1:]...)
+					return strings.Join(out, "\n"), true
+				}
+			}
+			return s, false
+		}
+	}
+	return s, false
+}
+
+// Strip deletes the marker lines of the managed block id and keeps the
+// content between them, for a block the user modified: the content stays as
+// ordinary text of the file (RFC 9.1). It reports whether the block was
+// found.
+func Strip(s, id string) (string, bool) {
+	lines := strings.Split(s, "\n")
+	for i := 0; i < len(lines); i++ {
+		if m := beginRe.FindStringSubmatch(lines[i]); m != nil && m[1] == id {
+			for j := i + 1; j < len(lines); j++ {
+				if e := endRe.FindStringSubmatch(lines[j]); e != nil && e[1] == id {
+					out := make([]string, 0, len(lines))
+					out = append(out, lines[:i]...)
+					out = append(out, lines[i+1:j]...)
+					out = append(out, lines[j+1:]...)
+					return strings.Join(out, "\n"), true
+				}
+			}
+			return s, false
+		}
+	}
+	return s, false
+}
+
 // FirstHeading returns the lowercased text of the first ATX heading of a
 // fragment; empty when the fragment has none.
 func FirstHeading(fragment string) string {

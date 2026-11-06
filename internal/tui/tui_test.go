@@ -268,6 +268,265 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 }
 
+// TestRemoveFlow removes an installed item through the list: the item is
+// marked for removal with d, the apply reports it removed, the target loses
+// the owned file and the directory penates created for it, the lock record
+// dies, and the list stops showing the item as installed (RFC 9.1).
+func TestRemoveFlow(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// Back to the list: the installed row takes the removal mark, and the
+	// apply removes it.
+	m = drive(t, m, "enter", "d")
+	lm := m.(*model)
+	if !lm.rows[0].installed || !lm.rows[0].remove {
+		t.Fatalf("row after d = %+v, want installed and marked", lm.rows[0])
+	}
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "removed  ex/good") {
+		t.Fatalf("removal apply:\n%s", rm.lastResults)
+	}
+	if strings.Contains(rm.lastResults, "excluded") {
+		t.Errorf("removal reported an exclusion:\n%s", rm.lastResults)
+	}
+
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("the owned file survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good")); !os.IsNotExist(err) {
+		t.Errorf("the emptied directory survived: %v", err)
+	}
+	lk, err := lock.NewStore(dataDir).Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lk.Items) != 0 {
+		t.Errorf("lock items after removal = %v", lk.Items)
+	}
+
+	// The list no longer offers the item as installed, and d on it does
+	// nothing.
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if lm.rows[0].installed || lm.rows[0].selected || lm.rows[0].remove {
+		t.Fatalf("row after removal = %+v", lm.rows[0])
+	}
+	m = drive(t, m, "d")
+	if m.(*model).rows[0].remove {
+		t.Error("d marked a row that is not installed")
+	}
+}
+
+// TestOrphanRemoval walks the frozen-orphan flow of RFC 9.2: an installed
+// item no kit provides anymore stays in the list as an orphan and removes
+// from the lock and the target like any other item.
+func TestOrphanRemoval(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	// The lock holds an item no kit provides: its kit is gone.
+	locks := lock.NewStore(dataDir)
+	lk, err := locks.Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk.SetItem("gone/old", &lock.Item{Version: "0.9.0"})
+	if err := locks.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, locks)
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter")
+	lm := m.(*model)
+	if len(lm.rows) != 3 {
+		t.Fatalf("rows = %v", lm.rows)
+	}
+	orphan := lm.rows[2]
+	if orphan.key != "gone/old" || !orphan.orphan || !orphan.installed {
+		t.Fatalf("orphan row = %+v", orphan)
+	}
+
+	// The orphan removes from the lock alone, without any kit (RFC 9.2).
+	m = drive(t, m, "down", "down", "d", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "removed  gone/old") {
+		t.Fatalf("orphan removal:\n%s", rm.lastResults)
+	}
+	fresh, err := locks.Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Items) != 0 {
+		t.Errorf("lock items after orphan removal = %v", fresh.Items)
+	}
+}
+
+// writeSectionKit writes a kit whose three items all contribute a section to
+// one shared file: two plain and one with a required templated variable.
+func writeSectionKit(t *testing.T, target string) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"kit.yaml":                "name: ex\ntarget_hint: " + target + "\nshared:\n  - AGENTS.md\n",
+		"items/one/item.yaml":     "id: one\nversion: 1.0.0\ndescription: One rules\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n",
+		"items/one/note.md":       "## One rules\n\none body\n",
+		"items/two/item.yaml":     "id: two\nversion: 1.0.0\ndescription: Two rules\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n",
+		"items/two/note.md":       "## Two rules\n\ntwo body\n",
+		"items/varitem/item.yaml": "id: varitem\nversion: 0.1.0\ndescription: Var rules\nvars:\n  - {id: p, prompt: pick a word, required: true}\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n    template: true\n",
+		"items/varitem/note.md":   "## Var rules\n\nfor {{p}}\n",
+	}
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestRemoveThenInstallSameFile pins the order of one apply: the removals run
+// first and the installs plan from the target as the removals leave it, so
+// removing an item and installing another into the same shared file cannot
+// bring the removed content back (RFC 9).
+func TestRemoveThenInstallSameFile(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeSectionKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// Mark the installed item for removal and select another writer of the
+	// same shared file: one apply must land the target on two's block alone.
+	m = drive(t, m, "enter", "down", "space", "up", "d", "a")
+	rm = m.(*model)
+	if rm.screen != screenResults {
+		t.Fatalf("screen = %v, want results", rm.screen)
+	}
+	if !strings.Contains(rm.lastResults, "removed  ex/one") || !strings.Contains(rm.lastResults, "applied  ex/two 1.0.0") {
+		t.Fatalf("removal and install:\n%s", rm.lastResults)
+	}
+
+	data, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md: %v", err)
+	}
+	want := "<!-- penates:begin ex/two -->\n## Two rules\n\ntwo body\n\n<!-- penates:end ex/two -->\n"
+	if string(data) != want {
+		t.Errorf("AGENTS.md =\n%q\nwant\n%q", data, want)
+	}
+	lk, err := lock.NewStore(dataDir).Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk.Items["ex/one"] != nil || lk.Items["ex/two"] == nil {
+		t.Errorf("lock items = %v", lk.Items)
+	}
+}
+
+// TestRemoveWithFormResume removes an item and installs one that asks for a
+// variable: the form interrupts after the removals, and the resumed apply
+// neither re-reports the removed item as excluded nor reinstalls it through
+// its held selection (RFC 9).
+func TestRemoveWithFormResume(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeSectionKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// The removal runs before the form interrupts: AGENTS.md is already gone.
+	m = drive(t, m, "enter", "down", "down", "space", "up", "up", "d", "a")
+	fm := m.(*model)
+	if fm.screen != screenForm {
+		t.Fatalf("screen after apply = %v, want form", fm.screen)
+	}
+	if _, err := os.Stat(filepath.Join(target, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("the removal did not run before the form: %v", err)
+	}
+
+	// The answer resumes the apply: the varitem installs into the target as
+	// the removal left it, with no word about the removed item.
+	m = drive(t, m, "answered", "enter")
+	rm = m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
+		t.Fatalf("resumed apply:\n%s", rm.lastResults)
+	}
+	if strings.Contains(rm.lastResults, "the item is not installed") || strings.Contains(rm.lastResults, "ex/one") {
+		t.Errorf("the removed item leaked into the results:\n%s", rm.lastResults)
+	}
+
+	data, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md: %v", err)
+	}
+	want := "<!-- penates:begin ex/varitem -->\n## Var rules\n\nfor answered\n\n<!-- penates:end ex/varitem -->\n"
+	if string(data) != want {
+		t.Errorf("AGENTS.md =\n%q\nwant\n%q", data, want)
+	}
+	lk, err := lock.NewStore(dataDir).Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk.Items["ex/one"] != nil || lk.Items["ex/varitem"] == nil {
+		t.Errorf("lock items = %v", lk.Items)
+	}
+
+	// The list drops every mark of the removed row.
+	m = drive(t, m, "enter")
+	lm := m.(*model)
+	if lm.rows[0].installed || lm.rows[0].selected || lm.rows[0].remove {
+		t.Errorf("row of the removed item = %+v", lm.rows[0])
+	}
+}
+
 // bumpKit rewrites the good item's version and skill content in the fixture
 // kit, the way a kit author publishes a new version.
 func bumpKit(t *testing.T, kitDir, version, skill string) {

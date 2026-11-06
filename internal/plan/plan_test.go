@@ -1451,3 +1451,391 @@ func TestPlanJSONUpdates(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildRemoval walks the RFC 9.1 removal table for every contribution
+// kind: an owned file deleted unchanged and kept plus reported when modified,
+// an owned block deleted with its markers or kept without them, a json value
+// removed when its item is the last owner, the shared files penates created
+// that a removal leaves without content, and the orphan flow of 9.2 — an
+// item of a kit that is gone is planned from the lock and the snapshot alone.
+// The directory rows of the table belong to apply, which owns the deletions.
+func TestBuildRemoval(t *testing.T) {
+	const frag = "## House rules\n\nbody\n"
+	blockText := markdown.BlockText("k/one", frag)
+	fragHash := hashOf([]byte(frag))
+	darkHash := hashOf([]byte(`"dark"`))
+	bHash := hashOf([]byte(`"b"`))
+	fileHash := hashOf([]byte("installed\n"))
+	userHash := hashOf([]byte("user changed\n"))
+	tests := map[string]struct {
+		lockItems map[string]*lock.Item
+		created   []string
+		files     map[string]target.FileState
+		shared    map[string]target.SharedFileState
+		remove    []string
+		want      func(*testing.T, *Plan)
+	}{
+		"unchanged owned file is deleted": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.2.0",
+				Files:   map[string]string{"skills/one/SKILL.md": fileHash},
+			}},
+			files:  map[string]target.FileState{"skills/one/SKILL.md": {Exists: true, Hash: fileHash}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || ip.Version != "1.2.0" || ip.ItemID != "one" {
+					t.Fatalf("item = %+v", ip)
+				}
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				if a.Kind != ActionRemove || a.To != "skills/one/SKILL.md" || a.Reason != "the owned file is removed unchanged" {
+					t.Errorf("action = %+v", a)
+				}
+				if len(ip.Reports) != 0 {
+					t.Errorf("reports = %v, want none", ip.Reports)
+				}
+			},
+		},
+		"modified owned file is kept and reported": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				Files:   map[string]string{"skills/one/SKILL.md": fileHash},
+			}},
+			files:  map[string]target.FileState{"skills/one/SKILL.md": {Exists: true, Hash: userHash}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 {
+					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+				}
+				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], "kept skills/one/SKILL.md: modified by the user") {
+					t.Errorf("reports = %v", ip.Reports)
+				}
+			},
+		},
+		"a file the user added beside the owned ones is never planned": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				Files:   map[string]string{"skills/one/SKILL.md": fileHash},
+			}},
+			files: map[string]target.FileState{
+				"skills/one/SKILL.md":  {Exists: true, Hash: fileHash},
+				"skills/one/extra.md":  {Exists: true, Hash: userHash},
+				"skills/one/deeper.md": {Exists: true, Hash: userHash},
+			},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 || ip.Actions[0].To != "skills/one/SKILL.md" {
+					t.Fatalf("actions = %v, want only the owned file", ip.Actions)
+				}
+				for _, note := range ip.Reports {
+					if strings.Contains(note, "extra.md") || strings.Contains(note, "deeper.md") {
+						t.Errorf("the user's file reached the plan: %q", note)
+					}
+				}
+			},
+		},
+		"owned file that is gone already dies silently": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				Files:   map[string]string{"skills/one/SKILL.md": fileHash},
+			}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"unchanged owned block is deleted with its markers": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version:  "1.0.0",
+				Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+			}},
+			created: []string{"AGENTS.md"},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: "# Notes\n\n" + blockText + "\n",
+				Blocks:  map[string]string{"k/one": fragHash},
+			}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				// The file penates created keeps its other content, so it is
+				// rewritten rather than deleted (RFC 9.1).
+				if a.Kind != ActionSectionRemove || a.To != "AGENTS.md" || a.Block != "k/one" {
+					t.Errorf("action = %+v", a)
+				}
+				if got := string(a.Content); got != "# Notes\n" {
+					t.Errorf("content = %q, want the block gone with its blank line", got)
+				}
+			},
+		},
+		"modified block keeps its content without markers and is reported": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version:  "1.0.0",
+				Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+			}},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: "# Notes\n\n<!-- penates:begin k/one -->\n## House rules\n\nuser body\n<!-- penates:end k/one -->\n\ntail\n",
+				Blocks:  map[string]string{"k/one": hashOf([]byte("## House rules\n\nuser body"))},
+			}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				if a.Kind != ActionSectionRemove {
+					t.Errorf("kind = %q", a.Kind)
+				}
+				if got := string(a.Content); got != "# Notes\n\n## House rules\n\nuser body\n\ntail\n" {
+					t.Errorf("content =\n%q\nwant the block text kept without its markers", got)
+				}
+				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], "kept the block content in AGENTS.md: modified by the user") {
+					t.Errorf("reports = %v", ip.Reports)
+				}
+			},
+		},
+		"a block the user deleted already plans nothing": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version:  "1.0.0",
+				Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+			}},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {Exists: true, Content: "# Notes\n"}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"a created shared file left without content is deleted": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version:  "1.0.0",
+				Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+			}},
+			created: []string{"AGENTS.md"},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: blockText + "\n",
+				Blocks:  map[string]string{"k/one": fragHash},
+			}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				if a.Kind != ActionRemove || a.To != "AGENTS.md" || a.Reason != "the shared file penates created is left without content" {
+					t.Errorf("action = %+v", a)
+				}
+			},
+		},
+		"a shared file the user wrote survives empty": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version:  "1.0.0",
+				Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+			}},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: blockText + "\n",
+				Blocks:  map[string]string{"k/one": fragHash},
+			}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				a := p.Items[0].Actions[0]
+				// The file is not penates's: it is rewritten without the
+				// block, not deleted, however empty that leaves it.
+				if a.Kind != ActionSectionRemove || string(a.Content) != "" {
+					t.Errorf("action = %+v content %q", a, a.Content)
+				}
+			},
+		},
+		"json value of the last owner is removed": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark", "editor": "vim"}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 1 {
+					t.Fatalf("actions = %v", ip.Actions)
+				}
+				a := ip.Actions[0]
+				if a.Kind != ActionJSONRemove || a.To != "config.jsonc" {
+					t.Errorf("action = %+v", a)
+				}
+				if got := string(a.Content); strings.Contains(got, "theme") || !strings.Contains(got, `"editor": "vim"`) {
+					t.Errorf("content =\n%s\nwant the value gone and the rest kept", got)
+				}
+			},
+		},
+		"an array element is removed by the value it holds": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/tags", Hash: bHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"tags": ["a", "b"]}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				a := p.Items[0].Actions[0]
+				got := string(a.Content)
+				if strings.Contains(got, `"b"`) || !strings.Contains(got, `"a"`) {
+					t.Errorf("content =\n%s\nwant only the co-owned element left", got)
+				}
+			},
+		},
+		"a co-owned value stays while the record dies alone": {
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+				"other/two": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+			},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark"}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"a modified json value is kept and reported": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "light"}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if len(ip.Actions) != 0 {
+					t.Fatalf("actions = %v, want none", ip.Actions)
+				}
+				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/theme" in config.jsonc: modified by the user`) {
+					t.Errorf("reports = %v", ip.Reports)
+				}
+			},
+		},
+		"a json value that is gone already plans nothing": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+			}},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"editor": "vim"}`}},
+			remove: []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"a created json file left without values is deleted": {
+			lockItems: map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+			}},
+			created: []string{"config.jsonc"},
+			shared:  map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark"}`}},
+			remove:  []string{"k/one"},
+			want: func(t *testing.T, p *Plan) {
+				a := p.Items[0].Actions[0]
+				if a.Kind != ActionRemove || a.To != "config.jsonc" || a.Reason != "the shared file penates created is left without content" {
+					t.Errorf("action = %+v", a)
+				}
+			},
+		},
+		"an item that is not installed is excluded": {
+			remove: []string{"k/gone"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "the item is not installed") {
+					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+			},
+		},
+		"an orphan of a kit that is gone removes from the lock alone": {
+			// No kits at all: the item is planned by its lock record and the
+			// snapshot, exactly like an item whose kit is available (RFC 9.2).
+			lockItems: map[string]*lock.Item{"gone/old": {
+				Version: "0.9.0",
+				Files:   map[string]string{"skills/old/SKILL.md": fileHash},
+			}},
+			files:  map[string]target.FileState{"skills/old/SKILL.md": {Exists: true, Hash: fileHash}},
+			remove: []string{"gone/old"},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusRemove || len(ip.Actions) != 1 || ip.Actions[0].Kind != ActionRemove {
+					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"several items remove in key order": {
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version: "1.0.0",
+					Files:   map[string]string{"skills/one/SKILL.md": fileHash},
+				},
+				"k/two": {
+					Version: "1.0.0",
+					Files:   map[string]string{"skills/two/SKILL.md": fileHash},
+				},
+			},
+			files: map[string]target.FileState{
+				"skills/one/SKILL.md": {Exists: true, Hash: userHash},
+				"skills/two/SKILL.md": {Exists: true, Hash: fileHash},
+			},
+			remove: []string{"k/two", "k/one"},
+			want: func(t *testing.T, p *Plan) {
+				if len(p.Items) != 2 || p.Items[0].Key != "k/one" || p.Items[1].Key != "k/two" {
+					t.Fatalf("items = %v", p.Items)
+				}
+				if len(p.Items[0].Actions) != 0 || len(p.Items[1].Actions) != 1 {
+					t.Errorf("actions = %v, %v", p.Items[0].Actions, p.Items[1].Actions)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			lk := newLock(tc.lockItems)
+			lk.CreatedSharedFiles = tc.created
+			snap := sharedOf(tc.shared)
+			for path, state := range tc.files {
+				snap.Files[path] = state
+			}
+			remove := map[string]bool{}
+			for _, key := range tc.remove {
+				remove[key] = true
+			}
+			p := BuildRemoval(Input{Lock: lk, Snapshot: snap, Remove: remove})
+			if len(p.Items) != len(tc.remove) {
+				t.Fatalf("items = %d, want %d", len(p.Items), len(tc.remove))
+			}
+			tc.want(t, p)
+		})
+	}
+}

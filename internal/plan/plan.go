@@ -30,6 +30,11 @@ const (
 	// StatusNoAction means the item needs nothing: it is installed at the same
 	// version already.
 	StatusNoAction ItemStatus = "no-action"
+	// StatusRemove means the item is removed from the target: its actions
+	// delete files and rewrite shared files without the item's content, and
+	// apply drops the item's lock record (RFC 9). Only BuildRemoval produces
+	// it.
+	StatusRemove ItemStatus = "remove"
 	// StatusError means the item is excluded from the plan; its reasons say why.
 	StatusError ItemStatus = "error"
 )
@@ -67,6 +72,10 @@ type ItemPlan struct {
 	// one (RFC 8). The plan is complete, but the client shows it as a
 	// downgrade and never selects it by default.
 	Downgrade bool
+	// Reports are user-facing notes of a removal plan (RFC 9.1): content the
+	// item does not take away — a file or a value the user modified, a block
+	// whose content is kept without its markers.
+	Reports []string
 }
 
 // ActionKind distinguishes what an action writes: a whole file or a managed
@@ -82,6 +91,18 @@ const (
 	// ActionJSON writes its content as the whole shared file, with the
 	// fragment's values inserted by RFC 6901 pointer.
 	ActionJSON ActionKind = "json"
+	// ActionRemove deletes the file at To: an owned file removed unchanged, or
+	// a shared file penates created that is left without content (RFC 9.1).
+	ActionRemove ActionKind = "remove"
+	// ActionSectionRemove writes its content as the whole shared file with the
+	// item's block deleted, or with its markers stripped when the user
+	// modified the block (RFC 9.1). The item's section record dies with its
+	// lock record.
+	ActionSectionRemove ActionKind = "section-remove"
+	// ActionJSONRemove writes its content as the whole shared file with the
+	// values the item last-owned removed (RFC 9.1). Values another item
+	// co-owns or the user modified stay.
+	ActionJSONRemove ActionKind = "json-remove"
 )
 
 // Location is one JSON location an item owns inside a shared JSON file
@@ -133,6 +154,17 @@ func (p *Plan) Installable() []*ItemPlan {
 	return out
 }
 
+// Removals returns the item plans that remove their items, in plan order.
+func (p *Plan) Removals() []*ItemPlan {
+	var out []*ItemPlan
+	for _, ip := range p.Items {
+		if ip.Status == StatusRemove {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
 // Input carries everything planning needs. None of it is read further here: the
 // planner is pure and touches no file system.
 type Input struct {
@@ -160,6 +192,11 @@ type Input struct {
 	// content even where the user modified it. A reset is never part of a
 	// regular update plan.
 	Reset map[string]bool
+	// Remove names the installed items the user asked to remove (RFC 9). Only
+	// BuildRemoval reads it; the removal is planned from the lock and the
+	// snapshot alone, so orphans and items of unavailable kits remove like
+	// any other item (9.2).
+	Remove map[string]bool
 }
 
 // MissingVars returns the required variables of the selected items that
@@ -285,6 +322,257 @@ func Build(in Input) *Plan {
 		p.Items = append(p.Items, planItem(key, index, in, claims, shared))
 	}
 	return p
+}
+
+// BuildRemoval plans the removal of the items named in Input.Remove (RFC 9).
+// It reads the lock and the snapshot only: an item is removed by what the
+// lock records, so orphans and items of unavailable kits remove exactly like
+// the rest (9.2). Content the user modified stays in the target and reaches
+// the client as a report; unchanged owned content goes away, and a shared
+// file penates created that is left without content is deleted.
+func BuildRemoval(in Input) *Plan {
+	keys := make([]string, 0, len(in.Remove))
+	for key, remove := range in.Remove {
+		if remove {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+
+	p := &Plan{}
+	for _, key := range keys {
+		p.Items = append(p.Items, planRemoval(key, in))
+	}
+	return p
+}
+
+// planRemoval plans one item's removal from its lock record. Files, sections,
+// and json values that stand as installed are taken away; the ones the user
+// modified stay and are reported. A created shared file the removal leaves
+// without content is deleted with it (RFC 9.1).
+func planRemoval(key string, in Input) *ItemPlan {
+	ip := &ItemPlan{Key: key}
+	kitName, itemID, split := strings.Cut(key, "/")
+	if split {
+		ip.KitName, ip.ItemID = kitName, itemID
+	}
+	rec, installed := in.Lock.Items[key]
+	if !installed {
+		ip.Status = StatusError
+		ip.Reasons = []string{"the item is not installed"}
+		return ip
+	}
+	ip.Version = rec.Version
+	ip.Status = StatusRemove
+
+	// Composed shared-file contents, so a file both a section and a json
+	// contribution of the item touch is rewritten once, in order.
+	pending := map[string]string{}
+
+	for _, path := range sortedKeys(rec.Files) {
+		st := in.Snapshot.File(path)
+		if !st.Exists {
+			continue // the file is gone already; the record dies with the item
+		}
+		if st.Hash == rec.Files[path] {
+			ip.Actions = append(ip.Actions, Action{
+				Kind:   ActionRemove,
+				To:     path,
+				Reason: "the owned file is removed unchanged",
+			})
+			continue
+		}
+		ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s: modified by the user", path))
+	}
+
+	for _, file := range sortedKeys(rec.Sections) {
+		sec := rec.Sections[file]
+		composed, action := removalSection(ip, file, sec, in)
+		if action != nil {
+			ip.Actions = append(ip.Actions, *action)
+		}
+		if composed != nil {
+			pending[file] = string(composed)
+		}
+	}
+
+	for _, file := range sortedKeys(rec.JSON) {
+		removalJSON(ip, key, file, rec.JSON[file], in, pending)
+	}
+
+	return ip
+}
+
+// removalSection composes the shared file without the item's block: a block
+// that stands as installed loses its markers with the content, a modified one
+// keeps its content as ordinary text and is reported. A created shared file
+// left without content is deleted instead of rewritten. composed is the new
+// file content when an action rewrites it.
+func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input) (composed []byte, action *Action) {
+	st := in.Snapshot.SharedFile(file)
+	if !st.Exists || st.IsDir {
+		return nil, nil
+	}
+	present := false
+	for _, b := range markdown.Parse(st.Content).Blocks {
+		if b.ID == sec.Block {
+			present = true
+			break
+		}
+	}
+	if !present {
+		return nil, nil // the user deleted the block already
+	}
+
+	var text string
+	if st.Blocks[sec.Block] == sec.Hash {
+		text, _ = markdown.Remove(st.Content, sec.Block)
+	} else {
+		text, _ = markdown.Strip(st.Content, sec.Block)
+		ip.Reports = append(ip.Reports, fmt.Sprintf("kept the block content in %s: modified by the user", file))
+	}
+	if in.Lock.CreatedShared(file) && strings.TrimSpace(text) == "" {
+		return nil, &Action{
+			Kind:   ActionRemove,
+			To:     file,
+			Reason: "the shared file penates created is left without content",
+		}
+	}
+	return []byte(text), &Action{
+		Kind:    ActionSectionRemove,
+		To:      file,
+		Content: []byte(text),
+		Block:   sec.Block,
+		Reason:  "the item's block is removed from the shared file",
+	}
+}
+
+// removalJSON composes the shared file without the values the item
+// last-owns: a value another item co-owns stays, a modified one stays and is
+// reported. The document is read from the file as earlier removal actions of
+// this item leave it.
+func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input, pending map[string]string) {
+	st := in.Snapshot.SharedFile(file)
+	if !st.Exists || st.IsDir {
+		return
+	}
+	base, ok := pending[file]
+	if !ok {
+		base = st.Content
+	}
+	doc, err := jsonc.Parse([]byte(base))
+	if err != nil {
+		ip.Reports = append(ip.Reports, fmt.Sprintf("kept the values in %s: it no longer holds a JSON document", file))
+		return
+	}
+
+	sorted := append([]lock.Location(nil), locs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Pointer < sorted[j].Pointer })
+	changed := false
+	for _, loc := range sorted {
+		min, found, err := doc.Get(loc.Pointer)
+		if err != nil || !found {
+			continue // the value is gone already
+		}
+		// The lock records array elements under the pointer of their array
+		// (RFC 7.4): such a value stands while the array holds an element
+		// with the recorded hash. A member's value stands at the pointer
+		// itself and is compared by its hash.
+		element := min[0] == '[' && hashOf(min) != loc.Hash
+		present := hashOf(min) == loc.Hash
+		if element {
+			elems, _, err := doc.Elements(loc.Pointer)
+			if err != nil {
+				continue // not an array after all; nothing of the item's stands there
+			}
+			for _, e := range elems {
+				if hashOf(e) == loc.Hash {
+					present = true
+					break
+				}
+			}
+		}
+		if !present {
+			if element {
+				continue // the element is gone from the array already
+			}
+			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: modified by the user", quoteLoc(loc.Pointer), file))
+			continue
+		}
+		if owners := in.Lock.JSONOwners(file, loc.Pointer, loc.Hash); len(owners) > 1 {
+			continue // another item still owns the value; the record dies alone
+		}
+		if err := removeJSONValue(doc, loc); err != nil {
+			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: %v", quoteLoc(loc.Pointer), file, err))
+			continue
+		}
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	composed := doc.Bytes()
+	if in.Lock.CreatedShared(file) && jsonWithoutContent(composed) {
+		ip.Actions = append(ip.Actions, Action{
+			Kind:   ActionRemove,
+			To:     file,
+			Reason: "the shared file penates created is left without content",
+		})
+		return
+	}
+	ip.Actions = append(ip.Actions, Action{
+		Kind:    ActionJSONRemove,
+		To:      file,
+		Content: composed,
+		Reason:  "the item's values are removed from the shared file",
+	})
+}
+
+// removeJSONValue deletes one owned location: a member at its own pointer, an
+// array element at the index its value holds in the array now, since the lock
+// records elements as (array pointer, value hash) pairs.
+func removeJSONValue(doc *jsonc.Doc, loc lock.Location) error {
+	if min, _, err := doc.Get(loc.Pointer); err == nil && hashOf(min) == loc.Hash {
+		return doc.Remove(loc.Pointer)
+	}
+	elems, found, err := doc.Elements(loc.Pointer)
+	if err != nil || !found {
+		return fmt.Errorf("the value's array is not in the file")
+	}
+	for i, e := range elems {
+		if hashOf(e) == loc.Hash {
+			return doc.Remove(loc.Pointer + "/" + strconv.Itoa(i))
+		}
+	}
+	return fmt.Errorf("the value is not in the file's array")
+}
+
+// jsonWithoutContent reports whether the composed document holds no values at
+// all: an empty object or array, or nothing.
+func jsonWithoutContent(data []byte) bool {
+	doc, err := jsonc.Parse(data)
+	if err != nil {
+		return false
+	}
+	min, found, err := doc.Get("")
+	if err != nil || !found {
+		return true
+	}
+	switch string(min) {
+	case "{}", "[]":
+		return true
+	}
+	return false
+}
+
+// sortedKeys lists a string-keyed map's keys, sorted.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // claimSet records which selected items write which target paths, so that
@@ -459,16 +747,6 @@ func (c *claimSet) jsonConflict(file string, key string, leaves map[string]strin
 		}
 	}
 	return "", nil
-}
-
-// sortedKeys lists the keys of a set map, sorted.
-func sortedKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // sharedFiles carries the shared-file contents as the planner composes them:

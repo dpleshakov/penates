@@ -94,8 +94,10 @@ type row struct {
 	description      string
 	installed        bool
 	installedVersion string
+	orphan           bool
 	selected         bool
 	reset            bool
+	remove           bool
 }
 
 // formField is one missing required variable the variable form asks for.
@@ -248,6 +250,12 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.rows[m.cursor].reset = true
 			}
 		}
+	case "d":
+		// Removal is only ever a user request (RFC 9): it toggles on the
+		// installed row under the cursor and applies once.
+		if len(m.rows) > 0 && m.rows[m.cursor].installed {
+			m.rows[m.cursor].remove = !m.rows[m.cursor].remove
+		}
 	case "a":
 		m.apply()
 	}
@@ -305,6 +313,7 @@ func (m *model) enterList(target string) {
 	}
 
 	m.rows = nil
+	covered := map[string]bool{}
 	for _, name := range st.KitsForTarget(target) {
 		k, err := kit.Load(st.Kits[name])
 		if err != nil {
@@ -314,6 +323,7 @@ func (m *model) enterList(target string) {
 		m.kits = append(m.kits, k)
 		for _, it := range k.Items {
 			key := kit.ItemKey(k.Name, it.ID)
+			covered[key] = true
 			r := row{
 				key:         key,
 				version:     it.Version,
@@ -328,12 +338,34 @@ func (m *model) enterList(target string) {
 			m.rows = append(m.rows, r)
 		}
 	}
+	// Installed items no kit provides anymore stay managed and frozen: the
+	// list shows them so the user can remove them (RFC 9.2).
+	keys := make([]string, 0, len(lk.Items))
+	for key := range lk.Items {
+		if !covered[key] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		rec := lk.Items[key]
+		m.rows = append(m.rows, row{
+			key:              key,
+			version:          rec.Version,
+			description:      "no longer provided by any registered kit",
+			installed:        true,
+			installedVersion: rec.Version,
+			orphan:           true,
+			selected:         selected[key],
+		})
+	}
 }
 
-// apply plans and installs the current selection, records the selection in the
-// state, and shows the results.
+// apply plans and installs the current selection, removes the items marked
+// for removal, records the selection in the state, and shows the results.
 func (m *model) apply() {
 	var selection []string
+	var removals []string
 	var paths []string
 	seen := map[string]bool{}
 	sharedSeen := map[string]bool{}
@@ -347,6 +379,12 @@ func (m *model) apply() {
 		}
 	}
 	for _, r := range m.rows {
+		if r.remove && r.installed {
+			removals = append(removals, r.key)
+			// A removal wins over a held selection: the item does not join
+			// the installs of the same apply (RFC 9).
+			continue
+		}
 		if !r.selected {
 			continue
 		}
@@ -371,21 +409,38 @@ func (m *model) apply() {
 	}
 	sort.Strings(paths)
 
-	// The form collects the required variables neither the lock nor this
-	// session's answers provide; apply resumes once they are in (RFC 6.4,
-	// 10.2). A required variable answered with an empty string stays missing,
-	// so the form asks for it again.
-	if missing := plan.MissingVars(m.kits, selection, m.lk, m.answers); len(missing) > 0 {
-		m.formFields = nil
-		for _, key := range selection {
-			for _, v := range missing[key] {
-				m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
+	// A removal is planned from the lock: its files and shared files join the
+	// snapshot, for the items of kits that are gone as well (RFC 9.2).
+	for _, key := range removals {
+		rec := m.lk.Items[key]
+		if rec == nil {
+			continue
+		}
+		for path := range rec.Files {
+			if !seen[path] {
+				seen[path] = true
+				paths = append(paths, path)
 			}
 		}
-		m.formCursor = 0
-		m.input = textinput.New()
-		m.input.Focus()
-		m.screen = screenForm
+		for file := range rec.Sections {
+			if !sharedSeen[file] {
+				sharedSeen[file] = true
+				sharedPaths = append(sharedPaths, file)
+			}
+		}
+		for file := range rec.JSON {
+			if !sharedSeen[file] {
+				sharedSeen[file] = true
+				sharedPaths = append(sharedPaths, file)
+			}
+		}
+	}
+	sort.Strings(paths)
+	sort.Strings(sharedPaths)
+
+	if len(selection) == 0 && len(removals) == 0 {
+		m.lastResults = "nothing selected\n"
+		m.screen = screenResults
 		return
 	}
 
@@ -395,53 +450,140 @@ func (m *model) apply() {
 		m.screen = screenResults
 		return
 	}
-	sources, err := kit.ReadSources(m.kits, selection)
-	if err != nil {
-		m.lastResults = "apply failed: " + err.Error()
-		m.screen = screenResults
-		return
-	}
-	p := plan.Build(plan.Input{
-		Kits:      m.kits,
-		Selection: selection,
-		Lock:      m.lk,
-		Snapshot:  snap,
-		Sources:   sources,
-		Answers:   m.answers,
-		Reset:     m.resets,
-	})
-	m.resets = nil
-	results := apply.Apply(m.target, p, m.lk, m.app.Locks)
-	errors := map[string]string{}
-	for _, r := range results {
-		if r.Err != nil {
-			errors[r.Key] = r.Err.Error()
+
+	var b strings.Builder
+
+	// The removals go first: they shrink what the installs write into.
+	if len(removals) > 0 {
+		remove := map[string]bool{}
+		for _, key := range removals {
+			remove[key] = true
+		}
+		rp := plan.BuildRemoval(plan.Input{Lock: m.lk, Snapshot: snap, Remove: remove})
+		results := apply.Remove(m.target, rp, m.lk, m.app.Locks)
+		errors := map[string]string{}
+		removed := map[string]bool{}
+		for _, r := range results {
+			if r.Err != nil {
+				errors[r.Key] = r.Err.Error()
+				continue
+			}
+			removed[r.Key] = true
+		}
+		// A removed row drops both of its marks: a form-resumed apply
+		// collects no removal for it again, and does not reinstall the item
+		// through its held selection (RFC 9).
+		for i := range m.rows {
+			if removed[m.rows[i].key] {
+				m.rows[i].remove = false
+				m.rows[i].selected = false
+			}
+		}
+		for _, ip := range rp.Items {
+			switch ip.Status {
+			case plan.StatusRemove:
+				if err := errors[ip.Key]; err != "" {
+					fmt.Fprintf(&b, "failed   %s: %s\n", ip.Key, err)
+				} else {
+					fmt.Fprintf(&b, "removed  %s\n", ip.Key)
+				}
+			case plan.StatusError:
+				fmt.Fprintf(&b, "excluded %s:\n", ip.Key)
+				for _, reason := range ip.Reasons {
+					fmt.Fprintf(&b, "         %s\n", reason)
+				}
+			}
+			for _, report := range ip.Reports {
+				fmt.Fprintf(&b, "         %s\n", report)
+			}
+		}
+		if lk, err := m.app.Locks.Load(m.target); err == nil {
+			m.lk = lk
+		}
+		// The removals rewrote and deleted what the snapshot observed: the
+		// installs plan from the target as the removals leave it, so a
+		// removed item's content cannot rise again in a shared file (RFC 9).
+		if len(selection) > 0 {
+			snap, err = target.Read(m.target, paths, sharedPaths)
+			if err != nil {
+				m.lastResults = "apply failed: " + err.Error()
+				m.screen = screenResults
+				return
+			}
 		}
 	}
 
-	var b strings.Builder
-	for _, ip := range p.Items {
-		switch ip.Status {
-		case plan.StatusInstall:
-			if err := errors[ip.Key]; err != "" {
-				fmt.Fprintf(&b, "failed   %s: %s\n", ip.Key, err)
-			} else {
-				fmt.Fprintf(&b, "applied  %s %s\n", ip.Key, ip.Version)
+	if len(selection) > 0 {
+		// The form collects the required variables neither the lock nor this
+		// session's answers provide; apply resumes once they are in (RFC 6.4,
+		// 10.2). A required variable answered with an empty string stays
+		// missing, so the form asks for it again.
+		if missing := plan.MissingVars(m.kits, selection, m.lk, m.answers); len(missing) > 0 {
+			m.formFields = nil
+			for _, key := range selection {
+				for _, v := range missing[key] {
+					m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
+				}
 			}
-		case plan.StatusNoAction:
-			fmt.Fprintf(&b, "kept     %s: %s\n", ip.Key, ip.Reason)
-		case plan.StatusError:
-			fmt.Fprintf(&b, "excluded %s:\n", ip.Key)
-			for _, reason := range ip.Reasons {
-				fmt.Fprintf(&b, "         %s\n", reason)
+			m.formCursor = 0
+			m.input = textinput.New()
+			m.input.Focus()
+			m.screen = screenForm
+			return
+		}
+
+		sources, err := kit.ReadSources(m.kits, selection)
+		if err != nil {
+			m.lastResults = "apply failed: " + err.Error()
+			m.screen = screenResults
+			return
+		}
+		p := plan.Build(plan.Input{
+			Kits:      m.kits,
+			Selection: selection,
+			Lock:      m.lk,
+			Snapshot:  snap,
+			Sources:   sources,
+			Answers:   m.answers,
+			Reset:     m.resets,
+		})
+		m.resets = nil
+		results := apply.Apply(m.target, p, m.lk, m.app.Locks)
+		errors := map[string]string{}
+		for _, r := range results {
+			if r.Err != nil {
+				errors[r.Key] = r.Err.Error()
 			}
 		}
+
+		for _, ip := range p.Items {
+			switch ip.Status {
+			case plan.StatusInstall:
+				if err := errors[ip.Key]; err != "" {
+					fmt.Fprintf(&b, "failed   %s: %s\n", ip.Key, err)
+				} else {
+					fmt.Fprintf(&b, "applied  %s %s\n", ip.Key, ip.Version)
+				}
+			case plan.StatusNoAction:
+				fmt.Fprintf(&b, "kept     %s: %s\n", ip.Key, ip.Reason)
+			case plan.StatusError:
+				fmt.Fprintf(&b, "excluded %s:\n", ip.Key)
+				for _, reason := range ip.Reasons {
+					fmt.Fprintf(&b, "         %s\n", reason)
+				}
+			}
+		}
+
 	}
+
 	if b.Len() == 0 {
 		b.WriteString("nothing selected\n")
 	}
 	m.lastResults = b.String()
 
+	// The selection as applied — the removal rows dropped out of it —
+	// replaces the remembered one, so a removed item is not offered selected
+	// again (RFC 9).
 	if st, err := m.app.State.Load(); err == nil {
 		st.SetSelection(m.target, selection)
 		if err := m.app.State.Save(st); err != nil {
@@ -507,15 +649,20 @@ func (m *model) View() string {
 				cursor = ">"
 			}
 			installed := ""
-			if r.installed {
+			if r.orphan {
+				installed += styleDim.Render(" orphan")
+			} else if r.installed {
 				installed = styleDim.Render(" installed")
 			}
 			if r.reset {
 				installed += styleDim.Render(" reset")
 			}
+			if r.remove {
+				installed += styleErr.Render(" remove")
+			}
 			fmt.Fprintf(&b, "%s[%s] %-24s %-16s %s%s\n", cursor, mark, r.key, m.versionLabel(r), r.description, installed)
 		}
-		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    i  installed    r  reset    a  apply    q  quit"))
+		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    r  reset    d  remove    a  apply    q  quit"))
 	case screenForm:
 		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
 		fmt.Fprintf(&b, "required variables:\n\n")

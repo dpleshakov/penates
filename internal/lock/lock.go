@@ -224,6 +224,18 @@ func (l *Lock) CreatedDir(itemKey, dir string) bool {
 	return false
 }
 
+// CreatedShared reports whether penates recorded the shared file as one it
+// created (RFC 6.7): such a file is deleted when a removal leaves it without
+// content (RFC 9.1).
+func (l *Lock) CreatedShared(path string) bool {
+	for _, el := range l.CreatedSharedFiles {
+		if el == path {
+			return true
+		}
+	}
+	return false
+}
+
 // SetItem records a fully applied item, replacing any earlier record of it.
 func (l *Lock) SetItem(itemKey string, item *Item) {
 	l.Items[itemKey] = item

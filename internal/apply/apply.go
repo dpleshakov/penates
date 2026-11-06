@@ -120,6 +120,102 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	return nil
 }
 
+// Remove executes every removal item of a plan into the target root (RFC 9).
+// Content actions are staged like writes and renamed into place only after
+// the whole item is staged, and the deletions happen after the staging, so a
+// failing item leaves the target as it was. On success the item's lock record
+// dies, the shared files deleted here leave the created list, and the
+// directories penates created for the item are removed while they are empty.
+func Remove(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result {
+	var results []Result
+	for _, ip := range p.Removals() {
+		if err := removeItem(root, ip, lk, store); err != nil {
+			results = append(results, Result{Key: ip.Key, Err: err})
+			continue
+		}
+		results = append(results, Result{Key: ip.Key})
+	}
+	return results
+}
+
+func removeItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
+	rec := lk.Items[ip.Key]
+	if rec == nil {
+		return fmt.Errorf("remove %s: the item is not recorded in the lock", ip.Key)
+	}
+	var staged []string
+	fail := func(err error) error {
+		cleanup(root, staged, nil)
+		return err
+	}
+
+	type write struct {
+		to  string
+		tmp string
+	}
+	var writes []write
+	var deletes []string
+	for _, a := range ip.Actions {
+		dst := filepath.Join(root, filepath.FromSlash(a.To))
+		switch a.Kind {
+		case plan.ActionRemove:
+			deletes = append(deletes, dst)
+		case plan.ActionSectionRemove, plan.ActionJSONRemove:
+			tmp, err := stage(dst, a.Content)
+			if err != nil {
+				return fail(fmt.Errorf("stage %s: %w", a.To, err))
+			}
+			staged = append(staged, tmp)
+			writes = append(writes, write{to: dst, tmp: tmp})
+		default:
+			return fail(fmt.Errorf("remove %s: the action kind %q is not a removal", ip.Key, a.Kind))
+		}
+	}
+
+	// Everything is staged: move the files into place, then take the deletions.
+	for _, w := range writes {
+		if err := os.Rename(w.tmp, w.to); err != nil {
+			return fail(fmt.Errorf("write %s: %w", w.to, err))
+		}
+	}
+	for _, dst := range deletes {
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return fail(fmt.Errorf("delete %s: %w", dst, err))
+		}
+	}
+
+	// Directories penates created for the item go while they are empty,
+	// deepest first (RFC 9.1); a directory that holds user files stays.
+	dirs := append([]string(nil), rec.DirsCreated...)
+	sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
+	for _, dir := range dirs {
+		os.Remove(filepath.Join(root, filepath.FromSlash(dir)))
+	}
+
+	// A shared file deleted here also leaves the created list.
+	for _, a := range ip.Actions {
+		if a.Kind == plan.ActionRemove {
+			lk.CreatedSharedFiles = withoutPath(lk.CreatedSharedFiles, a.To)
+		}
+	}
+	lk.RemoveItem(ip.Key)
+	if err := store.Save(lk); err != nil {
+		return fail(fmt.Errorf("save lock: %w", err))
+	}
+	return nil
+}
+
+// withoutPath drops one path from a list, keeping the order of the rest.
+func withoutPath(list []string, p string) []string {
+	var out []string
+	for _, el := range list {
+		if el != p {
+			out = append(out, el)
+		}
+	}
+	return out
+}
+
 // answersOf normalizes the plan's answers for the lock: an item with no
 // variables records an empty, not a null, map (RFC 6.4).
 func answersOf(ip *plan.ItemPlan) map[string]string {
@@ -129,7 +225,8 @@ func answersOf(ip *plan.ItemPlan) map[string]string {
 	return ip.Answers
 }
 
-// jsonLocations converts the plan's owned locations into their lock form. An// item may own locations in a file it did not write: values found satisfied
+// jsonLocations converts the plan's owned locations into their lock form. An
+// item may own locations in a file it did not write: values found satisfied
 // and made co-owned bring no action, yet the lock records them (RFC 7.4).
 func jsonLocations(locs map[string][]plan.Location) map[string][]lock.Location {
 	if len(locs) == 0 {

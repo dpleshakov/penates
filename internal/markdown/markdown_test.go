@@ -130,6 +130,51 @@ func TestReplace(t *testing.T) {
 	}
 }
 
+func TestRemove(t *testing.T) {
+	tests := map[string]struct {
+		in   string
+		want string
+	}{
+		"block with its blank line and markers goes": {
+			in:   "# Notes\n\n<!-- penates:begin k/i -->\nold line\n\nmore\n<!-- penates:end k/i -->\n\ntail\n",
+			want: "# Notes\n\ntail\n",
+		},
+		"block without a blank line before it": {
+			in:   "# Notes\n<!-- penates:begin k/i -->\nold\n<!-- penates:end k/i -->\n",
+			want: "# Notes\n",
+		},
+		"block alone in the file leaves it empty": {
+			in:   "<!-- penates:begin k/i -->\nold\n<!-- penates:end k/i -->\n",
+			want: "",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, ok := Remove(tc.in, "k/i")
+			if !ok || got != tc.want {
+				t.Errorf("Remove = %q, %v; want %q", got, ok, tc.want)
+			}
+		})
+	}
+
+	if _, ok := Remove("# Notes\n\n<!-- penates:begin k/i -->\nold\n<!-- penates:end k/i -->\n", "k/other"); ok {
+		t.Error("Remove reported success for a missing block")
+	}
+}
+
+func TestStrip(t *testing.T) {
+	in := "# Notes\n\n<!-- penates:begin k/i -->\nold line\n\nmore\n<!-- penates:end k/i -->\n\ntail\n"
+	want := "# Notes\n\nold line\n\nmore\n\ntail\n"
+	got, ok := Strip(in, "k/i")
+	if !ok || got != want {
+		t.Errorf("Strip = %q, %v; want %q", got, ok, want)
+	}
+
+	if _, ok := Strip(in, "k/other"); ok {
+		t.Error("Strip reported success for a missing block")
+	}
+}
+
 func TestFirstHeading(t *testing.T) {
 	tests := map[string]struct {
 		in   string

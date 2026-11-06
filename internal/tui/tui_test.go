@@ -77,12 +77,17 @@ func TestRegisterListApplyFlow(t *testing.T) {
 		t.Fatalf("form fields = %+v", fm.formFields)
 	}
 
-	// The answer resumes the apply: both items install, the templated file
-	// carries the substitution, and the lock records the answers.
+	// The answer leads to the summary first: nothing is written until the
+	// summary is confirmed (RFC 10.2).
 	m = drive(t, m, "answered", "enter")
+	sm := m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after form = %v, want summary", sm.screen)
+	}
+	m = drive(t, m, "enter")
 	rm := m.(*model)
 	if rm.screen != screenResults {
-		t.Fatalf("screen after form = %v, want results", rm.screen)
+		t.Fatalf("screen after summary = %v, want results", rm.screen)
 	}
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
 		t.Errorf("results miss the applied items:\n%s", rm.lastResults)
@@ -109,13 +114,17 @@ func TestRegisterListApplyFlow(t *testing.T) {
 
 	// Back to the list: the applied items are marked installed, and applying
 	// the same selection again reuses the recorded answers — no form, straight
-	// to the results that keep everything.
+	// to the summary that keeps everything, then the results.
 	m = drive(t, m, "enter")
 	lm = m.(*model)
 	if !lm.rows[0].installed || !lm.rows[0].selected || !lm.rows[1].installed {
 		t.Errorf("after apply: %+v %+v", lm.rows[0], lm.rows[1])
 	}
 	m = drive(t, m, "a")
+	if m.(*model).screen != screenSummary {
+		t.Fatalf("re-apply screen = %v, want summary without a form", m.(*model).screen)
+	}
+	m = drive(t, m, "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("re-apply screen = %v, want results without a form", rm.screen)
@@ -201,7 +210,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := app.Initial(kitDir)
-	m = drive(t, m, "enter", "space", "a")
+	m = drive(t, m, "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("first apply:\n%s", rm.lastResults)
@@ -219,7 +228,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 
 	// The persisted selection applies the update.
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
 		t.Fatalf("update apply:\n%s", rm.lastResults)
@@ -248,7 +257,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if lm.screen != screenList || !lm.rows[0].selected {
 		t.Fatalf("restarted screen = %v selected %v", lm.screen, lm.rows[0].selected)
 	}
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") {
 		t.Fatalf("apply over a user modification:\n%s", rm.lastResults)
@@ -259,7 +268,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 
 	// With the reset requested, the kit content replaces the user's change.
-	m = drive(t, m, "enter", "r", "a")
+	m = drive(t, m, "enter", "r", "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
 		t.Fatalf("reset apply:\n%s", rm.lastResults)
@@ -286,7 +295,7 @@ func TestRemoveFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := app.Initial(kitDir)
-	m = drive(t, m, "enter", "space", "a")
+	m = drive(t, m, "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -299,7 +308,7 @@ func TestRemoveFlow(t *testing.T) {
 	if !lm.rows[0].installed || !lm.rows[0].remove {
 		t.Fatalf("row after d = %+v, want installed and marked", lm.rows[0])
 	}
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "removed  ex/good") {
 		t.Fatalf("removal apply:\n%s", rm.lastResults)
@@ -372,7 +381,7 @@ func TestOrphanRemoval(t *testing.T) {
 	}
 
 	// The orphan removes from the lock alone, without any kit (RFC 9.2).
-	m = drive(t, m, "down", "down", "d", "a")
+	m = drive(t, m, "down", "down", "d", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "removed  gone/old") {
 		t.Fatalf("orphan removal:\n%s", rm.lastResults)
@@ -428,7 +437,7 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := app.Initial(kitDir)
-	m = drive(t, m, "enter", "space", "a")
+	m = drive(t, m, "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -436,7 +445,7 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 
 	// Mark the installed item for removal and select another writer of the
 	// same shared file: one apply must land the target on two's block alone.
-	m = drive(t, m, "enter", "down", "space", "up", "d", "a")
+	m = drive(t, m, "enter", "down", "space", "up", "d", "a", "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("screen = %v, want results", rm.screen)
@@ -463,9 +472,10 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 }
 
 // TestRemoveWithFormResume removes an item and installs one that asks for a
-// variable: the form interrupts after the removals, and the resumed apply
+// variable: the form interrupts before anything is written, the summary
+// lists the removal and the install together, and the confirmed apply
 // neither re-reports the removed item as excluded nor reinstalls it through
-// its held selection (RFC 9).
+// its held selection (RFC 9, 10.2).
 func TestRemoveWithFormResume(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")
@@ -478,30 +488,44 @@ func TestRemoveWithFormResume(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := app.Initial(kitDir)
-	m = drive(t, m, "enter", "space", "a")
+	m = drive(t, m, "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
 	}
 
-	// The removal runs before the form interrupts: AGENTS.md is already gone.
+	// The form interrupts before anything is written: the removal of the
+	// marked item waits for the summary's confirmation (RFC 10.2).
 	m = drive(t, m, "enter", "down", "down", "space", "up", "up", "d", "a")
 	fm := m.(*model)
 	if fm.screen != screenForm {
 		t.Fatalf("screen after apply = %v, want form", fm.screen)
 	}
-	if _, err := os.Stat(filepath.Join(target, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Fatalf("the removal did not run before the form: %v", err)
+	if _, err := os.Stat(filepath.Join(target, "AGENTS.md")); err != nil {
+		t.Fatalf("the removal ran before the form: %v", err)
 	}
 
-	// The answer resumes the apply: the varitem installs into the target as
-	// the removal left it, with no word about the removed item.
+	// The answer leads to the summary; it lists the removal and the install
+	// together.
 	m = drive(t, m, "answered", "enter")
+	sm := m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after form = %v, want summary", sm.screen)
+	}
+	view := sm.View()
+	if !strings.Contains(view, "removals:") || !strings.Contains(view, "ex/one 1.0.0") || !strings.Contains(view, "changes:") {
+		t.Errorf("the summary misses the removal or the install:\n%s", view)
+	}
+
+	// The confirmation applies: the varitem installs into the target as the
+	// removal left it; the removed item is reported as removed, not as
+	// excluded or installed again.
+	m = drive(t, m, "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
 		t.Fatalf("resumed apply:\n%s", rm.lastResults)
 	}
-	if strings.Contains(rm.lastResults, "the item is not installed") || strings.Contains(rm.lastResults, "ex/one") {
+	if strings.Contains(rm.lastResults, "the item is not installed") || strings.Contains(rm.lastResults, "applied  ex/one") {
 		t.Errorf("the removed item leaked into the results:\n%s", rm.lastResults)
 	}
 
@@ -642,7 +666,7 @@ func TestListFilter(t *testing.T) {
 
 	// With the filter applied, selection and apply still act on the row the
 	// filter shows.
-	m = drive(t, m, "esc", "/", "beta", "enter", "space", "a")
+	m = drive(t, m, "esc", "/", "beta", "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/beta 1.0.0") {
 		t.Fatalf("filtered apply:\n%s", rm.lastResults)
@@ -667,7 +691,7 @@ func TestItemDetails(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	// Install both items so the answers of varitem are recorded.
-	m := drive(t, app.Initial(kitDir), "enter", "space", "down", "space", "a", "answered", "enter")
+	m := drive(t, app.Initial(kitDir), "enter", "space", "down", "space", "a", "answered", "enter", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/varitem") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -753,7 +777,7 @@ func TestListStatuses(t *testing.T) {
 	}
 
 	// Applying makes the item installed; the bracket shows it.
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -832,7 +856,7 @@ func TestListStatuses(t *testing.T) {
 
 	// The held selection repairs the broken item; the list shows installed
 	// again.
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
 		t.Fatalf("repair:\n%s", rm.lastResults)
@@ -1025,7 +1049,7 @@ func TestReconciliationFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := app.Initial(kitDir)
-	m = drive(t, m, "enter", "space", "a")
+	m = drive(t, m, "enter", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -1054,7 +1078,7 @@ func TestReconciliationFlow(t *testing.T) {
 
 	// The held selection applies: the broken item is repaired at its
 	// installed version.
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("repair apply:\n%s", rm.lastResults)
@@ -1076,12 +1100,140 @@ func TestReconciliationFlow(t *testing.T) {
 	if view := lm.View(); !strings.Contains(view, "modified") {
 		t.Errorf("the list shows no modified mark:\n%s", view)
 	}
-	m = drive(t, m, "a")
+	m = drive(t, m, "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed; the content was modified after installation") {
 		t.Fatalf("apply over a modification:\n%s", rm.lastResults)
 	}
 	if data, err := os.ReadFile(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil || string(data) != "user edit\n" {
 		t.Errorf("file after apply = %q, %v; want the modification kept", data, err)
+	}
+}
+
+// TestApplySummary drives the RFC 10.2 summary: applying shows what would
+// change per item — and what a removal marked with d takes away — before
+// anything is written; the apply runs only after the summary is confirmed,
+// and esc cancels out of it without touching the target.
+func TestApplySummary(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	sm := m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after apply = %v, want summary", sm.screen)
+	}
+	view := sm.View()
+	for _, want := range []string{"changes:", "ex/good 1.0.0", "skills/good/SKILL.md", "target file is absent"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("summary misses %q:\n%s", want, view)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("the summary wrote the file: %v", err)
+	}
+
+	// esc cancels: back to the list with the selection held, nothing applied.
+	m = drive(t, m, "esc")
+	lm := m.(*model)
+	if lm.screen != screenList || !lm.rows[0].selected {
+		t.Fatalf("screen after cancel = %v selected %v", lm.screen, lm.rows[0].selected)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("the canceled apply wrote the file: %v", err)
+	}
+
+	// The confirmation applies: the summary is seen before the results.
+	m = drive(t, m, "a", "enter")
+	rm := m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
+		t.Errorf("the confirmed apply wrote no file: %v", err)
+	}
+
+	// The removal marked with d joins the summary too: its action and reason
+	// show before anything is deleted, and esc keeps the item in place.
+	m = drive(t, m, "enter", "d", "a")
+	sm = m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after removal apply = %v, want summary", sm.screen)
+	}
+	view = sm.View()
+	for _, want := range []string{"removals:", "ex/good 1.0.0", "the owned file is removed unchanged"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("removal summary misses %q:\n%s", want, view)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
+		t.Errorf("the summary removed the file: %v", err)
+	}
+	m = drive(t, m, "esc")
+	if m.(*model).screen != screenList {
+		t.Fatalf("screen after cancel = %v, want list", m.(*model).screen)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
+		t.Errorf("the canceled removal deleted the file: %v", err)
+	}
+
+	// Confirming the removal deletes the file.
+	m = drive(t, m, "a", "enter")
+	rm = m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "removed  ex/good") {
+		t.Fatalf("confirmed removal:\n%s", rm.lastResults)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("the file survived the confirmed removal: %v", err)
+	}
+}
+
+// TestApplySummaryExcluded shows an excluded item with its reason on the
+// summary: a required variable answered with an empty string stays missing,
+// so the planner excludes the item and the summary says why before the
+// results repeat it (RFC 6.4, 10.2).
+func TestApplySummaryExcluded(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	// Only the varitem is selected: its required variable opens the form,
+	// and the empty answer leaves the variable without a value.
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	sm := m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after form = %v, want summary", sm.screen)
+	}
+	view := sm.View()
+	for _, want := range []string{"excluded:", "ex/varitem", `required variable "p" has no value`} {
+		if !strings.Contains(view, want) {
+			t.Errorf("summary misses %q:\n%s", want, view)
+		}
+	}
+
+	// The confirmation runs the apply: the results report the same exclusion
+	// and nothing is written.
+	m = drive(t, m, "enter")
+	rm := m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "excluded ex/varitem") {
+		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "varitem", "v.md")); !os.IsNotExist(err) {
+		t.Errorf("the excluded item wrote a file: %v", err)
 	}
 }

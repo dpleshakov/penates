@@ -148,7 +148,7 @@ per item and every excluded item with its reason; apply happens only after
 confirmation.
 **Definition of done:** a headless test sees the summary before the results and
 can cancel out of it; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-14 `rfc-completeness-pass`
 **Description:** Final pass over the RFC: walk sections 6–10 row by row against

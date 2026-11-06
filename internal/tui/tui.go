@@ -85,6 +85,7 @@ const (
 	screenList
 	screenForm
 	screenDetails
+	screenSummary
 	screenResults
 )
 
@@ -181,6 +182,16 @@ type formField struct {
 	prompt string
 }
 
+// pendingApply is one apply waiting on the summary's confirmation: the
+// selection and removals it was built from, and the paths its planning
+// touches.
+type pendingApply struct {
+	selection   []string
+	removals    []string
+	paths       []string
+	sharedPaths []string
+}
+
 type model struct {
 	app     *App
 	screen  screen
@@ -209,6 +220,8 @@ type model struct {
 	formCursor  int
 	answers     map[string]map[string]string
 	lastResults string
+	pending     *pendingApply
+	summary     string
 }
 
 func fatalModel(err error) tea.Model {
@@ -248,6 +261,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		case screenDetails:
 			if msg.String() == "esc" || msg.String() == "i" || msg.String() == "q" {
+				m.screen = screenList
+			}
+		case screenSummary:
+			switch msg.String() {
+			case "enter", "y":
+				if m.pending != nil {
+					m.performApply(m.pending)
+				}
+			case "esc", "n", "q":
 				m.screen = screenList
 			}
 		}
@@ -405,7 +427,7 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenDetails
 		}
 	case "a":
-		m.apply()
+		m.beginApply()
 	case "q", "esc":
 		return m, tea.Quit
 	}
@@ -433,7 +455,11 @@ func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, textinput.Blink
 		}
-		m.apply()
+		if m.pending == nil {
+			m.screen = screenList
+			return m, nil
+		}
+		m.buildSummary(m.pending)
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -706,9 +732,39 @@ func (m *model) refreshPlanStatuses() {
 	}
 }
 
-// apply plans and installs the current selection, removes the items marked
-// for removal, records the selection in the state, and shows the results.
-func (m *model) apply() {
+// beginApply collects what the list would apply and moves to the summary it
+// waits on (RFC 10.2). The required variables neither the lock nor this
+// session's answers provide are asked for first: the summary must show the
+// templated content as substituted (RFC 6.4).
+func (m *model) beginApply() {
+	p := m.collectApply()
+	m.pending = p
+	if len(p.selection) == 0 && len(p.removals) == 0 {
+		m.lastResults = "nothing selected\n"
+		m.screen = screenResults
+		return
+	}
+	if missing := plan.MissingVars(m.kits, p.selection, m.lk, m.answers); len(missing) > 0 {
+		m.formFields = nil
+		for _, key := range p.selection {
+			for _, v := range missing[key] {
+				m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
+			}
+		}
+		m.formCursor = 0
+		m.input = textinput.New()
+		m.input.Focus()
+		m.screen = screenForm
+		return
+	}
+	m.buildSummary(p)
+}
+
+// collectApply gathers the selection and the removal marks of the list into
+// one pending apply. The paths cover the selected items' owned files, the
+// kits' shared files, and the removals' recorded files and shared files, so
+// the planning sees everything it may touch (RFC 9.2).
+func (m *model) collectApply() *pendingApply {
 	var selection []string
 	var removals []string
 	var paths []string
@@ -782,14 +838,141 @@ func (m *model) apply() {
 	}
 	sort.Strings(paths)
 	sort.Strings(sharedPaths)
+	return &pendingApply{selection: selection, removals: removals, paths: paths, sharedPaths: sharedPaths}
+}
 
-	if len(selection) == 0 && len(removals) == 0 {
-		m.lastResults = "nothing selected\n"
+// buildSummary plans the pending apply without writing anything and shows
+// what it would do: every change per item with the reason of each action,
+// the removals with the content they leave behind, the items kept, and every
+// excluded item with its reasons (RFC 10.2). The apply runs only after the
+// screen's confirmation, and plans again from the target of that moment.
+func (m *model) buildSummary(p *pendingApply) {
+	m.pending = p
+	snap, err := target.Read(m.target, p.paths, p.sharedPaths)
+	if err != nil {
+		m.lastResults = "apply failed: " + err.Error()
 		m.screen = screenResults
 		return
 	}
+	var installs, removals []*plan.ItemPlan
+	if len(p.removals) > 0 {
+		remove := map[string]bool{}
+		for _, key := range p.removals {
+			remove[key] = true
+		}
+		removals = plan.BuildRemoval(plan.Input{Lock: m.lk, Snapshot: snap, Remove: remove}).Items
+	}
+	if len(p.selection) > 0 {
+		sources, err := kit.ReadSources(m.kits, p.selection)
+		if err != nil {
+			m.lastResults = "apply failed: " + err.Error()
+			m.screen = screenResults
+			return
+		}
+		installs = plan.Build(plan.Input{
+			Kits:       m.kits,
+			Selection:  p.selection,
+			Lock:       m.lk,
+			Snapshot:   snap,
+			Sources:    sources,
+			Answers:    m.answers,
+			Reset:      m.resets,
+			Reconciled: m.reconcil,
+		}).Items
+	}
+	m.summary = renderSummary(installs, removals)
+	m.screen = screenSummary
+}
 
-	snap, err := target.Read(m.target, paths, sharedPaths)
+// renderSummary lays out the plans of one pending apply (RFC 10.2): every
+// change per item with the reason of each action, the removals with the
+// content they leave behind, the items kept, and every excluded item with
+// its reasons. An install that writes no byte still takes ownership of its
+// JSON locations; the summary names them.
+func renderSummary(installs, removals []*plan.ItemPlan) string {
+	var changes, kept, excluded, removed []*plan.ItemPlan
+	for _, ip := range installs {
+		switch ip.Status {
+		case plan.StatusInstall:
+			changes = append(changes, ip)
+		case plan.StatusNoAction:
+			kept = append(kept, ip)
+		case plan.StatusError:
+			excluded = append(excluded, ip)
+		}
+	}
+	for _, ip := range removals {
+		if ip.Status == plan.StatusError {
+			excluded = append(excluded, ip)
+			continue
+		}
+		removed = append(removed, ip)
+	}
+
+	var b strings.Builder
+	writeActions := func(items []*plan.ItemPlan) {
+		for _, ip := range items {
+			fmt.Fprintf(&b, "  %s %s\n", ip.Key, ip.Version)
+			for _, a := range ip.Actions {
+				fmt.Fprintf(&b, "    %-14s %-44s %s\n", string(a.Kind), a.To, a.Reason)
+			}
+			if len(ip.Actions) == 0 {
+				files := make([]string, 0, len(ip.JSONLocations))
+				for f := range ip.JSONLocations {
+					files = append(files, f)
+				}
+				sort.Strings(files)
+				for _, f := range files {
+					for _, loc := range ip.JSONLocations[f] {
+						fmt.Fprintf(&b, "    %-14s %-44s takes ownership of %s\n", string(plan.ActionJSON), f, loc.Pointer)
+					}
+				}
+			}
+			for _, report := range ip.Reports {
+				fmt.Fprintf(&b, "    %s\n", report)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(changes) > 0 {
+		b.WriteString("changes:\n")
+		writeActions(changes)
+	}
+	if len(removed) > 0 {
+		b.WriteString("removals:\n")
+		writeActions(removed)
+	}
+	if len(kept) > 0 {
+		b.WriteString("kept:\n")
+		for _, ip := range kept {
+			reason := ip.Reason
+			if ip.Warning {
+				reason = "warning: " + reason
+			}
+			fmt.Fprintf(&b, "  %s %s   %s\n", ip.Key, ip.Version, reason)
+		}
+		b.WriteString("\n")
+	}
+	if len(excluded) > 0 {
+		b.WriteString("excluded:\n")
+		for _, ip := range excluded {
+			fmt.Fprintf(&b, "  %s\n", ip.Key)
+			for _, reason := range ip.Reasons {
+				fmt.Fprintf(&b, "    %s\n", reason)
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// performApply runs the apply the summary confirmed: removals first, then
+// the installs. Both plan again from a fresh snapshot: the removals rewrite
+// and delete what the summary's snapshot observed, so a removed item's
+// content cannot rise again in a shared file (RFC 9).
+func (m *model) performApply(p *pendingApply) {
+	m.pending = nil
+	snap, err := target.Read(m.target, p.paths, p.sharedPaths)
 	if err != nil {
 		m.lastResults = "apply failed: " + err.Error()
 		m.screen = screenResults
@@ -799,9 +982,9 @@ func (m *model) apply() {
 	var b strings.Builder
 
 	// The removals go first: they shrink what the installs write into.
-	if len(removals) > 0 {
+	if len(p.removals) > 0 {
 		remove := map[string]bool{}
-		for _, key := range removals {
+		for _, key := range p.removals {
 			remove[key] = true
 		}
 		rp := plan.BuildRemoval(plan.Input{Lock: m.lk, Snapshot: snap, Remove: remove})
@@ -848,8 +1031,8 @@ func (m *model) apply() {
 		// The removals rewrote and deleted what the snapshot observed: the
 		// installs plan from the target as the removals leave it, so a
 		// removed item's content cannot rise again in a shared file (RFC 9).
-		if len(selection) > 0 {
-			snap, err = target.Read(m.target, paths, sharedPaths)
+		if len(p.selection) > 0 {
+			snap, err = target.Read(m.target, p.paths, p.sharedPaths)
 			if err != nil {
 				m.lastResults = "apply failed: " + err.Error()
 				m.screen = screenResults
@@ -858,34 +1041,16 @@ func (m *model) apply() {
 		}
 	}
 
-	if len(selection) > 0 {
-		// The form collects the required variables neither the lock nor this
-		// session's answers provide; apply resumes once they are in (RFC 6.4,
-		// 10.2). A required variable answered with an empty string stays
-		// missing, so the form asks for it again.
-		if missing := plan.MissingVars(m.kits, selection, m.lk, m.answers); len(missing) > 0 {
-			m.formFields = nil
-			for _, key := range selection {
-				for _, v := range missing[key] {
-					m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
-				}
-			}
-			m.formCursor = 0
-			m.input = textinput.New()
-			m.input.Focus()
-			m.screen = screenForm
-			return
-		}
-
-		sources, err := kit.ReadSources(m.kits, selection)
+	if len(p.selection) > 0 {
+		sources, err := kit.ReadSources(m.kits, p.selection)
 		if err != nil {
 			m.lastResults = "apply failed: " + err.Error()
 			m.screen = screenResults
 			return
 		}
-		p := plan.Build(plan.Input{
+		planned := plan.Build(plan.Input{
 			Kits:       m.kits,
-			Selection:  selection,
+			Selection:  p.selection,
 			Lock:       m.lk,
 			Snapshot:   snap,
 			Sources:    sources,
@@ -894,7 +1059,7 @@ func (m *model) apply() {
 			Reconciled: m.reconcil,
 		})
 		m.resets = nil
-		results := apply.Apply(m.target, p, m.lk, m.app.Locks)
+		results := apply.Apply(m.target, planned, m.lk, m.app.Locks)
 		errors := map[string]string{}
 		for _, r := range results {
 			if r.Err != nil {
@@ -902,7 +1067,7 @@ func (m *model) apply() {
 			}
 		}
 
-		for _, ip := range p.Items {
+		for _, ip := range planned.Items {
 			switch ip.Status {
 			case plan.StatusInstall:
 				if err := errors[ip.Key]; err != "" {
@@ -931,7 +1096,7 @@ func (m *model) apply() {
 	// replaces the remembered one, so a removed item is not offered selected
 	// again (RFC 9).
 	if st, err := m.app.State.Load(); err == nil {
-		st.SetSelection(m.target, selection)
+		st.SetSelection(m.target, p.selection)
 		if err := m.app.State.Save(st); err != nil {
 			m.lastResults += "\ncould not save the selection: " + err.Error()
 		}
@@ -1124,6 +1289,10 @@ func (m *model) View() string {
 			}
 		}
 		fmt.Fprintf(&b, "\n%s\n", styleDim.Render(fmt.Sprintf("variable %d of %d    enter  next    esc  cancel", m.formCursor+1, len(m.formFields))))
+	case screenSummary:
+		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  apply summary  "+m.target))
+		b.WriteString(strings.TrimRight(m.summary, "\n"))
+		fmt.Fprintf(&b, "\n\n%s\n", styleDim.Render("enter  apply    esc  cancel"))
 	case screenResults:
 		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("apply"))
 		b.WriteString(m.lastResults)

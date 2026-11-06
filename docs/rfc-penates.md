@@ -355,7 +355,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - `i` shows the description, contributions, changelog, source kit and variable answers.
 - Forms request variables; answers are remembered.
 - On a later run, the previous selection is offered for restoration.
-- Before applying, a summary lists every change per item and every excluded item with its reason.
+- Before applying, a summary lists every change per item and every excluded item with its reason; items marked for removal join the same summary. The apply runs only after the summary is confirmed.
 
 ## 11. Architecture
 

@@ -130,7 +130,7 @@ TUI statuses.
 **Definition of done:** a test simulating an interrupted apply (staged temp
 files, moved-but-unrecorded files) reconciles to the expected statuses and
 clean target; tests pass.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-12 `tui-list-polish`
 **Description:** The RFC 10.2 list: kit group headers, the full status set

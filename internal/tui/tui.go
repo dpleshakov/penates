@@ -95,6 +95,8 @@ type row struct {
 	installed        bool
 	installedVersion string
 	orphan           bool
+	modified         bool
+	broken           bool
 	selected         bool
 	reset            bool
 	remove           bool
@@ -115,14 +117,15 @@ type model struct {
 	pendingKit *kit.Kit
 	input      textinput.Model
 
-	targets []string
-	target  string
-	kits    []*kit.Kit
-	kitErrs []string
-	lk      *lock.Lock
-	rows    []row
-	cursor  int
-	resets  map[string]bool
+	targets  []string
+	target   string
+	kits     []*kit.Kit
+	kitErrs  []string
+	lk       *lock.Lock
+	rows     []row
+	cursor   int
+	resets   map[string]bool
+	reconcil *plan.Reconciliation
 
 	formFields  []formField
 	formCursor  int
@@ -288,19 +291,35 @@ func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // enterList loads everything the item list shows: the kits registered for the
-// target, the target's lock, and the previous selection.
-func (m *model) enterList(target string) {
+// target, the target's lock, and the previous selection. The lock is
+// reconciled with the target before anything is shown or planned (RFC 7.7):
+// the staged files of an interrupted apply leave the target, and the items
+// whose recorded content the target holds modified or has lost take their
+// statuses.
+func (m *model) enterList(dir string) {
 	m.message = ""
-	m.target = target
+	m.target = dir
 	m.cursor = 0
 	m.screen = screenList
 
-	m.kits, m.kitErrs = nil, nil
-	lk, err := m.app.Locks.Load(target)
+	m.kits, m.kitErrs, m.reconcil = nil, nil, nil
+	lk, err := m.app.Locks.Load(dir)
 	if err != nil {
 		m.kitErrs = append(m.kitErrs, "lock: "+err.Error())
 	}
 	m.lk = lk
+
+	if lk != nil {
+		files, shared := lk.RecordedPaths()
+		snap, err := target.Read(dir, files, shared)
+		if err != nil {
+			m.kitErrs = append(m.kitErrs, "target: "+err.Error())
+		} else if rec, err := apply.Reconcile(dir, lk, snap); err != nil {
+			m.kitErrs = append(m.kitErrs, "reconcile: "+err.Error())
+		} else {
+			m.reconcil = rec
+		}
+	}
 
 	st, err := m.app.State.Load()
 	if err != nil {
@@ -308,13 +327,13 @@ func (m *model) enterList(target string) {
 		return
 	}
 	selected := map[string]bool{}
-	for _, key := range st.SelectionFor(target) {
+	for _, key := range st.SelectionFor(dir) {
 		selected[key] = true
 	}
 
 	m.rows = nil
 	covered := map[string]bool{}
-	for _, name := range st.KitsForTarget(target) {
+	for _, name := range st.KitsForTarget(dir) {
 		k, err := kit.Load(st.Kits[name])
 		if err != nil {
 			m.kitErrs = append(m.kitErrs, "kit "+name+": "+err.Error())
@@ -334,6 +353,8 @@ func (m *model) enterList(target string) {
 				r.installed = true
 				r.installedVersion = rec.Version
 				r.reset = m.resets[key]
+				r.modified = m.reconcil.ModifiedItem(key)
+				r.broken = m.reconcil.BrokenItem(key)
 			}
 			m.rows = append(m.rows, r)
 		}
@@ -349,7 +370,7 @@ func (m *model) enterList(target string) {
 	sort.Strings(keys)
 	for _, key := range keys {
 		rec := lk.Items[key]
-		m.rows = append(m.rows, row{
+		r := row{
 			key:              key,
 			version:          rec.Version,
 			description:      "no longer provided by any registered kit",
@@ -357,7 +378,10 @@ func (m *model) enterList(target string) {
 			installedVersion: rec.Version,
 			orphan:           true,
 			selected:         selected[key],
-		})
+		}
+		r.modified = m.reconcil.ModifiedItem(key)
+		r.broken = m.reconcil.BrokenItem(key)
+		m.rows = append(m.rows, r)
 	}
 }
 
@@ -539,13 +563,14 @@ func (m *model) apply() {
 			return
 		}
 		p := plan.Build(plan.Input{
-			Kits:      m.kits,
-			Selection: selection,
-			Lock:      m.lk,
-			Snapshot:  snap,
-			Sources:   sources,
-			Answers:   m.answers,
-			Reset:     m.resets,
+			Kits:       m.kits,
+			Selection:  selection,
+			Lock:       m.lk,
+			Snapshot:   snap,
+			Sources:    sources,
+			Answers:    m.answers,
+			Reset:      m.resets,
+			Reconciled: m.reconcil,
 		})
 		m.resets = nil
 		results := apply.Apply(m.target, p, m.lk, m.app.Locks)
@@ -653,6 +678,12 @@ func (m *model) View() string {
 				installed += styleDim.Render(" orphan")
 			} else if r.installed {
 				installed = styleDim.Render(" installed")
+			}
+			if r.broken {
+				installed += styleErr.Render(" broken")
+			}
+			if r.modified {
+				installed += styleDim.Render(" modified")
 			}
 			if r.reset {
 				installed += styleDim.Render(" reset")

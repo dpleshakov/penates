@@ -236,6 +236,35 @@ func (l *Lock) CreatedShared(path string) bool {
 	return false
 }
 
+// RecordedPaths lists the target-relative paths the lock records: every owned
+// file, and every shared file holding an owned section or json location, each
+// sorted and without duplicates. A client snapshots them to reconcile the
+// lock with the target (RFC 7.7).
+func (l *Lock) RecordedPaths() (files, shared []string) {
+	fileSet := map[string]bool{}
+	sharedSet := map[string]bool{}
+	for _, item := range l.Items {
+		for path := range item.Files {
+			fileSet[path] = true
+		}
+		for path := range item.Sections {
+			sharedSet[path] = true
+		}
+		for path := range item.JSON {
+			sharedSet[path] = true
+		}
+	}
+	for path := range fileSet {
+		files = append(files, path)
+	}
+	for path := range sharedSet {
+		shared = append(shared, path)
+	}
+	sort.Strings(files)
+	sort.Strings(shared)
+	return files, shared
+}
+
 // SetItem records a fully applied item, replacing any earlier record of it.
 func (l *Lock) SetItem(itemKey string, item *Item) {
 	l.Items[itemKey] = item

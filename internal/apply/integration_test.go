@@ -256,6 +256,168 @@ func TestRemoveEndToEnd(t *testing.T) {
 	}
 }
 
+// TestReconcileAfterInterruption walks RFC 7.7: an apply interrupted after
+// the renames and before the lock save leaves moved-but-unrecorded content
+// and staged temp files. The next run reconciles: the item comes back
+// modified and broken by what the target holds and lost, the staged files are
+// gone, the repair apply restores the lost file while the user's modification
+// stands, and the lock record comes out whole again.
+func TestReconcileAfterInterruption(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "harness")
+	kitDir := t.TempDir()
+	writeSource(t, kitDir, "kit.yaml", "name: demo\n")
+	writeSource(t, kitDir, "items/one/item.yaml",
+		"id: one\nversion: 1.0.0\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/one/SKILL.md\n  - file: conf.md\n    to: skills/one/conf.md\n")
+	writeSource(t, kitDir, "items/one/skill/SKILL.md", "one skill\n")
+	writeSource(t, kitDir, "items/one/conf.md", "conf\n")
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := stateStore.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RegisterKit("demo", kitDir, targetDir)
+	if err := stateStore.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	locks := lock.NewStore(dataDir)
+	k, err := kit.Load(kitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := target.Read(targetDir, []string{"skills/one/SKILL.md", "skills/one/conf.md"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := kit.ReadSources([]*kit.Kit{k}, []string{"demo/one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plan.Build(plan.Input{Kits: []*kit.Kit{k}, Selection: []string{"demo/one"}, Lock: lk, Snapshot: snap, Sources: sources})
+	results := Apply(targetDir, p, lk, locks)
+	for _, r := range results {
+		if r.Err != nil {
+			t.Fatalf("install %s: %v", r.Key, r.Err)
+		}
+	}
+
+	// The interrupted apply: its update renamed the skill into place and
+	// staged a temp file, and died before the lock save; the conf file the
+	// user deleted meanwhile.
+	if err := os.WriteFile(filepath.Join(targetDir, "skills", "one", "SKILL.md"), []byte("half-applied update\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "skills", "one", ".penates-4211"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, ".penates-99"), []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(targetDir, "skills", "one", "conf.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	lk, err = locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, shared := lk.RecordedPaths()
+	snap, err = target.Read(targetDir, files, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := Reconcile(targetDir, lk, snap)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(rec.Modified) != 1 || !rec.Modified["demo/one"] {
+		t.Errorf("modified = %v, want demo/one", rec.Modified)
+	}
+	if len(rec.Broken) != 1 || !rec.Broken["demo/one"] {
+		t.Errorf("broken = %v, want demo/one", rec.Broken)
+	}
+	// The target is clean of staged files, and the moved content stands.
+	for _, rel := range []string{"skills/one/.penates-4211", ".penates-99"} {
+		if _, err := os.Stat(filepath.Join(targetDir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Errorf("the staged file %s survived: %v", rel, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(targetDir, "skills", "one", "SKILL.md"))
+	if err != nil || string(data) != "half-applied update\n" {
+		t.Errorf("moved file = %q, %v; reconciliation touched it", data, err)
+	}
+
+	// The repair apply at the installed version: the lost conf file comes
+	// back, the moved skill is kept as the user's content.
+	p = plan.Build(plan.Input{
+		Kits:       []*kit.Kit{k},
+		Selection:  []string{"demo/one"},
+		Lock:       lk,
+		Snapshot:   snap,
+		Sources:    sources,
+		Reconciled: rec,
+	})
+	if len(p.Installable()) != 1 {
+		t.Fatalf("repair plan installable = %v", p.Installable())
+	}
+	if len(p.Items[0].Actions) != 1 || p.Items[0].Actions[0].To != "skills/one/conf.md" {
+		t.Fatalf("repair actions = %v, want the lost file alone", p.Items[0].Actions)
+	}
+	results = Apply(targetDir, p, lk, locks)
+	for _, r := range results {
+		if r.Err != nil {
+			t.Fatalf("repair %s: %v", r.Key, r.Err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "skills", "one", "conf.md")); err != nil {
+		t.Errorf("the repair wrote no conf.md: %v", err)
+	}
+
+	// The lock record is whole again: the restored file carries its hash, the
+	// kept one its installation base, and a fresh reconciliation sees the
+	// item modified — not broken — and nothing staged.
+	fresh, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recFiles := fresh.Items["demo/one"].Files
+	if len(recFiles) != 2 {
+		t.Fatalf("lock files = %v, want both recorded", recFiles)
+	}
+	sum := sha256.Sum256([]byte("conf\n"))
+	if recFiles["skills/one/conf.md"] != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Errorf("restored file hash = %q", recFiles["skills/one/conf.md"])
+	}
+	sum = sha256.Sum256([]byte("one skill\n"))
+	if recFiles["skills/one/SKILL.md"] != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Errorf("kept file hash = %q, want the installation base kept", recFiles["skills/one/SKILL.md"])
+	}
+	files, shared = fresh.RecordedPaths()
+	snap, err = target.Read(targetDir, files, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err = Reconcile(targetDir, fresh, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Broken) != 0 {
+		t.Errorf("broken after the repair = %v, want none", rec.Broken)
+	}
+	if len(rec.Modified) != 1 || !rec.Modified["demo/one"] {
+		t.Errorf("modified after the repair = %v, want demo/one: the user content stands", rec.Modified)
+	}
+}
+
 // TestInstallSectionEndToEnd installs the agenda item of the fixture example kit
 // into an empty target: the section contribution must create the shared AGENTS.md
 // with the marked block, the lock must record the block and the created shared file,

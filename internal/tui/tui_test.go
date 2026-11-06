@@ -539,3 +539,80 @@ func bumpKit(t *testing.T, kitDir, version, skill string) {
 		t.Fatal(err)
 	}
 }
+
+// TestReconciliationFlow reconciles the list with the target (RFC 7.7): a
+// staged temp file of an interrupted apply is removed on entering the list,
+// an item whose owned file is gone is shown broken and repaired by the next
+// apply, and a modified owned file is shown modified and kept.
+func TestReconciliationFlow(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, targetDir)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := app.Initial(kitDir)
+	m = drive(t, m, "enter", "space", "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// The interrupted apply: a staged temp file lies beside the owned file,
+	// and the owned file itself is gone from the target.
+	staged := filepath.Join(targetDir, "skills", "good", ".penates-4211")
+	if err := os.WriteFile(staged, []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm := m.(*model)
+	if lm.screen != screenList || !lm.rows[0].broken || lm.rows[0].modified {
+		t.Fatalf("row after reconciliation = %+v, want broken", lm.rows[0])
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Errorf("the staged file survived the reconciliation: %v", err)
+	}
+	if view := lm.View(); !strings.Contains(view, "broken") {
+		t.Errorf("the list shows no broken mark:\n%s", view)
+	}
+
+	// The held selection applies: the broken item is repaired at its
+	// installed version.
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
+		t.Fatalf("repair apply:\n%s", rm.lastResults)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
+		t.Errorf("the repair wrote no file: %v", err)
+	}
+
+	// The user modifies the installed file: the list shows modified, and the
+	// apply keeps the content.
+	if err := os.WriteFile(filepath.Join(targetDir, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[0].modified || lm.rows[0].broken {
+		t.Fatalf("row after reconciliation = %+v, want modified", lm.rows[0])
+	}
+	if view := lm.View(); !strings.Contains(view, "modified") {
+		t.Errorf("the list shows no modified mark:\n%s", view)
+	}
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed; the content was modified after installation") {
+		t.Fatalf("apply over a modification:\n%s", rm.lastResults)
+	}
+	if data, err := os.ReadFile(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil || string(data) != "user edit\n" {
+		t.Errorf("file after apply = %q, %v; want the modification kept", data, err)
+	}
+}

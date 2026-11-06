@@ -6,13 +6,17 @@ package apply
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
+	"github.com/dpleshakov/penates/internal/target"
 )
 
 // Result reports the outcome of applying one item.
@@ -227,6 +231,46 @@ func removeItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 		return fail(fmt.Errorf("save lock: %w", err))
 	}
 	return nil
+}
+
+// Reconcile reconciles the lock with the target after an interruption
+// (RFC 7.7): the staged temp files an interrupted apply left beside their
+// destinations are removed, and the installed items whose recorded content
+// the target holds modified or has lost are reported. snap must cover the
+// paths the lock records; the client reads them with lock.RecordedPaths.
+func Reconcile(root string, lk *lock.Lock, snap *target.Snapshot) (*plan.Reconciliation, error) {
+	if err := removeStaged(root); err != nil {
+		return nil, err
+	}
+	return plan.Reconcile(lk, snap), nil
+}
+
+// stagedPrefix names the temp files stage writes beside their destinations.
+const stagedPrefix = ".penates-"
+
+// removeStaged deletes the temp files of an interrupted apply: regular files
+// named .penates-* anywhere under root. A target that does not exist yet has
+// nothing to clean; directories and anything else the pattern may name are
+// left alone.
+func removeStaged(root string) error {
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() || !strings.HasPrefix(d.Name(), stagedPrefix) {
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove staged file %s: %w", path, err)
+		}
+		return nil
+	})
 }
 
 // withoutPath drops one path from a list, keeping the order of the rest.

@@ -197,6 +197,13 @@ type Input struct {
 	// snapshot alone, so orphans and items of unavailable kits remove like
 	// any other item (9.2).
 	Remove map[string]bool
+	// Reconciled carries the outcome of reconciling the lock with the target
+	// by recorded hashes (RFC 7.7), as the client produced it before
+	// planning. A broken item plans again at its installed version: its lost
+	// content is installed. A modified one keeps its content, and the
+	// no-action reason names the modification. Nil when the client did not
+	// reconcile.
+	Reconciled *Reconciliation
 }
 
 // MissingVars returns the required variables of the selected items that
@@ -830,16 +837,21 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 	// An installed item is re-decided by the version table of RFC 8: a higher
 	// kit version updates, a lower one plans a downgrade the client never
 	// selects by default, an equal version needs nothing or warns, and an
-	// explicit reset bypasses the table entirely.
+	// explicit reset bypasses the table entirely. A broken item bypasses it
+	// too: reconciliation found its recorded content missing from the target,
+	// and the next apply installs it again (RFC 7.7).
 	reset := false
 	if rec, installed := lk.Items[key]; installed {
 		reset = in.Reset[key]
-		if !reset {
+		if !reset && !in.Reconciled.BrokenItem(key) {
 			switch kit.CompareVersions(it.Version, rec.Version) {
 			case 0:
 				if contentUnchanged(it, rec, in, resolved) {
 					ip.Status = StatusNoAction
 					ip.Reason = "already installed"
+					if in.Reconciled.ModifiedItem(key) {
+						ip.Reason = "already installed; the content was modified after installation"
+					}
 				} else {
 					ip.Status = StatusNoAction
 					ip.Reason = "content changed without a version change; no update is offered"

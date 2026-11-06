@@ -54,8 +54,8 @@ only client.
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
 | `internal/markdown` | Pure text manipulation over managed blocks in shared Markdown files: parses the block layout and performs the append, replace, and removal operations section contributions are planned and removed with (RFC 7.3, 9.1). Knows no file system. |
 | `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (RFC 7.4). Knows no file system. |
-| `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, errors per item, the answers the plan used, and the JSON locations each item owns. Implements the three-state conflict model (RFC 7), the per-location table for json contributions (7.4), the cross-item conflicts (7.5), the variable substitution and required-variable rule (6.4), the version table for updates with reset to kit on request (7.6, 8), and the removal of installed items from the lock and the snapshot (RFC 9). Performs no I/O. |
-| `internal/apply` | Executes a plan: applies installs and removals item by item, completely or not at all, writes atomically (temp file and rename), updates the lock on success, reconciles after an interruption (RFC 7.7, 9). |
+| `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, errors per item, the answers the plan used, and the JSON locations each item owns. Implements the three-state conflict model (RFC 7), the per-location table for json contributions (7.4), the cross-item conflicts (7.5), the variable substitution and required-variable rule (6.4), the version table for updates with reset to kit on request (7.6, 8), the reconciliation of the lock with the target by recorded hashes (7.7), and the removal of installed items from the lock and the snapshot (RFC 9). Performs no I/O. |
+| `internal/apply` | Executes a plan: applies installs and removals item by item, completely or not at all, writes atomically (temp file and rename), updates the lock on success, and reconciles after an interruption by removing the staged temp files and running the plan-side verdict over the snapshot (RFC 7.7, 9). |
 | `internal/tui` | The Bubble Tea client: registration, item list with installed versions and reset requests, variable forms, apply summary (RFC 10). The only package that knows about the terminal. |
 
 ### Dependencies
@@ -70,6 +70,7 @@ flowchart LR
     PL --> LK["internal/lock"]
     PL --> TG["internal/target"]
     PL --> JC["internal/jsonc"]
+    AP --> PL
     AP --> LK
     AP --> TG
     AP --> KIT
@@ -86,8 +87,11 @@ Rules:
 
 1. **Load.** The state names the registered kits; `internal/kit` reads them;
    `internal/target` reads the snapshot; `internal/lock` reads the lock.
-2. **Plan.** `internal/plan` turns selection plus inputs into per-item actions and
-   errors; the TUI shows the summary (RFC 10.2) and collects missing input.
+2. **Plan.** The lock is reconciled with the target by recorded hashes first
+   (RFC 7.7): the staged files of an interrupted apply are removed, and the
+   modified and broken items are known. Then `internal/plan` turns selection
+   plus inputs into per-item actions and errors; the TUI shows the summary
+   (RFC 10.2) and collects missing input.
 3. **Apply.** `internal/apply` processes items one at a time: validate the item's
    contributions against the target, write through temp files, record the item in the
    lock. Removals planned from the lock (RFC 9) run before the installs, and the

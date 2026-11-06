@@ -110,6 +110,37 @@ func TestOwnership(t *testing.T) {
 	}
 }
 
+// TestRecordedPaths lists what a client snapshots for the reconciliation
+// (RFC 7.7): every owned file, and every shared file holding an owned
+// section or json location, sorted and deduplicated.
+func TestRecordedPaths(t *testing.T) {
+	l := &Lock{
+		Target: "/target",
+		Items: map[string]*Item{
+			"alpha/one": {
+				Version:  "1.0.0",
+				Files:    map[string]string{"skills/one/SKILL.md": "sha256:aa", "skills/one/lib.md": "sha256:bb"},
+				Sections: map[string]Section{"AGENTS.md": {Block: "alpha/one", Hash: "sha256:cc"}},
+				JSON: map[string][]Location{
+					"AGENTS.md":  {{Pointer: "/x", Hash: "sha256:dd"}},
+					"notes.json": {{Pointer: "/y", Hash: "sha256:ee"}},
+				},
+			},
+			"beta/two": {
+				Version: "2.0.0",
+				Files:   map[string]string{"skills/one/lib.md": "sha256:ff"},
+			},
+		},
+	}
+	files, shared := l.RecordedPaths()
+	if diff := cmp.Diff([]string{"skills/one/SKILL.md", "skills/one/lib.md"}, files); diff != "" {
+		t.Errorf("files (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"AGENTS.md", "notes.json"}, shared); diff != "" {
+		t.Errorf("shared (-want +got):\n%s", diff)
+	}
+}
+
 func TestJSONOwnership(t *testing.T) {
 	l := &Lock{
 		Target: "/target",

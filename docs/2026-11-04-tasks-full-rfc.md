@@ -156,4 +156,7 @@ the tests, close the gaps found, update `docs/architecture.md` (new packages)
 and `CHANGELOG.md`, and archive this file.
 **Definition of done:** a written checklist of every RFC rule with its covering
 test or documented deviation; all tests, vet, and gofmt green.
+**Pile:** a registered kit that fails to load and holds no installed items
+renders no group at all, so its "kit did not load" note is lost from the list
+(TASK-12 review).
 **Status:** Pending

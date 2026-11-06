@@ -36,7 +36,7 @@ func NewApp(st *state.Store, locks *lock.Store) *App {
 // Initial builds the first screen: registering kitPath when it is given, otherwise
 // the single — or chosen — registered target.
 func (a *App) Initial(kitPath string) tea.Model {
-	m := &model{app: a, input: textinput.New()}
+	m := &model{app: a, input: textinput.New(), filter: textinput.New()}
 	m.input.CharLimit = 0
 
 	if kitPath != "" {
@@ -84,22 +84,94 @@ const (
 	screenPicker
 	screenList
 	screenForm
+	screenDetails
 	screenResults
 )
 
 // row is one item line in the list.
 type row struct {
 	key              string
+	kitName          string
+	kitDir           string
 	version          string
 	description      string
+	tags             []string
 	installed        bool
 	installedVersion string
+	update           bool
+	downgrade        bool
 	orphan           bool
+	unavailable      bool
 	modified         bool
 	broken           bool
+	conflict         bool
+	conflictReason   string
+	warning          bool
 	selected         bool
 	reset            bool
 	remove           bool
+}
+
+// statusWord is the bracketed status the list renders for the row: the most
+// specific of the states it holds (RFC 10.2). The order is the precedence —
+// a planned conflict outranks reconciliation drift, drift outranks the
+// version table, and the frozen statuses of RFC 9.2 outrank selection.
+func (r row) statusWord() string {
+	switch {
+	case r.conflict:
+		return "conflict"
+	case r.broken:
+		return "broken"
+	case r.warning:
+		return "warning"
+	case r.modified:
+		return "modified"
+	case r.downgrade:
+		return "downgrade"
+	case r.update:
+		return "update"
+	case r.orphan:
+		return "orphan"
+	case r.unavailable:
+		return "unavailable"
+	case r.installed:
+		return "installed"
+	case r.selected:
+		return "selected"
+	}
+	return " "
+}
+
+// matches reports whether the row survives a filter: a case-insensitive
+// substring over the id, the tags, and the description (RFC 10.2).
+func (r row) matches(filter string) bool {
+	if filter == "" {
+		return true
+	}
+	f := strings.ToLower(filter)
+	if strings.Contains(strings.ToLower(r.key), f) || strings.Contains(strings.ToLower(r.description), f) {
+		return true
+	}
+	for _, tag := range r.tags {
+		if strings.Contains(strings.ToLower(tag), f) {
+			return true
+		}
+	}
+	return false
+}
+
+// group is one kit block of the list: the header line and the indices of its
+// rows. Kits are listed in registration order; the items of a kit that did
+// not load and the installed items of a kit that is not registered keep
+// their groups, so their frozen statuses stay visible (RFC 9.2).
+type group struct {
+	kitName string
+	kitDir  string
+	// note is rendered under the header: why the group holds no kit —
+	// a load error, or a kit that is not registered.
+	note    string
+	noteErr bool
+	rows    []int
 }
 
 // formField is one missing required variable the variable form asks for.
@@ -122,11 +194,17 @@ type model struct {
 	kits     []*kit.Kit
 	kitErrs  []string
 	lk       *lock.Lock
+	snap     *target.Snapshot
+	reconcil *plan.Reconciliation
 	rows     []row
+	groups   []group
 	cursor   int
 	resets   map[string]bool
-	reconcil *plan.Reconciliation
+	planned  map[string]*plan.ItemPlan
 
+	filter      textinput.Model
+	filtering   bool
+	detailKey   string
 	formFields  []formField
 	formCursor  int
 	answers     map[string]map[string]string
@@ -147,24 +225,19 @@ func (m *model) Init() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "esc", "q":
-			if msg.String() == "esc" {
-				switch m.screen {
-				case screenRegister:
-					m.screen = screenUsage
-					return m, nil
-				case screenForm:
-					m.screen = screenList
-					return m, nil
-				}
-			}
+		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
-
 		switch m.screen {
 		case screenUsage:
-			// Nothing to do beyond quitting.
+			if msg.String() == "q" || msg.String() == "esc" {
+				return m, tea.Quit
+			}
+		case screenResults:
+			if msg.String() == "q" {
+				return m, tea.Quit
+			}
+			m.enterList(m.target)
 		case screenRegister:
 			return m.updateRegister(msg)
 		case screenPicker:
@@ -173,8 +246,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case screenForm:
 			return m.updateForm(msg)
-		case screenResults:
-			m.enterList(m.target)
+		case screenDetails:
+			if msg.String() == "esc" || msg.String() == "i" || msg.String() == "q" {
+				m.screen = screenList
+			}
 		}
 	case tea.WindowSizeMsg:
 		// Rendering is line-based; no size-dependent layout yet.
@@ -183,6 +258,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateRegister(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.screen = screenUsage
+		return m, nil
+	}
 	if msg.String() == "enter" {
 		abs, err := filepath.Abs(expandHome(m.input.Value()))
 		if err != nil {
@@ -219,48 +298,116 @@ func (m *model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		m.enterList(m.targets[m.cursor])
+	case "q", "esc":
+		return m, tea.Quit
 	}
 	return m, nil
 }
 
+// visible lists the indices of the rows the current filter lets through, in
+// list order. The cursor moves over these.
+func (m *model) visible() []int {
+	filter := m.filter.Value()
+	var out []int
+	for _, g := range m.groups {
+		for _, idx := range g.rows {
+			if m.rows[idx].matches(filter) {
+				out = append(out, idx)
+			}
+		}
+	}
+	return out
+}
+
+func (m *model) clampCursor() {
+	vis := m.visible()
+	if len(vis) == 0 {
+		m.cursor = 0
+		return
+	}
+	if m.cursor >= len(vis) {
+		m.cursor = len(vis) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filtering {
+		switch msg.String() {
+		case "enter":
+			m.filtering = false
+			m.clampCursor()
+			return m, nil
+		case "esc":
+			m.filtering = false
+			m.filter.Reset()
+			m.clampCursor()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		m.clampCursor()
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
 	case "down", "j":
-		if m.cursor < len(m.rows)-1 {
+		if m.cursor < len(m.visible())-1 {
 			m.cursor++
 		}
+	case "/":
+		// The filter takes over the keyboard: while it is open, q and a
+		// type into it instead of quitting and applying.
+		m.filtering = true
+		m.filter.Reset()
+		return m, m.filter.Focus()
 	case " ", "enter":
-		if len(m.rows) > 0 {
-			m.rows[m.cursor].selected = !m.rows[m.cursor].selected
+		if vis := m.visible(); len(vis) > 0 {
+			idx := vis[m.cursor]
+			m.rows[idx].selected = !m.rows[idx].selected
+			m.refreshPlanStatuses()
 		}
 	case "r":
 		// Reset to kit is only ever a user request (RFC 7.6): it toggles on
-		// the row under the cursor, applies once, and clears.
-		if len(m.rows) > 0 && m.rows[m.cursor].installed {
-			key := m.rows[m.cursor].key
+		// the row under the cursor, applies once, and clears. It changes
+		// what planning would decide, so the statuses follow.
+		if vis := m.visible(); len(vis) > 0 && m.rows[vis[m.cursor]].installed {
+			idx := vis[m.cursor]
+			key := m.rows[idx].key
 			if m.resets == nil {
 				m.resets = map[string]bool{}
 			}
 			if m.resets[key] {
 				delete(m.resets, key)
-				m.rows[m.cursor].reset = false
+				m.rows[idx].reset = false
 			} else {
 				m.resets[key] = true
-				m.rows[m.cursor].reset = true
+				m.rows[idx].reset = true
 			}
+			m.refreshPlanStatuses()
 		}
 	case "d":
 		// Removal is only ever a user request (RFC 9): it toggles on the
 		// installed row under the cursor and applies once.
-		if len(m.rows) > 0 && m.rows[m.cursor].installed {
-			m.rows[m.cursor].remove = !m.rows[m.cursor].remove
+		if vis := m.visible(); len(vis) > 0 && m.rows[vis[m.cursor]].installed {
+			idx := vis[m.cursor]
+			m.rows[idx].remove = !m.rows[idx].remove
+		}
+	case "i":
+		if vis := m.visible(); len(vis) > 0 {
+			m.detailKey = m.rows[vis[m.cursor]].key
+			m.screen = screenDetails
 		}
 	case "a":
 		m.apply()
+	case "q", "esc":
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -268,6 +415,10 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateForm feeds the current field; enter records the answer and moves on,
 // and the last one resumes the apply the form interrupted.
 func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.screen = screenList
+		return m, nil
+	}
 	if msg.String() == "enter" {
 		f := m.formFields[m.formCursor]
 		if m.answers == nil {
@@ -295,93 +446,263 @@ func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // reconciled with the target before anything is shown or planned (RFC 7.7):
 // the staged files of an interrupted apply leave the target, and the items
 // whose recorded content the target holds modified or has lost take their
-// statuses.
+// statuses. Rows are grouped under their kit's header; the items of a kit
+// that no longer loads and the installed items of a kit that is not
+// registered keep their groups and their frozen statuses (RFC 9.2). The
+// current selection is then planned against the snapshot, which turns the
+// conflict and warning outcomes of the planner into row statuses.
 func (m *model) enterList(dir string) {
 	m.message = ""
 	m.target = dir
 	m.cursor = 0
 	m.screen = screenList
+	m.filtering = false
+	m.filter.Reset()
 
-	m.kits, m.kitErrs, m.reconcil = nil, nil, nil
+	m.kits, m.kitErrs, m.reconcil, m.planned = nil, nil, nil, nil
+	m.rows, m.groups = nil, nil
 	lk, err := m.app.Locks.Load(dir)
 	if err != nil {
 		m.kitErrs = append(m.kitErrs, "lock: "+err.Error())
 	}
 	m.lk = lk
 
-	if lk != nil {
-		files, shared := lk.RecordedPaths()
-		snap, err := target.Read(dir, files, shared)
-		if err != nil {
-			m.kitErrs = append(m.kitErrs, "target: "+err.Error())
-		} else if rec, err := apply.Reconcile(dir, lk, snap); err != nil {
-			m.kitErrs = append(m.kitErrs, "reconcile: "+err.Error())
-		} else {
-			m.reconcil = rec
-		}
-	}
-
 	st, err := m.app.State.Load()
 	if err != nil {
 		m.kitErrs = append(m.kitErrs, "state: "+err.Error())
 		return
 	}
+
+	// The kits registered for the target, loaded where they still load.
+	names := st.KitsForTarget(dir)
+	failed := map[string]string{}
+	for _, name := range names {
+		k, err := kit.Load(st.Kits[name])
+		if err != nil {
+			failed[name] = err.Error()
+			continue
+		}
+		m.kits = append(m.kits, k)
+	}
+
+	// The snapshot covers the paths the lock records and every loaded
+	// contribution target, so the planning below and a later selection
+	// toggle both see the target as it stands.
+	var files, shared []string
+	if lk != nil {
+		files, shared = lk.RecordedPaths()
+	}
+	seenFile := map[string]bool{}
+	for _, p := range files {
+		seenFile[p] = true
+	}
+	seenShared := map[string]bool{}
+	for _, p := range shared {
+		seenShared[p] = true
+	}
+	for _, k := range m.kits {
+		for _, it := range k.Items {
+			for _, c := range it.Contributes {
+				if c.Kind != kit.KindFile {
+					if !seenShared[c.To] {
+						seenShared[c.To] = true
+						shared = append(shared, c.To)
+					}
+					continue
+				}
+				if !seenFile[c.To] {
+					seenFile[c.To] = true
+					files = append(files, c.To)
+				}
+			}
+		}
+	}
+	sort.Strings(files)
+	sort.Strings(shared)
+
+	var snap *target.Snapshot
+	if snap, err = target.Read(dir, files, shared); err != nil {
+		m.kitErrs = append(m.kitErrs, "target: "+err.Error())
+	} else if lk != nil {
+		if rec, err := apply.Reconcile(dir, lk, snap); err != nil {
+			m.kitErrs = append(m.kitErrs, "reconcile: "+err.Error())
+		} else {
+			m.reconcil = rec
+		}
+	}
+	m.snap = snap
+
 	selected := map[string]bool{}
 	for _, key := range st.SelectionFor(dir) {
 		selected[key] = true
 	}
 
-	m.rows = nil
+	// One group per registered kit, in registration order, with a row per
+	// item the kit provides.
 	covered := map[string]bool{}
-	for _, name := range st.KitsForTarget(dir) {
-		k, err := kit.Load(st.Kits[name])
-		if err != nil {
-			m.kitErrs = append(m.kitErrs, "kit "+name+": "+err.Error())
+	next := 0
+	for _, name := range names {
+		if reason, ok := failed[name]; ok {
+			m.groups = append(m.groups, group{kitName: name, note: "kit did not load: " + reason, noteErr: true})
 			continue
 		}
-		m.kits = append(m.kits, k)
+		k := m.kits[next]
+		next++
+		g := group{kitName: k.Name, kitDir: k.Dir}
 		for _, it := range k.Items {
 			key := kit.ItemKey(k.Name, it.ID)
 			covered[key] = true
+			g.rows = append(g.rows, len(m.rows))
+			m.rows = append(m.rows, m.kitRow(k, it, selected))
+		}
+		m.groups = append(m.groups, g)
+	}
+
+	// Installed items no loaded kit provides stay managed and frozen: the
+	// list shows them under their kit's name so the user can remove them
+	// (RFC 9.2). An installed item of a kit that failed to load is shown as
+	// kit unavailable; one whose kit is not registered at all, or that a
+	// loaded kit no longer provides, is an orphan.
+	if lk != nil {
+		keys := make([]string, 0, len(lk.Items))
+		for key := range lk.Items {
+			if !covered[key] {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			rec := lk.Items[key]
+			kitName, _, _ := strings.Cut(key, "/")
+			gi := -1
+			for i := range m.groups {
+				if m.groups[i].kitName == kitName {
+					gi = i
+					break
+				}
+			}
+			if gi < 0 {
+				gi = len(m.groups)
+				m.groups = append(m.groups, group{kitName: kitName, note: "kit not registered"})
+			}
 			r := row{
-				key:         key,
-				version:     it.Version,
-				description: it.Description,
-				selected:    selected[key],
+				key:              key,
+				kitName:          kitName,
+				version:          rec.Version,
+				installed:        true,
+				installedVersion: rec.Version,
+				selected:         selected[key],
+				modified:         m.reconcil.ModifiedItem(key),
+				broken:           m.reconcil.BrokenItem(key),
 			}
-			if rec := lk.Items[key]; rec != nil {
-				r.installed = true
-				r.installedVersion = rec.Version
-				r.reset = m.resets[key]
-				r.modified = m.reconcil.ModifiedItem(key)
-				r.broken = m.reconcil.BrokenItem(key)
+			switch {
+			case failed[kitName] != "":
+				// The kit is registered but no longer loads: the item is
+				// frozen as kit unavailable (RFC 9.2).
+				r.unavailable = true
+				r.description = "kit did not load"
+			case m.groups[gi].kitDir != "":
+				// The kit loads but no longer provides the item.
+				r.orphan = true
+				r.description = "removed from the kit"
+			default:
+				// No kit of this name is registered.
+				r.orphan = true
+				r.description = "kit is not registered"
 			}
+			m.groups[gi].rows = append(m.groups[gi].rows, len(m.rows))
 			m.rows = append(m.rows, r)
 		}
 	}
-	// Installed items no kit provides anymore stay managed and frozen: the
-	// list shows them so the user can remove them (RFC 9.2).
-	keys := make([]string, 0, len(lk.Items))
-	for key := range lk.Items {
-		if !covered[key] {
-			keys = append(keys, key)
+
+	m.refreshPlanStatuses()
+}
+
+// kitRow builds the list row of one item a loaded kit provides: the kit
+// facts, the lock record, and the reconciliation and version-table statuses
+// the lock and the kit version decide (RFC 8, 9.2).
+func (m *model) kitRow(k *kit.Kit, it *kit.Item, selected map[string]bool) row {
+	key := kit.ItemKey(k.Name, it.ID)
+	r := row{
+		key:         key,
+		kitName:     k.Name,
+		kitDir:      k.Dir,
+		version:     it.Version,
+		description: it.Description,
+		tags:        it.Tags,
+		selected:    selected[key],
+	}
+	rec := m.lk.Items[key]
+	if m.lk == nil || rec == nil {
+		return r
+	}
+	r.installed = true
+	r.installedVersion = rec.Version
+	r.reset = m.resets[key]
+	r.modified = m.reconcil.ModifiedItem(key)
+	r.broken = m.reconcil.BrokenItem(key)
+	switch kit.CompareVersions(it.Version, rec.Version) {
+	case 1:
+		r.update = true
+	case -1:
+		r.downgrade = true
+	}
+	return r
+}
+
+// refreshPlanStatuses plans the current selection against the snapshot the
+// way an apply would, without writing anything, and lifts the planner's
+// conflict and warning verdicts onto the rows (RFC 10.2). Rows whose
+// selection was toggled since the last refresh take their new statuses here.
+func (m *model) refreshPlanStatuses() {
+	m.planned = nil
+	for i := range m.rows {
+		m.rows[i].conflict = false
+		m.rows[i].conflictReason = ""
+		m.rows[i].warning = false
+	}
+	var selection []string
+	for i := range m.rows {
+		if m.rows[i].selected {
+			selection = append(selection, m.rows[i].key)
 		}
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		rec := lk.Items[key]
-		r := row{
-			key:              key,
-			version:          rec.Version,
-			description:      "no longer provided by any registered kit",
-			installed:        true,
-			installedVersion: rec.Version,
-			orphan:           true,
-			selected:         selected[key],
+	if len(selection) == 0 || m.snap == nil || len(m.kits) == 0 {
+		return
+	}
+	sources, err := kit.ReadSources(m.kits, selection)
+	if err != nil {
+		// A source the kit no longer provides is a kit problem the apply
+		// reports; the list simply shows no planned statuses.
+		return
+	}
+	p := plan.Build(plan.Input{
+		Kits:       m.kits,
+		Selection:  selection,
+		Lock:       m.lk,
+		Snapshot:   m.snap,
+		Sources:    sources,
+		Answers:    m.answers,
+		Reconciled: m.reconcil,
+	})
+	m.planned = map[string]*plan.ItemPlan{}
+	for _, ip := range p.Items {
+		m.planned[ip.Key] = ip
+	}
+	for i := range m.rows {
+		ip := m.planned[m.rows[i].key]
+		if ip == nil {
+			continue
 		}
-		r.modified = m.reconcil.ModifiedItem(key)
-		r.broken = m.reconcil.BrokenItem(key)
-		m.rows = append(m.rows, r)
+		if ip.Status == plan.StatusError && ip.Conflict {
+			m.rows[i].conflict = true
+			if len(ip.Reasons) > 0 {
+				m.rows[i].conflictReason = ip.Reasons[0]
+			}
+		}
+		if ip.Status == plan.StatusNoAction && ip.Warning {
+			m.rows[i].warning = true
+		}
 	}
 }
 
@@ -654,46 +975,134 @@ func (m *model) View() string {
 		}
 		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("enter  choose    q  quit"))
 	case screenList:
-		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
+		header := "penates  target " + m.target
+		if names := m.registeredKitNames(); len(names) > 0 {
+			header += "  kits: " + strings.Join(names, ", ")
+		}
+		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render(header))
 		for _, e := range m.kitErrs {
 			b.WriteString(styleErr.Render(e) + "\n")
 		}
 		if len(m.rows) == 0 && len(m.kitErrs) == 0 {
 			b.WriteString("no items\n")
 		}
-		for i, r := range m.rows {
-			mark := " "
-			switch {
-			case r.selected:
-				mark = "x"
-			case r.installed:
-				mark = "i"
+		pos := 0
+		for _, g := range m.groups {
+			head := "-- " + g.kitName
+			if g.kitDir != "" {
+				head += "  " + g.kitDir
 			}
-			cursor := " "
-			if i == m.cursor {
-				cursor = ">"
+			shown := 0
+			for _, idx := range g.rows {
+				if m.rows[idx].matches(m.filter.Value()) {
+					shown++
+				}
 			}
-			installed := ""
-			if r.orphan {
-				installed += styleDim.Render(" orphan")
-			} else if r.installed {
-				installed = styleDim.Render(" installed")
+			if shown == 0 {
+				continue
 			}
-			if r.broken {
-				installed += styleErr.Render(" broken")
+			fmt.Fprintf(&b, "%s\n", styleTitle.Render(head))
+			if g.note != "" {
+				note := "   " + g.note
+				if g.noteErr {
+					b.WriteString(styleErr.Render(note) + "\n")
+				} else {
+					b.WriteString(styleDim.Render(note) + "\n")
+				}
 			}
-			if r.modified {
-				installed += styleDim.Render(" modified")
+			for _, idx := range g.rows {
+				r := &m.rows[idx]
+				if !r.matches(m.filter.Value()) {
+					continue
+				}
+				cursor := " "
+				if pos == m.cursor {
+					cursor = ">"
+				}
+				pos++
+				mark := fmt.Sprintf("%-12s", "["+r.statusWord()+"]")
+				switch r.statusWord() {
+				case "conflict", "broken", "unavailable":
+					mark = styleErr.Render(mark)
+				}
+				idcol := r.key
+				if len(r.tags) > 0 {
+					idcol += "  " + strings.Join(r.tags, " ")
+				}
+				desc := r.description
+				if r.conflict && r.conflictReason != "" {
+					desc = r.conflictReason
+				}
+				suffix := ""
+				if r.reset {
+					suffix += styleDim.Render(" reset")
+				}
+				if r.remove {
+					suffix += styleErr.Render(" remove")
+				}
+				fmt.Fprintf(&b, "%s%s %-30s %-16s %s%s\n", cursor, mark, idcol, m.versionLabel(*r), desc, suffix)
 			}
-			if r.reset {
-				installed += styleDim.Render(" reset")
-			}
-			if r.remove {
-				installed += styleErr.Render(" remove")
-			}
-			fmt.Fprintf(&b, "%s[%s] %-24s %-16s %s%s\n", cursor, mark, r.key, m.versionLabel(r), r.description, installed)
+			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("space  select    r  reset    d  remove    a  apply    q  quit"))
+		if m.filtering {
+			fmt.Fprintf(&b, "filter %s\n", m.filter.View())
+			fmt.Fprintf(&b, "\n%s\n", styleDim.Render("enter  apply filter    esc  clear filter"))
+		} else {
+			fmt.Fprintf(&b, "\n%s\n", styleDim.Render("/  filter    space  select    i  details    r  reset    d  remove    a  apply    q  quit"))
+		}
+	case screenDetails:
+		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
+		r, ok := m.rowByKey(m.detailKey)
+		if !ok {
+			b.WriteString("no item\n")
+			break
+		}
+		fmt.Fprintf(&b, "%s %s\n", styleTitle.Render(r.key), m.versionLabel(r))
+		fmt.Fprintf(&b, "\n%s\n", r.description)
+		if len(r.tags) > 0 {
+			fmt.Fprintf(&b, "\ntags  %s\n", strings.Join(r.tags, ", "))
+		}
+		if r.kitName != "" {
+			kitLine := "kit   " + r.kitName
+			if r.kitDir != "" {
+				kitLine += "  " + r.kitDir
+			}
+			fmt.Fprintf(&b, "%s\n", kitLine)
+		}
+		if it := m.itemByKey(r.key); it != nil {
+			if len(it.Contributes) > 0 {
+				b.WriteString("\ncontributes:\n")
+				for _, c := range it.Contributes {
+					tmpl := ""
+					if c.Template {
+						tmpl = "  (template)"
+					}
+					fmt.Fprintf(&b, "  %-8s %s%s\n", string(c.Kind), c.To, tmpl)
+				}
+			}
+			if it.HasChangelog {
+				if data, err := os.ReadFile(filepath.Join(it.Dir, "CHANGELOG.md")); err == nil {
+					b.WriteString("\nchangelog:\n")
+					for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+						fmt.Fprintf(&b, "  %s\n", line)
+					}
+				}
+			}
+		}
+		if m.lk != nil {
+			if rec := m.lk.Items[r.key]; rec != nil && len(rec.Answers) > 0 {
+				b.WriteString("\nanswers:\n")
+				ids := make([]string, 0, len(rec.Answers))
+				for id := range rec.Answers {
+					ids = append(ids, id)
+				}
+				sort.Strings(ids)
+				for _, id := range ids {
+					fmt.Fprintf(&b, "  %s = %s\n", id, rec.Answers[id])
+				}
+			}
+		}
+		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("esc  back"))
 	case screenForm:
 		fmt.Fprintf(&b, "%s\n\n", styleTitle.Render("penates  "+m.target))
 		fmt.Fprintf(&b, "required variables:\n\n")
@@ -721,6 +1130,48 @@ func (m *model) View() string {
 		fmt.Fprintf(&b, "\n%s\n", styleDim.Render("any key  back"))
 	}
 	return b.String()
+}
+
+// registeredKitNames lists the kits registered for the target: the loaded
+// ones and the ones that failed to load, in list order.
+func (m *model) registeredKitNames() []string {
+	var out []string
+	for _, g := range m.groups {
+		if g.kitDir != "" || g.noteErr {
+			out = append(out, g.kitName)
+		}
+	}
+	return out
+}
+
+// rowByKey finds a row by its item key.
+func (m *model) rowByKey(key string) (row, bool) {
+	for i := range m.rows {
+		if m.rows[i].key == key {
+			return m.rows[i], true
+		}
+	}
+	return row{}, false
+}
+
+// itemByKey finds the kit item behind a row key, or nil for the rows whose
+// kit does not load or is not registered.
+func (m *model) itemByKey(key string) *kit.Item {
+	kitName, itemID, split := strings.Cut(key, "/")
+	if !split {
+		return nil
+	}
+	for _, k := range m.kits {
+		if k.Name != kitName {
+			continue
+		}
+		for _, it := range k.Items {
+			if it.ID == itemID {
+				return it
+			}
+		}
+	}
+	return nil
 }
 
 // versionLabel renders the version column: installed and kit versions joined

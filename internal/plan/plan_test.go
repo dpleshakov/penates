@@ -148,6 +148,9 @@ func TestBuild(t *testing.T) {
 				if ip.Status != StatusNoAction || !strings.Contains(ip.Reason, "content changed without a version change") {
 					t.Errorf("status %q reason %q", ip.Status, ip.Reason)
 				}
+				if !ip.Warning {
+					t.Error("the warning is not marked")
+				}
 			},
 		},
 		"two items claiming the same file conflict": {
@@ -155,6 +158,9 @@ func TestBuild(t *testing.T) {
 			selection: []string{"k/one", "k/two"},
 			want: func(t *testing.T, p *Plan) {
 				for _, ip := range p.Items {
+					if !ip.Conflict {
+						t.Errorf("%s is not marked as a conflict", ip.Key)
+					}
 					if ip.Status != StatusError {
 						t.Fatalf("%s: status = %q, want error", ip.Key, ip.Status)
 					}
@@ -355,6 +361,9 @@ func TestPlanSections(t *testing.T) {
 				ip := p.Items[0]
 				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `already has a heading "house rules"`) {
 					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				}
+				if !ip.Conflict {
+					t.Error("the heading duplicate is not marked as a conflict")
 				}
 			},
 		},

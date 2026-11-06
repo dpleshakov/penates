@@ -8,6 +8,7 @@ package plan
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -72,6 +73,17 @@ type ItemPlan struct {
 	// one (RFC 8). The plan is complete, but the client shows it as a
 	// downgrade and never selects it by default.
 	Downgrade bool
+	// Conflict marks an excluded item whose reasons are conflicts: an
+	// encounter with user content or with another selected item's claim
+	// (RFC 7.5 and the conflict rows of 7.2–7.4). The client shows such an
+	// item as conflicting, not merely excluded. Set only when Status is
+	// Error.
+	Conflict bool
+	// Warning marks a NoAction item the version table of RFC 8 warns about:
+	// the kit provides different content under the installed version, so
+	// applying would keep everything and update nothing. Set only when
+	// Status is NoAction.
+	Warning bool
 	// Reports are user-facing notes of a removal plan (RFC 9.1): content the
 	// item does not take away — a file or a value the user modified, a block
 	// whose content is kept without its markers.
@@ -855,6 +867,7 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 				} else {
 					ip.Status = StatusNoAction
 					ip.Reason = "content changed without a version change; no update is offered"
+					ip.Warning = true
 				}
 				return ip
 			case -1:
@@ -1006,6 +1019,25 @@ func jsonUnchanged(c kit.Contribution, rec *lock.Item, in Input, src []byte) boo
 	return true
 }
 
+// conflictError marks an exclusion reason that names a conflict: an encounter
+// with user content or with another selected item's claim (RFC 7.5 and the
+// conflict rows of 7.2–7.4). planContributions lifts the mark onto the item,
+// which the client shows as conflicting rather than merely excluded.
+type conflictError struct{ msg string }
+
+func (e *conflictError) Error() string { return e.msg }
+
+// conflictf builds a conflict reason.
+func conflictf(format string, args ...any) error {
+	return &conflictError{msg: fmt.Sprintf(format, args...)}
+}
+
+// asConflict reports whether err is a conflict reason.
+func asConflict(err error) bool {
+	var ce *conflictError
+	return errors.As(err, &ce)
+}
+
 // planContributions evaluates every contribution of the item into ip: the
 // planned writes, the owned JSON locations, and the errors (RFC 7). reset
 // marks an explicit reset to kit (7.6), which overwrites the item's owned
@@ -1020,6 +1052,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 		case kit.KindFile:
 			if others := claims.fileRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is also contributed by %s", c.To, strings.Join(others, ", ")))
+				ip.Conflict = true
 				continue
 			}
 			content, ok := in.Sources[it.SourcePath(c)]
@@ -1052,10 +1085,12 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 			owner, base, owned := lk.FileOwner(c.To)
 			if !owned {
 				errs = append(errs, fmt.Sprintf("%s exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user", c.To))
+				ip.Conflict = true
 				continue
 			}
 			if owner != key {
 				errs = append(errs, fmt.Sprintf("%s is owned by installed item %s", c.To, owner))
+				ip.Conflict = true
 				continue
 			}
 			// Owned by this item: the three-state rules of RFC 7.2 decide,
@@ -1072,6 +1107,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 			}
 			if write, conflict := ownedAction(base, state.Hash, hashOf(content)); conflict != "" {
 				errs = append(errs, fmt.Sprintf("%s was modified after installation, and the kit provides different content", c.To))
+				ip.Conflict = true
 			} else if write {
 				ip.Actions = append(ip.Actions, Action{
 					Kind:    ActionFile,
@@ -1084,18 +1120,22 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 		case kit.KindSection:
 			if others := claims.sharedRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is contributed as a file by %s", c.To, strings.Join(others, ", ")))
+				ip.Conflict = true
 				continue
 			}
 			if others := claims.sectionRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is also contributed as json by %s; one shared file is either Markdown or JSON", c.To, strings.Join(others, ", ")))
+				ip.Conflict = true
 				continue
 			}
 			if owner, _, owned := lk.FileOwner(c.To); owned {
 				errs = append(errs, fmt.Sprintf("%s is owned as a whole file by installed item %s", c.To, owner))
+				ip.Conflict = true
 				continue
 			}
 			if sectionFiles[c.To] {
 				errs = append(errs, fmt.Sprintf("two section contributions write %s; one item owns one block per shared file", c.To))
+				ip.Conflict = true
 				continue
 			}
 			sectionFiles[c.To] = true
@@ -1105,6 +1145,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 			a, err := planSection(key, c, it, in, resolved, shared, reset)
 			if err != nil {
 				errs = append(errs, err.Error())
+				ip.Conflict = ip.Conflict || asConflict(err)
 				continue
 			}
 			if a != nil {
@@ -1113,10 +1154,12 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 		case kit.KindJSON:
 			if others := claims.jsonRivals(c.To, key); len(others) > 0 {
 				errs = append(errs, fmt.Sprintf("%s is also contributed as a file or section by %s; one shared file is either Markdown or JSON", c.To, strings.Join(others, ", ")))
+				ip.Conflict = true
 				continue
 			}
 			if owner, _, owned := lk.FileOwner(c.To); owned {
 				errs = append(errs, fmt.Sprintf("%s is owned as a whole file by installed item %s", c.To, owner))
+				ip.Conflict = true
 				continue
 			}
 			if c.Template && failed[it.SourcePath(c)] {
@@ -1125,6 +1168,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 			a, err := planJSON(key, c, it, in, resolved, claims, shared, jsonLocs, reset)
 			if err != nil {
 				errs = append(errs, err.Error())
+				ip.Conflict = ip.Conflict || asConflict(err)
 				continue
 			}
 			if a != nil {
@@ -1175,7 +1219,7 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolve
 	if h := markdown.FirstHeading(string(fragment)); h != "" {
 		for _, existing := range layout.Headings {
 			if existing == h {
-				return nil, fmt.Errorf("%s already has a heading %q outside managed blocks; the section would duplicate it", c.To, h)
+				return nil, conflictf("%s already has a heading %q outside managed blocks; the section would duplicate it", c.To, h)
 			}
 		}
 	}
@@ -1194,7 +1238,7 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolve
 			// and a reset overwrites whatever the user changed.
 			if !reset {
 				if write, conflict := ownedAction(installedBase, state.Blocks[key], hashOf(fragment)); conflict != "" {
-					return nil, fmt.Errorf("block %s in %s was modified after installation, and the kit provides different content", key, c.To)
+					return nil, conflictf("block %s in %s was modified after installation, and the kit provides different content", key, c.To)
 				} else if !write {
 					return nil, nil
 				}
@@ -1216,9 +1260,9 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolve
 			}, nil
 		}
 		if owned {
-			return nil, fmt.Errorf("block %s in %s is owned by installed item %s", key, c.To, owner)
+			return nil, conflictf("block %s in %s is owned by installed item %s", key, c.To, owner)
 		}
-		return nil, fmt.Errorf("%s holds block %s that is not recorded in the lock; refusing to touch content that may belong to the user", c.To, key)
+		return nil, conflictf("%s holds block %s that is not recorded in the lock; refusing to touch content that may belong to the user", c.To, key)
 	}
 
 	reason := "block is absent; it will be appended"
@@ -1326,7 +1370,7 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 		return nil, err
 	}
 	if ptr, rivals := claims.jsonConflict(c.To, key, leaves); len(rivals) > 0 {
-		return nil, fmt.Errorf("%s is claimed at %s with a different value by %s", c.To, ptr, strings.Join(rivals, ", "))
+		return nil, conflictf("%s is claimed at %s with a different value by %s", c.To, ptr, strings.Join(rivals, ", "))
 	}
 
 	w := &jsonPlanner{key: key, file: c.To, frag: frag, in: in, shared: shared, rec: rec, reset: reset}
@@ -1447,7 +1491,7 @@ func (w *jsonPlanner) placeLeaf(ptr, fmin, tmin string) error {
 		}
 		write, conflict := ownedAction(w.baseHash(ptr), current, incoming)
 		if conflict != "" {
-			return fmt.Errorf("%s holds a value at %s that was modified after installation, and the kit provides different content", w.file, quoteLoc(ptr))
+			return conflictf("%s holds a value at %s that was modified after installation, and the kit provides different content", w.file, quoteLoc(ptr))
 		}
 		if write {
 			return w.overwrite(ptr, incoming)
@@ -1576,7 +1620,7 @@ func (w *jsonPlanner) baseHash(ptr string) string {
 // differentError reports the table row that refuses to write: the location
 // holds a value the fragment does not provide, and penates does not own it.
 func (w *jsonPlanner) differentError(ptr string) error {
-	return fmt.Errorf("%s holds a different value at %s", w.file, quoteLoc(ptr))
+	return conflictf("%s holds a different value at %s", w.file, quoteLoc(ptr))
 }
 
 // ownedAction resolves the table row "owned by this item" by the three-state

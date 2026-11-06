@@ -159,16 +159,18 @@ func TestRegisterFormTyping(t *testing.T) {
 	}
 }
 
-// writeFixtureKit writes a kit with one installable item and one that uses a
-// required variable in a templated file, proposing target as its target hint.
+// writeFixtureKit writes a kit with one installable item — tagged, with a
+// changelog — and one that uses a required variable in a templated file,
+// proposing target as its target hint.
 func writeFixtureKit(t *testing.T, target string) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
 		"kit.yaml":                  "name: ex\ntarget_hint: " + target + "\n",
-		"items/good/item.yaml":      "id: good\nversion: 1.0.0\ndescription: Good item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n",
+		"items/good/item.yaml":      "id: good\nversion: 1.0.0\ndescription: Good item\ntags:\n  - writing\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/good/SKILL.md\n",
 		"items/good/skill/SKILL.md": "good skill\n",
-		"items/varitem/item.yaml":   "id: varitem\nversion: 0.1.0\nvars:\n  - {id: p, prompt: pick a word, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n    template: true\n",
+		"items/good/CHANGELOG.md":   "## 1.0.0\n\nfirst release\n",
+		"items/varitem/item.yaml":   "id: varitem\nversion: 0.1.0\ndescription: Var item\nvars:\n  - {id: p, prompt: pick a word, required: true}\ncontributes:\n  - file: v.md\n    to: skills/varitem/v.md\n    template: true\n",
 		"items/varitem/v.md":        "var item {{p}}\n",
 	}
 	for path, content := range files {
@@ -537,6 +539,473 @@ func bumpKit(t *testing.T, kitDir, version, skill string) {
 	}
 	if err := os.WriteFile(filepath.Join(kitDir, "items", "good", "skill", "SKILL.md"), []byte(skill), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// writeKitFiles writes a kit directory from a path-to-content map.
+func writeKitFiles(t *testing.T, dir string, files map[string]string) string {
+	t.Helper()
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// writeFilterKit writes a kit of three items whose descriptions and tags tell
+// the filter test what to type.
+func writeFilterKit(t *testing.T, target string) string {
+	t.Helper()
+	dir := t.TempDir()
+	return writeKitFiles(t, dir, map[string]string{
+		"kit.yaml":              "name: ex\ntarget_hint: " + target + "\n",
+		"items/alpha/item.yaml": "id: alpha\nversion: 1.0.0\ndescription: Marks finished sessions\ntags:\n  - opencode-v2\ncontributes:\n  - file: a.md\n    to: skills/alpha/a.md\n",
+		"items/alpha/a.md":      "alpha\n",
+		"items/beta/item.yaml":  "id: beta\nversion: 1.0.0\ndescription: Review agent\ntags:\n  - review\ncontributes:\n  - file: b.md\n    to: skills/beta/b.md\n",
+		"items/beta/b.md":       "beta\n",
+		"items/gamma/item.yaml": "id: gamma\nversion: 1.0.0\ndescription: Stores notes\ncontributes:\n  - file: g.md\n    to: skills/gamma/g.md\n",
+		"items/gamma/g.md":      "gamma\n",
+	})
+}
+
+// TestListFilter drives the `/` filter of RFC 10.2: it narrows the list by
+// id, tag, and description; esc clears it; enter keeps it applied; keys that
+// quit and apply in the list type into the open filter instead.
+func TestListFilter(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFilterKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := drive(t, app.Initial(kitDir), "enter")
+	lm := m.(*model)
+	if len(lm.rows) != 3 || lm.rows[0].key != "ex/alpha" || lm.rows[2].key != "ex/gamma" {
+		t.Fatalf("rows = %+v", lm.rows)
+	}
+	if len(lm.visible()) != 3 {
+		t.Fatalf("visible = %v", lm.visible())
+	}
+
+	// The filter matches a description and hides the rest.
+	m = drive(t, m, "/", "review")
+	lm = m.(*model)
+	if !lm.filtering {
+		t.Fatal("typing / did not open the filter")
+	}
+	if vis := lm.visible(); len(vis) != 1 || lm.rows[vis[0]].key != "ex/beta" {
+		t.Fatalf("visible after 'review' = %v", vis)
+	}
+	if view := lm.View(); !strings.Contains(view, "ex/beta") || strings.Contains(view, "ex/alpha") || strings.Contains(view, "ex/gamma") {
+		t.Errorf("the list is not narrowed to beta:\n%s", view)
+	}
+
+	// esc clears the filter and shows everything again.
+	m = drive(t, m, "esc")
+	lm = m.(*model)
+	if lm.filtering || lm.filter.Value() != "" {
+		t.Fatalf("esc left the filter open or set: %v %q", lm.filtering, lm.filter.Value())
+	}
+	if len(lm.visible()) != 3 {
+		t.Fatalf("visible after esc = %v", lm.visible())
+	}
+
+	// A tag matches too.
+	m = drive(t, m, "/", "opencode-v2")
+	lm = m.(*model)
+	if vis := lm.visible(); len(vis) != 1 || lm.rows[vis[0]].key != "ex/alpha" {
+		t.Fatalf("visible after 'opencode-v2' = %v", vis)
+	}
+
+	// enter closes the filter and keeps it applied.
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if lm.filtering || len(lm.visible()) != 1 {
+		t.Fatalf("after enter: filtering %v, visible %v", lm.filtering, lm.visible())
+	}
+
+	// No match: the list is empty, and acting on it changes nothing.
+	m = drive(t, m, "esc", "/", "zzz", "space", "down", "i")
+	lm = m.(*model)
+	if len(lm.visible()) != 0 || lm.screen != screenList {
+		t.Fatalf("after no-match: visible %v, screen %v", lm.visible(), lm.screen)
+	}
+
+	// With the filter applied, selection and apply still act on the row the
+	// filter shows.
+	m = drive(t, m, "esc", "/", "beta", "enter", "space", "a")
+	rm := m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/beta 1.0.0") {
+		t.Fatalf("filtered apply:\n%s", rm.lastResults)
+	}
+	if strings.Contains(rm.lastResults, "ex/alpha") || strings.Contains(rm.lastResults, "ex/gamma") {
+		t.Errorf("the filter leaked into the selection:\n%s", rm.lastResults)
+	}
+}
+
+// TestItemDetails opens the details screen with i and checks that it shows
+// the description, the contributions, the changelog when the item carries
+// one, the source kit, and the recorded variable answers (RFC 10.2).
+func TestItemDetails(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	// Install both items so the answers of varitem are recorded.
+	m := drive(t, app.Initial(kitDir), "enter", "space", "down", "space", "a", "answered", "enter")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/varitem") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+
+	// The first item carries a changelog and tags.
+	m = drive(t, m, "enter", "i")
+	dm := m.(*model)
+	if dm.screen != screenDetails {
+		t.Fatalf("screen after i = %v, want details", dm.screen)
+	}
+	view := dm.View()
+	for _, want := range []string{"ex/good", "Good item", "tags  writing", "kit   ex", "skills/good/SKILL.md", "changelog:", "first release"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details miss %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "answers:") {
+		t.Errorf("details invent answers for an item without variables:\n%s", view)
+	}
+
+	// esc returns to the list; the second item shows its templated
+	// contribution and the answer the installation recorded.
+	m = drive(t, m, "esc", "down", "i")
+	dm = m.(*model)
+	if dm.screen != screenDetails {
+		t.Fatalf("screen after esc, down, i = %v, want details", dm.screen)
+	}
+	view = dm.View()
+	for _, want := range []string{"ex/varitem", "Var item", "skills/varitem/v.md  (template)", "p = answered"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details miss %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "changelog:") {
+		t.Errorf("details show a changelog for an item without one:\n%s", view)
+	}
+
+	// esc brings the list back.
+	m = drive(t, m, "esc")
+	if m.(*model).screen != screenList {
+		t.Fatal("esc did not return to the list")
+	}
+}
+
+// TestListStatuses walks every status of the RFC 10.2 list through one
+// target: not installed, selected, installed, update, downgrade, warning,
+// modified, broken, conflict, orphan, and kit unavailable each render their
+// own bracket marker, and the planner's conflict and warning verdicts reach
+// the rows of the current selection.
+func TestListStatuses(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "target")
+	kitDir := writeStatusKit(t, targetDir)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	// Nothing is installed: both rows show the empty marker.
+	m := drive(t, app.Initial(kitDir), "enter")
+	lm := m.(*model)
+	if lm.rows[0].key != "ex/dup" || lm.rows[1].key != "ex/plain" {
+		t.Fatalf("rows = %+v", lm.rows)
+	}
+	if lm.rows[0].statusWord() != " " || lm.rows[1].statusWord() != " " {
+		t.Fatalf("fresh rows = %q %q, want empty statuses", lm.rows[0].statusWord(), lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[ ]") {
+		t.Errorf("the fresh list shows no empty marker:\n%s", lm.View())
+	}
+
+	// Selecting marks the row as selected.
+	m = drive(t, m, "down", "space")
+	lm = m.(*model)
+	if !lm.rows[1].selected || lm.rows[1].statusWord() != "selected" {
+		t.Fatalf("selected row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[selected]") {
+		t.Errorf("no selected marker:\n%s", lm.View())
+	}
+
+	// Applying makes the item installed; the bracket shows it.
+	m = drive(t, m, "a")
+	rm := m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
+		t.Fatalf("install:\n%s", rm.lastResults)
+	}
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if lm.rows[1].statusWord() != "installed" {
+		t.Fatalf("installed word = %q", lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[installed]") {
+		t.Errorf("no installed marker:\n%s", lm.View())
+	}
+
+	// A higher kit version is an update, with the arrow in the version
+	// column.
+	bumpStatusKit(t, kitDir, "1.1.0", "plain v2\n")
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].update || lm.rows[1].statusWord() != "update" {
+		t.Fatalf("update row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if view := lm.View(); !strings.Contains(view, "[update]") || !strings.Contains(view, "1.0.0 > 1.1.0") {
+		t.Errorf("no update marker or arrow:\n%s", view)
+	}
+
+	// A lower kit version is a downgrade.
+	bumpStatusKit(t, kitDir, "0.9.0", "plain v2\n")
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].downgrade || lm.rows[1].statusWord() != "downgrade" {
+		t.Fatalf("downgrade row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if view := lm.View(); !strings.Contains(view, "[downgrade]") || !strings.Contains(view, "1.0.0 < 0.9.0") {
+		t.Errorf("no downgrade marker or arrow:\n%s", view)
+	}
+
+	// The same version with changed content warns while the item is
+	// selected: applying would keep everything.
+	bumpStatusKit(t, kitDir, "1.0.0", "plain v2 changed\n")
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].warning || lm.rows[1].statusWord() != "warning" {
+		t.Fatalf("warning row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[warning]") {
+		t.Errorf("no warning marker:\n%s", lm.View())
+	}
+
+	// With the kit content back to the installed one, a user edit shows as
+	// modified.
+	bumpStatusKit(t, kitDir, "1.0.0", "plain v1\n")
+	if err := os.WriteFile(filepath.Join(targetDir, "skills", "plain", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].modified || lm.rows[1].statusWord() != "modified" {
+		t.Fatalf("modified row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[modified]") {
+		t.Errorf("no modified marker:\n%s", lm.View())
+	}
+
+	// Losing the owned file shows broken.
+	if err := os.Remove(filepath.Join(targetDir, "skills", "plain", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if !lm.rows[1].broken || lm.rows[1].statusWord() != "broken" {
+		t.Fatalf("broken row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	if !strings.Contains(lm.View(), "[broken]") {
+		t.Errorf("no broken marker:\n%s", lm.View())
+	}
+
+	// The held selection repairs the broken item; the list shows installed
+	// again.
+	m = drive(t, m, "a")
+	rm = m.(*model)
+	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
+		t.Fatalf("repair:\n%s", rm.lastResults)
+	}
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if lm.rows[1].statusWord() != "installed" {
+		t.Fatalf("after repair the word = %q", lm.rows[1].statusWord())
+	}
+
+	// A heading the user wrote outside managed blocks conflicts with the
+	// section item as soon as it is selected, and the reason shows in the
+	// row; deselecting clears the conflict. The list re-reads the target on
+	// entry, so the file lands before the selection is toggled.
+	if err := os.WriteFile(filepath.Join(targetDir, "AGENTS.md"), []byte("notes\n\n## Dup rules\n\nhand written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	m = drive(t, m, "space")
+	lm = m.(*model)
+	if !lm.rows[0].conflict || lm.rows[0].statusWord() != "conflict" {
+		t.Fatalf("conflict row = %+v, word %q", lm.rows[0], lm.rows[0].statusWord())
+	}
+	view := lm.View()
+	if !strings.Contains(view, "[conflict]") || !strings.Contains(view, "already has a heading") {
+		t.Errorf("no conflict marker or reason:\n%s", view)
+	}
+	m = drive(t, m, "space")
+	lm = m.(*model)
+	if lm.rows[0].statusWord() != " " {
+		t.Fatalf("deselected conflict row word = %q", lm.rows[0].statusWord())
+	}
+
+	// An installed item whose kit is not registered is an orphan, grouped
+	// under its kit's name.
+	locks := lock.NewStore(dataDir)
+	lk, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk.SetItem("gone/old", &lock.Item{Version: "0.2.0"})
+	if err := locks.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+	m = app.Initial(kitDir)
+	lm = m.(*model)
+	if lm.rows[2].key != "gone/old" || !lm.rows[2].orphan || lm.rows[2].statusWord() != "orphan" {
+		t.Fatalf("orphan row = %+v, word %q", lm.rows[2], lm.rows[2].statusWord())
+	}
+	view = lm.View()
+	if !strings.Contains(view, "[orphan]") || !strings.Contains(view, "kit not registered") {
+		t.Errorf("no orphan marker or group note:\n%s", view)
+	}
+
+	// When the kit stops loading, its installed items freeze as kit
+	// unavailable under the kit's header, next to the healthy kit's items.
+	if err := os.Remove(filepath.Join(kitDir, "kit.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	teamDir := writeTeamKit(t, targetDir)
+	m = app.Initial(teamDir)
+	if m.(*model).screen != screenRegister {
+		t.Fatalf("screen = %v, want register for the new kit", m.(*model).screen)
+	}
+	m = drive(t, m, "enter")
+	lm = m.(*model)
+	if lm.screen != screenList {
+		t.Fatalf("screen after register = %v", lm.screen)
+	}
+	if lm.rows[1].key != "ex/plain" || !lm.rows[1].unavailable || lm.rows[1].statusWord() != "unavailable" {
+		t.Fatalf("unavailable row = %+v, word %q", lm.rows[1], lm.rows[1].statusWord())
+	}
+	view = lm.View()
+	if !strings.Contains(view, "[unavailable]") || !strings.Contains(view, "kit did not load") || !strings.Contains(view, "-- ex") || !strings.Contains(view, "-- team") {
+		t.Errorf("the unavailable kit lost its group:\n%s", view)
+	}
+}
+
+// writeStatusKit writes a kit with a plain file item and a section item
+// whose heading the status test can place outside managed blocks.
+func writeStatusKit(t *testing.T, target string) string {
+	t.Helper()
+	dir := t.TempDir()
+	return writeKitFiles(t, dir, map[string]string{
+		"kit.yaml":                   "name: ex\ntarget_hint: " + target + "\nshared:\n  - AGENTS.md\n",
+		"items/dup/item.yaml":        "id: dup\nversion: 1.0.0\ndescription: Dup item\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n",
+		"items/dup/note.md":          "## Dup rules\n\ndup body\n",
+		"items/plain/item.yaml":      "id: plain\nversion: 1.0.0\ndescription: Plain item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/plain/SKILL.md\n",
+		"items/plain/skill/SKILL.md": "plain v1\n",
+	})
+}
+
+// bumpStatusKit rewrites the plain item's version and skill content in the
+// status fixture kit.
+func bumpStatusKit(t *testing.T, kitDir, version, skill string) {
+	t.Helper()
+	itemYaml := "id: plain\nversion: " + version + "\ndescription: Plain item\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/plain/SKILL.md\n"
+	if err := os.WriteFile(filepath.Join(kitDir, "items", "plain", "item.yaml"), []byte(itemYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kitDir, "items", "plain", "skill", "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeTeamKit writes a second kit for the same target, so the list shows
+// two kit groups.
+func writeTeamKit(t *testing.T, target string) string {
+	t.Helper()
+	dir := t.TempDir()
+	return writeKitFiles(t, dir, map[string]string{
+		"kit.yaml":              "name: team\ntarget_hint: " + target + "\n",
+		"items/titem/item.yaml": "id: titem\nversion: 1.0.0\ndescription: Team item\ncontributes:\n  - file: t.md\n    to: skills/titem/t.md\n",
+		"items/titem/t.md":      "team item\n",
+	})
+}
+
+// TestKitGroups checks the kit group headers of RFC 10.2: the header line
+// names the registered kits, every group header carries the kit directory,
+// and a filter that hides a kit's items hides its header too.
+func TestKitGroups(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	dirA := writeKitFiles(t, t.TempDir(), map[string]string{
+		"kit.yaml":             "name: aaa\ntarget_hint: " + target + "\n",
+		"items/aone/item.yaml": "id: aone\nversion: 1.0.0\ndescription: One\ncontributes:\n  - file: a.md\n    to: skills/aone/a.md\n",
+		"items/aone/a.md":      "one\n",
+	})
+	dirB := writeKitFiles(t, t.TempDir(), map[string]string{
+		"kit.yaml":             "name: bbb\ntarget_hint: " + target + "\n",
+		"items/bone/item.yaml": "id: bone\nversion: 1.0.0\ndescription: Two\ncontributes:\n  - file: b.md\n    to: skills/bone/b.md\n",
+		"items/bone/b.md":      "two\n",
+	})
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := drive(t, app.Initial(dirA), "enter")
+	lm := m.(*model)
+	if lm.screen != screenList || len(lm.groups) != 1 || lm.groups[0].kitName != "aaa" {
+		t.Fatalf("first kit: screen %v, groups %+v", lm.screen, lm.groups)
+	}
+
+	// Registering the second kit lands on the same target: two groups.
+	m = drive(t, app.Initial(dirB), "enter")
+	lm = m.(*model)
+	if len(lm.groups) != 2 || lm.groups[0].kitName != "aaa" || lm.groups[1].kitName != "bbb" {
+		t.Fatalf("groups = %+v", lm.groups)
+	}
+	if lm.rows[0].key != "aaa/aone" || lm.rows[1].key != "bbb/bone" {
+		t.Fatalf("rows = %+v", lm.rows)
+	}
+	if lm.groups[0].kitDir != dirA || lm.groups[1].kitDir != dirB {
+		t.Errorf("group dirs = %q %q", lm.groups[0].kitDir, lm.groups[1].kitDir)
+	}
+	view := lm.View()
+	if !strings.Contains(view, "kits: aaa, bbb") {
+		t.Errorf("header misses the kit names:\n%s", view)
+	}
+	if i := strings.Index(view, "-- aaa"); i < 0 || i > strings.Index(view, "-- bbb") {
+		t.Errorf("groups out of order:\n%s", view)
+	}
+
+	// A filter that nothing in aaa matches hides aaa's header as well.
+	m = drive(t, m, "/", "bone")
+	lm = m.(*model)
+	view = lm.View()
+	if strings.Contains(view, "-- aaa") || !strings.Contains(view, "-- bbb") {
+		t.Errorf("a filter did not hide the empty group:\n%s", view)
 	}
 }
 

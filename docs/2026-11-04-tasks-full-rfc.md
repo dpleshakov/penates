@@ -140,7 +140,7 @@ and `i` details — description, contributions, changelog when present, source
 kit, variable answers.
 **Definition of done:** headless tests drive the filter and the details
 screen; every status renders a distinct marker.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-13 `apply-summary`
 **Description:** RFC 10.2: before applying, a summary screen lists every change

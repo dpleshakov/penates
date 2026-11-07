@@ -281,7 +281,7 @@ Two items that claim the same file, the same block identifier, or the same JSON 
 
 ### 7.6 Explicit reset
 
-For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update.
+For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update. The model keeps reset available for every installed item; the interface names the key where it applies — on modified, conflict and broken items (10.2).
 
 ### 7.7 Atomicity
 
@@ -343,27 +343,29 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 ### 10.2 Main screen
 
 ```
- penates   target ~/.config/opencode   kits: personal-opencode, team-opencode
+ penates  ~/.config/opencode                                         3 pending · ? help
 
- -- personal-opencode   ~/kits/opencode
- [installed]   writing                   1.0.0          Text editing skill
- [update]      done-v2     opencode-v2   1.2.0 > 1.3.0  Marks finished sessions
- [conflict]    git-via-gh  gh            1.2.0          AGENTS.md: heading exists
- [ ]           done-v1     opencode-v1   1.0.0          Marks finished sessions
+  ▾ personal-opencode     ●2 ↑1 ✗1      ~/kits/opencode
+    ● writing                           1.0.0          Text editing skill
+    ↑ done-v2             opencode-v2   1.2.0 → 1.3.0  Marks finished sessions   ✓
+    ✗ git-via-gh          gh            1.2.0          AGENTS.md: heading exists
+    ○ done-v1             opencode-v1   1.0.0          Marks finished sessions
+  ▾ team-opencode         ○1 ◌1         ~/kits/team
+    ○ review                            0.3.0          Review agent with team checklist  ✓
+    ◌ old-lint                          0.2.0          Removed from kit                  −
+  ▸ old-kit               ⊘ unreadable  ~/kits/old
+  + add kit
 
- -- team-opencode   ~/kits/team
- [selected]    review                    0.3.0          Review agent with team checklist
- [orphan]      old-lint                  0.2.0          Removed from kit
-
- /  filter    space  select    i  details    r  reset    d  remove    a  apply    q  quit
+ space unselect · d remove · enter details · / filter · a apply                  q quit
 ```
 
-- Statuses: not installed, selected, installed, update available, downgrade available, modified, broken, conflict, orphan, kit unavailable, warning.
-- `/` filters by id, tags and description.
-- `i` shows the description, contributions, changelog, source kit and variable answers.
-- `r` requests reset to kit for an installed item; `d` marks an installed item for removal.
-- Forms request variables; answers are remembered.
-- On a later run, the previous selection is restored as the active selection on entry; deselecting is one key.
+- The header names the application, the current target, the number of pending actions, and the help hint; the footer names the keys the row under the cursor answers, then the global keys. On a terminal below the minimum size, the screen gives way to a message stating the minimum.
+- The tree groups items under their kit's row. Each item shows its state as a glyph — available, installed, update or downgrade available, modified, conflict, broken, warning, orphan, kit unavailable — and its pending action as a separate mark at the right edge. An unreadable kit is collapsed and marked; installed items no attached kit provides form an orphans group at the end.
+- `space` toggles the default action of the item's status — install, update, downgrade, or the reset of a broken item. A major update opens its details with the changelog first and is selected by the second press. `d` marks an installed item for removal; `r` requests reset where the interface names the key (7.6).
+- `enter` shows the details of the row: description, status with the reason and the next step, the pending verb, tags, variables, contributions, changelog. On a wide terminal the same content sits in a pane beside the tree and follows the cursor.
+- `/` filters the tree by id, tags and description; kit rows keep their groups and show the match counts.
+- With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is; entering a kit path attaches the kit at its `target_hint`.
+- Startup opens the target that was active when penates last exited. On a later run, the previous selection is restored as the active selection; deselecting is one key.
 - Before applying, a summary lists every change per item and every excluded item with its reason; items marked for removal join the same summary. The apply runs only after the summary is confirmed.
 
 ## 11. Rejected directions

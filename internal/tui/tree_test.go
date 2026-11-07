@@ -359,6 +359,48 @@ func TestBuildTreeStatuses(t *testing.T) {
 	})
 }
 
+// TestBuildTreeVerdictOnAvailableItem pins the planner's verdict on an
+// available row: two rivals claim one file, the selection of one makes it
+// conflicting, and the reason stands in for the description — the row has
+// no lock record behind it, and the verdict applies all the same (3.1).
+func TestBuildTreeVerdictOnAvailableItem(t *testing.T) {
+	conflict := plan.Conflict{
+		Kind:   kit.KindFile,
+		File:   "skills/shared.md",
+		Rivals: []string{"ex/two"},
+		Cause:  plan.CauseClaimed,
+	}
+	rows := BuildTree(TreeInput{
+		Target: treeTarget,
+		Registry: &state.Registry{
+			Kits:        map[string]state.Kit{"ex": {Dir: "~/kits/ex"}},
+			Targets:     map[string]state.Target{treeTarget: {}},
+			Attachments: []state.Attachment{{Kit: "ex", Target: treeTarget}},
+		},
+		Kits: []*kit.Kit{{
+			Name: "ex",
+			Dir:  "~/kits/ex",
+			Items: []*kit.Item{
+				{ID: "one", Version: "1.0.0", Description: "One"},
+				{ID: "two", Version: "1.0.0", Description: "Two"},
+			},
+		}},
+		Plans: map[string]*plan.ItemPlan{
+			"ex/one": {Key: "ex/one", Status: plan.StatusError, Conflicts: []plan.Conflict{conflict}},
+		},
+	})
+	r := findItem(t, rows, "ex/one")
+	if r.Status != StatusConflict {
+		t.Errorf("status = %v, want %v", r.Status, StatusConflict)
+	}
+	if want := renderConflict(conflict); r.Reason != want {
+		t.Errorf("reason = %q, want %q", r.Reason, want)
+	}
+	if rival := findItem(t, rows, "ex/two"); rival.Status != StatusAvailable {
+		t.Errorf("rival status = %v, want %v", rival.Status, StatusAvailable)
+	}
+}
+
 // TestBuildTreeSummaries checks the group summaries of 3.4: the counts run
 // by glyph in the order of the status table, the unreadable kit carries
 // none, and the groups appear in attachment order with the orphans group

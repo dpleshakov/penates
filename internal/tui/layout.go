@@ -246,7 +246,7 @@ func ShortenLeft(s string, width int) string {
 		return "…"
 	}
 	tail := ansi.TruncateLeft(s, w-(width-1), "")
-	if i := strings.Index(tail, "/"); i >= 0 && i < len(tail)-1 {
+	if i := strings.IndexAny(tail, `/\`); i >= 0 && i < len(tail)-1 {
 		tail = tail[i:]
 	}
 	return "…" + tail

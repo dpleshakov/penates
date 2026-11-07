@@ -93,12 +93,15 @@ with completion and preview is task 07. Startup opens the last active
 target (11); a kit path argument opens the add-kit input prefilled. The
 list-planning plumbing of the old model carries over. concept.md 10.2
 and the README screen are rewritten in the same commit.
+The concept reset rule 7.6 is reconciled with the interface table 7.1 in
+the same rewrite: the model keeps reset for any installed item, the
+interface names where the key exists.
 **Definition of done:** the main screen renders at every breakpoint;
 every capability of the deleted screens exists in the new UI — list,
 statuses, select, reset, remove, filter, details, summary, apply,
 results; the TUI tests port to the new model and pass; concept.md and
 the README are updated.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-06 `selection-forms`
 **Description:** Move the variable forms to selection time (7.3):

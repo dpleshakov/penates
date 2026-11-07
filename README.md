@@ -15,24 +15,29 @@ each machine selects its own items and answers its own variables.
 ## The main screen
 
 ```
-penates  target ~/.config/opencode  kits: personal-opencode, team-opencode
+ penates  ~/.config/opencode                                     3 pending · ? help
 
--- personal-opencode  ~/kits/opencode
- [installed]  writing                        1.0.0            Text editing skill
- [update]     done-v2  opencode-v2           1.2.0 > 1.3.0    Marks finished sessions
- [conflict]   git-via-gh  gh                 1.2.0            AGENTS.md: heading exists
- [ ]          done-v1  opencode-v1           1.0.0            Marks finished sessions
+  ▾ personal-opencode     ●2 ↑1 ✗1      ~/kits/opencode
+    ● writing                           1.0.0          Text editing skill
+    ↑ done-v2             opencode-v2   1.2.0 → 1.3.0  Marks finished sessions   ✓
+    ✗ git-via-gh          gh            1.2.0          AGENTS.md: heading exists
+    ○ done-v1             opencode-v1   1.0.0          Marks finished sessions
+  ▸ old-kit               ⊘ unreadable  ~/kits/old
+  + add kit
 
--- team-opencode  ~/kits/team
->[selected]   review                         0.3.0            Review agent with team checklist
- [orphan]     old-lint                       0.2.0            Removed from kit
-
-/  filter    space  select    i  details    r  reset    d  remove    a  apply    q  quit
+ space unselect · d remove · enter details · / filter · a apply          q quit
 ```
 
-Bracket markers cover every state: not installed, installed, selected, update
-and downgrade available, modified, broken, conflict, warning, orphan (no kit
-provides the item anymore), and unavailable (the kit did not load).
+Kits and items form one tree. Every state shows itself as a glyph and a color
+together — available, installed, update or downgrade available, modified,
+conflict, broken, warning, orphan (no kit provides the item anymore), and
+unavailable (the kit did not load); a pending action takes a separate mark at
+the right edge. The footer names the keys the row under the cursor answers:
+`space` toggles the default action of the status, `d` removes an installed
+item, `r` resets it to the kit content where the key applies, `enter` opens
+the details — beside the tree on wide terminals, as a scrolling view
+everywhere — and `/` filters by id, tags and description. `a` collects the
+pending actions into a summary that nothing is applied before.
 
 ## A minimal kit
 
@@ -99,9 +104,9 @@ No releases yet — build from source and start with a kit path:
 go run ./cmd/penates /path/to/my-opencode-kit
 ```
 
-The first run proposes the kit's `target_hint` as the target; confirm or edit
-it, and the kit registers. Without arguments, penates opens the registered
-target, or offers a picker when several are registered.
+The first run attaches the kit at the `target_hint` it proposes; with no kit
+registered, the screen explains what a kit is and offers `+ add kit`. Without
+arguments, penates opens the target that was active when it last exited.
 
 ## Development
 

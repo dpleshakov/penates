@@ -329,6 +329,7 @@ func kitItemRow(kitName string, it *kit.Item, key string, in TreeInput, rec *pla
 		item = in.Lock.Items[key]
 	}
 	if item == nil {
+		r.applyVerdict(in.Plans[key])
 		r.Pending = pendingOf(pending, key)
 		return r
 	}
@@ -354,16 +355,28 @@ func kitItemRow(kitName string, it *kit.Item, key string, in TreeInput, rec *pla
 		}
 	}
 	if ip := in.Plans[key]; ip != nil {
-		if len(ip.Conflicts) > 0 {
-			r.Status = StatusConflict
-			r.Reason = renderConflict(ip.Conflicts[0])
-		} else if ip.Status == plan.StatusNoAction && ip.Warning {
-			r.Status = StatusWarning
-			r.Reason = ip.Reason
-		}
+		r.applyVerdict(ip)
 	}
 	r.Pending = pendingOf(pending, key)
 	return r
+}
+
+// applyVerdict lifts the planner's verdict for the item onto the row: a
+// verdict with conflicts makes the item conflicting, a NoAction verdict
+// with a warning makes it warning (3.1). An available item takes the
+// verdict the same way an installed one does — the planner speaks about
+// the selection, not about the lock.
+func (r *ItemRow) applyVerdict(ip *plan.ItemPlan) {
+	if ip == nil {
+		return
+	}
+	if len(ip.Conflicts) > 0 {
+		r.Status = StatusConflict
+		r.Reason = renderConflict(ip.Conflicts[0])
+	} else if ip.Status == plan.StatusNoAction && ip.Warning {
+		r.Status = StatusWarning
+		r.Reason = ip.Reason
+	}
 }
 
 // frozenRow builds the row of one installed item no kit item backs: the

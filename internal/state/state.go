@@ -259,8 +259,19 @@ func (reg *Registry) prune() []string {
 		for key, item := range p.Items {
 			kitName, _, _ := strings.Cut(key, "/")
 			if _, ok := reg.Kits[kitName]; !ok {
-				delete(p.Items, key)
-				report = append(report, fmt.Sprintf("dropped pending action %s for %s: the kit %s is not registered", key, path, kitName))
+				// An installed item whose kit is not registered stays
+				// manageable from the lock: a removal is planned from the
+				// lock alone, and a reset is the user's explicit request
+				// (9.2, concept 7.6). The selection goes — nothing can be
+				// planned for an item whose kit is gone.
+				if item.Select {
+					item.Select = false
+					item.Answers = nil
+					report = append(report, fmt.Sprintf("dropped the selection of %s for %s: the kit %s is not registered", key, path, kitName))
+				}
+				if !item.Reset && !item.Remove {
+					delete(p.Items, key)
+				}
 				continue
 			}
 			if !item.Select && len(item.Answers) > 0 {

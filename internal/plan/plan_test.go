@@ -1628,7 +1628,11 @@ func TestBuildRemoval(t *testing.T) {
 	const frag = "## House rules\n\nbody\n"
 	blockText := markdown.BlockText("k/one", frag)
 	fragHash := hashOf([]byte(frag))
+	fragTwo := "## Two rules\n\ntwo body\n"
+	blockTwo := markdown.BlockText("k/two", fragTwo)
+	twoFragHash := hashOf([]byte(fragTwo))
 	darkHash := hashOf([]byte(`"dark"`))
+	vimHash := hashOf([]byte(`"vim"`))
 	bHash := hashOf([]byte(`"b"`))
 	fileHash := hashOf([]byte("installed\n"))
 	userHash := hashOf([]byte("user changed\n"))
@@ -2013,6 +2017,98 @@ func TestBuildRemoval(t *testing.T) {
 				ip := p.Items[0]
 				if ip.Status != StatusRemove || len(ip.Actions) != 1 || ip.Actions[0].Kind != ActionRemove {
 					t.Errorf("item = %+v", ip)
+				}
+			},
+		},
+		"blocks of two items in one file compose across the run": {
+			// Each removal action rewrites the whole file: the second
+			// item's action must take its block out of what the first
+			// item's removal leaves, or the first block is written back.
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version:  "1.0.0",
+					Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+				},
+				"k/two": {
+					Version:  "1.0.0",
+					Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/two", Hash: twoFragHash}},
+				},
+			},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: "# Notes\n\n" + blockText + "\n\n" + blockTwo + "\n\ntail\n",
+				Blocks:  map[string]string{"k/one": fragHash, "k/two": twoFragHash},
+			}},
+			remove: []string{"k/one", "k/two"},
+			want: func(t *testing.T, p *Plan) {
+				first, second := p.Items[0].Actions[0], p.Items[1].Actions[0]
+				if first.Kind != ActionSectionRemove || second.Kind != ActionSectionRemove {
+					t.Fatalf("kinds = %q, %q", first.Kind, second.Kind)
+				}
+				if got := string(first.Content); !strings.Contains(got, "k/two") || strings.Contains(got, "k/one") {
+					t.Errorf("first action content =\n%s\nwant only k/two's block left", got)
+				}
+				if got := string(second.Content); got != "# Notes\n\ntail\n" {
+					t.Errorf("second action content =\n%q\nwant both blocks gone", got)
+				}
+			},
+		},
+		"a created file emptied by two removals is deleted by the last one": {
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version:  "1.0.0",
+					Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/one", Hash: fragHash}},
+				},
+				"k/two": {
+					Version:  "1.0.0",
+					Sections: map[string]lock.Section{"AGENTS.md": {Block: "k/two", Hash: twoFragHash}},
+				},
+			},
+			created: []string{"AGENTS.md"},
+			shared: map[string]target.SharedFileState{"AGENTS.md": {
+				Exists:  true,
+				Content: blockText + "\n\n" + blockTwo + "\n",
+				Blocks:  map[string]string{"k/one": fragHash, "k/two": twoFragHash},
+			}},
+			remove: []string{"k/one", "k/two"},
+			want: func(t *testing.T, p *Plan) {
+				first, second := p.Items[0].Actions[0], p.Items[1].Actions[0]
+				if first.Kind != ActionSectionRemove {
+					t.Fatalf("first action = %+v", first)
+				}
+				// The file holds nothing outside the two blocks: after the
+				// second removal it is left without content and is deleted.
+				if second.Kind != ActionRemove || second.Reason != "the shared file penates created is left without content" {
+					t.Errorf("second action = %+v", second)
+				}
+			},
+		},
+		"json values of two items in one file compose across the run": {
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+				"k/two": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/editor", Hash: vimHash}}},
+				},
+			},
+			shared: map[string]target.SharedFileState{"config.jsonc": {
+				Exists:  true,
+				Content: `{"theme": "dark", "editor": "vim"}`,
+			}},
+			remove: []string{"k/one", "k/two"},
+			want: func(t *testing.T, p *Plan) {
+				first, second := p.Items[0].Actions[0], p.Items[1].Actions[0]
+				if first.Kind != ActionJSONRemove || second.Kind != ActionJSONRemove {
+					t.Fatalf("kinds = %q, %q", first.Kind, second.Kind)
+				}
+				if got := string(first.Content); strings.Contains(got, "theme") || !strings.Contains(got, "editor") {
+					t.Errorf("first action content =\n%s\nwant only the theme value gone", got)
+				}
+				if got := string(second.Content); strings.Contains(got, "theme") || strings.Contains(got, `"editor"`) {
+					t.Errorf("second action content =\n%s\nwant both values gone", got)
 				}
 			},
 		},

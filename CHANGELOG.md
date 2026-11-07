@@ -28,6 +28,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The penates data directory is `~/.config/penates` on every OS, honoring `XDG_CONFIG_HOME` when it is set and non-empty, instead of the platform configuration directory (`%AppData%` on Windows, `~/Library/Application Support` on macOS). Existing state is not migrated.
 
 ### Fixed
+- Removing several items that own blocks or values in one shared file no longer overwrites each other's removal: the items compose their shared files across the run, so a later item's action rewrites what the earlier removals leave, and a shared file penates created is deleted when the run's removals empty it.
 - An update that keeps a user-modified file or block no longer drops it from the lock record: content a plan leaves standing stays recorded with its installation base, so later updates and removals still see it.
 - Removing an item no longer passes silently over the json content the user reshaped: an array element the user replaced or removed, and a value standing where the item installed another one, stay in the target and are named in the removal report like a modified value is.
 - Applying into a target directory that does not exist yet no longer fails when an item writes a file directly into the target root.

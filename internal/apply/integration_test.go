@@ -256,6 +256,128 @@ func TestRemoveEndToEnd(t *testing.T) {
 	}
 }
 
+// TestRemoveComposesSharedFilesAcrossItems pins the removal of several items
+// that own content in one shared file: every removal action rewrites the whole
+// file, so a later item's action must take its content out of what the earlier
+// items' removals leave, not out of the pre-run snapshot. Two items share a
+// created AGENTS.md (one block each) and the user's config.jsonc (one value
+// each); one Remove run takes both items away.
+func TestRemoveComposesSharedFilesAcrossItems(t *testing.T) {
+	dataDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "harness")
+	kitDir := t.TempDir()
+	writeSource(t, kitDir, "kit.yaml", "name: demo\nshared:\n  - AGENTS.md\n  - config.jsonc\n")
+	writeSource(t, kitDir, "items/one/item.yaml",
+		"id: one\nversion: 1.0.0\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n  - json: perm.jsonc\n    to: config.jsonc\n")
+	writeSource(t, kitDir, "items/one/note.md", "## One rules\n\none body\n")
+	writeSource(t, kitDir, "items/one/perm.jsonc", `{"theme": "dark"}`)
+	writeSource(t, kitDir, "items/two/item.yaml",
+		"id: two\nversion: 1.0.0\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n  - json: perm.jsonc\n    to: config.jsonc\n")
+	writeSource(t, kitDir, "items/two/note.md", "## Two rules\n\ntwo body\n")
+	writeSource(t, kitDir, "items/two/perm.jsonc", `{"font": "sans"}`)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The user's own file: both items only join it.
+	writeSource(t, targetDir, "config.jsonc", "{\n  \"editor\": \"vim\"\n}\n")
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := stateStore.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RegisterKit("demo", kitDir, targetDir)
+	if err := stateStore.Save(st); err != nil {
+		t.Fatal(err)
+	}
+
+	k, err := kit.Load(kitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locks := lock.NewStore(dataDir)
+	lk, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := []string{"AGENTS.md", "config.jsonc"}
+	snap, err := target.Read(targetDir, nil, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := kit.ReadSources([]*kit.Kit{k}, []string{"demo/one", "demo/two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plan.Build(plan.Input{
+		Kits:      []*kit.Kit{k},
+		Selection: []string{"demo/one", "demo/two"},
+		Lock:      lk,
+		Snapshot:  snap,
+		Sources:   sources,
+	})
+	results := Apply(targetDir, p, lk, locks, nil)
+	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil {
+		t.Fatalf("install results = %+v", results)
+	}
+
+	// Remove both items in one run.
+	lk, err = locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err = target.Read(targetDir, nil, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rp := plan.BuildRemoval(plan.Input{
+		Lock:     lk,
+		Snapshot: snap,
+		Remove:   map[string]bool{"demo/one": true, "demo/two": true},
+	})
+	if len(rp.Items) != 2 {
+		t.Fatalf("removal plan = %+v", rp.Items)
+	}
+	results = Remove(targetDir, rp, lk, locks, nil)
+	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil {
+		t.Fatalf("removal results = %+v", results)
+	}
+
+	// AGENTS.md was created by penates and both blocks are gone: the file
+	// is left without content and is deleted — a resurrection of the
+	// first item's block would keep it alive.
+	if _, err := os.Stat(filepath.Join(targetDir, "AGENTS.md")); !os.IsNotExist(err) {
+		data, readErr := os.ReadFile(filepath.Join(targetDir, "AGENTS.md"))
+		if readErr != nil {
+			t.Fatalf("the created shared file survived and cannot be read: %v", readErr)
+		}
+		t.Errorf("the created shared file survived the removal of both items, content:\n%s", data)
+	}
+	// The user's config.jsonc keeps the user's own value and holds neither
+	// item's value.
+	data, err := os.ReadFile(filepath.Join(targetDir, "config.jsonc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"editor": "vim"`) {
+		t.Errorf("config.jsonc after removal =\n%s\nwant the user's value kept", data)
+	}
+	if strings.Contains(string(data), "theme") || strings.Contains(string(data), "font") {
+		t.Errorf("config.jsonc after removal =\n%s\nwant both item values gone", data)
+	}
+	// The reloaded lock holds no trace of the items.
+	fresh, err := locks.Load(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Items) != 0 || len(fresh.CreatedSharedFiles) != 0 {
+		t.Errorf("lock after removal = %+v created %v", fresh.Items, fresh.CreatedSharedFiles)
+	}
+}
+
 // TestReconcileAfterInterruption walks reconciliation after interruption: an apply
 // interrupted after the renames and before the lock save leaves moved-but-unrecorded content
 // and staged temp files. The next run reconciles: the item comes back

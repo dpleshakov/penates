@@ -18,10 +18,10 @@ Accepted work that has not started yet, in priority order.
 **Context:** v1 ships the variable alone (docs/tui-screens.md, 3.3). The sketched scheme, if detection is wanted: `PENATES_ASCII` overrides everything; on Windows, a console output code page other than 65001 selects the ASCII set; on Unix, an encoding other than UTF-8 in LC_ALL, LC_CTYPE, or LANG does. The open question is less feasibility than need: whether users run terminals that are both broken for Unicode and not known to them. Decide after the new TUI sees real use.
 **Added:** 2026-11-07, in the TUI rework discussion
 
-### `removal-shared-file-loss`
-**Goal:** Removing several items that own blocks or values in one shared file composes their removals instead of overwriting each other.
-**Context:** Confirmed by reproduction: `BuildRemoval` plans every item from the same pre-run snapshot, and each item's composition is local to it, while the install planner composes shared files across items (`sharedFiles.pending`). When one `Remove` run takes two items with blocks in one file, the second rename writes a composition made from the original file and resurrects the first item's block — its removal is silently lost and the block stays in the target owned by nobody, in a file penates created. Reachable from the current TUI with two `d` marks on items sharing one AGENTS.md. Preferred fix: cross-item composition in `BuildRemoval`, mirroring the install planner, keeping plan pure and apply an executor; the alternative — replanning per step inside apply — moves planning into the executor against the module rules.
-**Added:** 2026-11-07, reported by the worker after the apply-stepping review
+### `coowner-single-run-removal`
+**Goal:** A co-owned json value leaves when one removal run takes both of its owners away.
+**Context:** `removalJSON` decides co-ownership by the lock, which planning never mutates. Removing both co-owners in one run, each item's plan still sees the other as a remaining owner and keeps the value — after the run no owner remains recorded, and the value stays in the target with nobody owning it; two sequential runs take it away on the second. Found while composing shared-file removals across a run (the same single-run class); the fix is to make the ownership check see the removals the run has already planned.
+**Added:** 2026-11-07, during the removal-shared-file-loss fix
 
 ### `tui-tempdir-flake`
 **Goal:** Track the intermittent `internal/tui` test failure on this machine and fix it if it ever turns out to be ours.

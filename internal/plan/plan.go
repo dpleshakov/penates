@@ -420,7 +420,11 @@ func Build(in Input) *Plan {
 // lock records, so orphans and items of unavailable kits remove exactly like
 // the rest. Content the user modified stays in the target and reaches
 // the client as a report; unchanged owned content goes away, and a shared
-// file penates created that is left without content is deleted.
+// file penates created that is left without content is deleted. The items
+// compose their shared files across the run: every removal action rewrites
+// a whole shared file, so a later item decides and removes its content in
+// what the earlier items' removals leave, as the install planner builds its
+// items on theirs.
 func BuildRemoval(in Input) *Plan {
 	keys := make([]string, 0, len(in.Remove))
 	for key, remove := range in.Remove {
@@ -431,8 +435,13 @@ func BuildRemoval(in Input) *Plan {
 	sort.Strings(keys)
 
 	p := &Plan{}
+	// Shared-file contents as the items planned so far leave them: each
+	// removal action rewrites the whole file, and a later item composing
+	// from the pre-run snapshot would write an earlier item's removed
+	// content back.
+	pending := map[string]string{}
 	for _, key := range keys {
-		p.Items = append(p.Items, planRemoval(key, in))
+		p.Items = append(p.Items, planRemoval(key, in, pending))
 	}
 	return p
 }
@@ -440,8 +449,10 @@ func BuildRemoval(in Input) *Plan {
 // planRemoval plans one item's removal from its lock record. Files, sections,
 // and json values that stand as installed are taken away; the ones the user
 // modified stay and are reported. A created shared file the removal leaves
-// without content is deleted with it.
-func planRemoval(key string, in Input) *ItemPlan {
+// without content is deleted with it. pending carries the shared-file
+// contents the items planned earlier leave behind; the compositions of this
+// item are recorded there for the ones planned after it.
+func planRemoval(key string, in Input, pending map[string]string) *ItemPlan {
 	ip := &ItemPlan{Key: key}
 	kitName, itemID, split := strings.Cut(key, "/")
 	if split {
@@ -455,10 +466,6 @@ func planRemoval(key string, in Input) *ItemPlan {
 	}
 	ip.Version = rec.Version
 	ip.Status = StatusRemove
-
-	// Composed shared-file contents, so a file both a section and a json
-	// contribution of the item touch is rewritten once, in order.
-	pending := map[string]string{}
 
 	for _, path := range sortedKeys(rec.Files) {
 		st := in.Snapshot.File(path)
@@ -478,7 +485,7 @@ func planRemoval(key string, in Input) *ItemPlan {
 
 	for _, file := range sortedKeys(rec.Sections) {
 		sec := rec.Sections[file]
-		composed, action := removalSection(ip, file, sec, in)
+		composed, action := removalSection(ip, file, sec, in, pending)
 		if action != nil {
 			ip.Actions = append(ip.Actions, *action)
 		}
@@ -496,18 +503,25 @@ func planRemoval(key string, in Input) *ItemPlan {
 
 // removalSection composes the shared file without the item's block: a block
 // that stands as installed loses its markers with the content, a modified one
-// keeps its content as ordinary text and is reported. A created shared file
-// left without content is deleted instead of rewritten. composed is the new
-// file content when an action rewrites it.
-func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input) (composed []byte, action *Action) {
+// keeps its content as ordinary text and is reported. The file is decided as
+// the items planned earlier leave it, and a created shared file left without
+// content is deleted instead of rewritten. composed is the new file content
+// when an action rewrites it.
+func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input, pending map[string]string) (composed []byte, action *Action) {
 	st := in.Snapshot.SharedFile(file)
 	if !st.Exists || st.IsDir {
 		return nil, nil
 	}
+	base, ok := pending[file]
+	if !ok {
+		base = st.Content
+	}
 	present := false
-	for _, b := range markdown.Parse(st.Content).Blocks {
+	installed := false
+	for _, b := range markdown.Parse(base).Blocks {
 		if b.ID == sec.Block {
 			present = true
+			installed = hashOf([]byte(b.Content)) == sec.Hash
 			break
 		}
 	}
@@ -516,10 +530,10 @@ func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input) (comp
 	}
 
 	var text string
-	if st.Blocks[sec.Block] == sec.Hash {
-		text, _ = markdown.Remove(st.Content, sec.Block)
+	if installed {
+		text, _ = markdown.Remove(base, sec.Block)
 	} else {
-		text, _ = markdown.Strip(st.Content, sec.Block)
+		text, _ = markdown.Strip(base, sec.Block)
 		ip.Reports = append(ip.Reports, fmt.Sprintf("kept the block content in %s: modified by the user", file))
 	}
 	if in.Lock.CreatedShared(file) && strings.TrimSpace(text) == "" {
@@ -540,8 +554,9 @@ func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input) (comp
 
 // removalJSON composes the shared file without the values the item
 // last-owns: a value another item co-owns stays, a modified one stays and is
-// reported. The document is read from the file as earlier removal actions of
-// this item leave it.
+// reported. The document is read from the file as the removal actions
+// planned earlier leave it, and the item's composition is recorded for the
+// items planned after it.
 func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input, pending map[string]string) {
 	st := in.Snapshot.SharedFile(file)
 	if !st.Exists || st.IsDir {
@@ -609,6 +624,7 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 		})
 		return
 	}
+	pending[file] = string(composed)
 	ip.Actions = append(ip.Actions, Action{
 		Kind:    ActionJSONRemove,
 		To:      file,

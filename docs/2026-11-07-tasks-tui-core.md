@@ -74,7 +74,7 @@ file, section, and json collisions, including the owning item where the
 collision is with owned content; existing tests assert the structure
 instead of strings; the current TUI shows the same conflict information as
 before, rendered from the structure.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `apply-stepping`
 **Description:** internal/apply exposes per-item execution: a step applies

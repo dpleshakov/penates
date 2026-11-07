@@ -107,8 +107,9 @@ func TestBuild(t *testing.T) {
 				if ip.Status != StatusError {
 					t.Fatalf("status = %q, want error", ip.Status)
 				}
-				if !strings.Contains(strings.Join(ip.Reasons, "; "), "not recorded in the lock") {
-					t.Errorf("reasons = %v", ip.Reasons)
+				want := []Conflict{{Kind: kit.KindFile, File: "skills/one/SKILL.md", Cause: CauseUserContent}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -119,8 +120,12 @@ func TestBuild(t *testing.T) {
 			snapshot:  map[string]target.FileState{"skills/one/SKILL.md": {Exists: true, Hash: "sha256:xx"}},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "owned by installed item other/two") {
-					t.Errorf("status %q, reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindFile, File: "skills/one/SKILL.md", Owner: "other/two", Cause: CauseOwned}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -157,17 +162,13 @@ func TestBuild(t *testing.T) {
 			kits:      oneKit("k", item("one", "shared.md"), item("two", "shared.md")),
 			selection: []string{"k/one", "k/two"},
 			want: func(t *testing.T, p *Plan) {
-				for _, ip := range p.Items {
-					if !ip.Conflict {
-						t.Errorf("%s is not marked as a conflict", ip.Key)
-					}
-					if ip.Status != StatusError {
-						t.Fatalf("%s: status = %q, want error", ip.Key, ip.Status)
-					}
-					joined := strings.Join(ip.Reasons, "; ")
-					if !strings.Contains(joined, "shared.md is also contributed by") {
-						t.Errorf("%s: reasons = %v", ip.Key, ip.Reasons)
-					}
+				want := []Conflict{{Kind: kit.KindFile, File: "shared.md", Cause: CauseClaimed, Rivals: []string{"k/two"}}}
+				if diff := cmp.Diff(want, p.Items[0].Conflicts); diff != "" {
+					t.Errorf("one: conflicts (-want +got):\n%s", diff)
+				}
+				want[0].Rivals = []string{"k/one"}
+				if diff := cmp.Diff(want, p.Items[1].Conflicts); diff != "" {
+					t.Errorf("two: conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -319,8 +320,12 @@ func TestPlanSections(t *testing.T) {
 			sources:   map[string][]byte{"note.md": []byte(fragment)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "not recorded in the lock") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Block: "k/one", Cause: CauseUserContent}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -334,8 +339,12 @@ func TestPlanSections(t *testing.T) {
 			sources: map[string][]byte{"note.md": []byte(fragment)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "owned by installed item other/two") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Block: "k/one", Owner: "other/two", Cause: CauseOwned}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -347,8 +356,12 @@ func TestPlanSections(t *testing.T) {
 			sources:   map[string][]byte{"note.md": []byte(fragment)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "owned as a whole file by installed item other/two") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Owner: "other/two", Cause: CauseOwned}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -359,11 +372,12 @@ func TestPlanSections(t *testing.T) {
 			sources:   map[string][]byte{"note.md": []byte("## house RULES\n\nbody\n")},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `already has a heading "house rules"`) {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
 				}
-				if !ip.Conflict {
-					t.Error("the heading duplicate is not marked as a conflict")
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Heading: "house rules", Cause: CauseUserContent}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -424,8 +438,12 @@ func TestPlanSections(t *testing.T) {
 			sources:   map[string][]byte{"a.md": []byte(fragment), "b.md": []byte(fragment)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "one item owns one block per shared file") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Cause: CauseTwoSections}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -440,11 +458,13 @@ func TestPlanSections(t *testing.T) {
 			selection: []string{"k1/one", "k2/two"},
 			sources:   map[string][]byte{"f": []byte("file\n"), "note.md": []byte(fragment)},
 			want: func(t *testing.T, p *Plan) {
-				if !strings.Contains(strings.Join(p.Items[0].Reasons, "; "), "is also contributed by k2/two") {
-					t.Errorf("file claimant reasons %v", p.Items[0].Reasons)
+				wantFile := []Conflict{{Kind: kit.KindFile, File: "AGENTS.md", Cause: CauseClaimed, Rivals: []string{"k2/two"}}}
+				if diff := cmp.Diff(wantFile, p.Items[0].Conflicts); diff != "" {
+					t.Errorf("file claimant conflicts (-want +got):\n%s", diff)
 				}
-				if !strings.Contains(strings.Join(p.Items[1].Reasons, "; "), "is contributed as a file by k1/one") {
-					t.Errorf("section claimant reasons %v", p.Items[1].Reasons)
+				wantSection := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Cause: CauseClaimedAsFile, Rivals: []string{"k1/one"}}}
+				if diff := cmp.Diff(wantSection, p.Items[1].Conflicts); diff != "" {
+					t.Errorf("section claimant conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -599,8 +619,31 @@ func TestPlanJSON(t *testing.T) {
 			sources:   map[string][]byte{"perm.jsonc": []byte(`{"theme":"dark"}`)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `holds a different value at "/theme"`) {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Pointer: "/theme", Cause: CauseDifferentValue}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"a different value owned by another installed item is named": {
+			kits:      oneKit("k", jsonItem("one", "perm.jsonc", "config.jsonc")),
+			selection: []string{"k/one"},
+			lockItems: map[string]*lock.Item{"other/two": {Version: "1.0.0", JSON: map[string][]lock.Location{
+				"config.jsonc": {{Pointer: "/theme", Hash: darkHash}},
+			}}},
+			shared:  map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark"}`}},
+			sources: map[string][]byte{"perm.jsonc": []byte(`{"theme":"light"}`)},
+			want: func(t *testing.T, p *Plan) {
+				ip := p.Items[0]
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Pointer: "/theme", Owner: "other/two", Cause: CauseDifferentValue}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -689,8 +732,12 @@ func TestPlanJSON(t *testing.T) {
 			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":{"b":1}}`)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), `different value at "/a"`) {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Pointer: "/a", Cause: CauseDifferentValue}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -701,8 +748,12 @@ func TestPlanJSON(t *testing.T) {
 			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":1}`)},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "different value at the root") {
-					t.Errorf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status = %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Cause: CauseDifferentValue}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -781,11 +832,13 @@ func TestPlanJSON(t *testing.T) {
 			selection: []string{"k/one", "k/two"},
 			sources:   map[string][]byte{"a.jsonc": []byte(`{"theme":"dark"}`), "b.jsonc": []byte(`{"theme":"light"}`)},
 			want: func(t *testing.T, p *Plan) {
-				for _, ip := range p.Items {
-					joined := strings.Join(ip.Reasons, "; ")
-					if ip.Status != StatusError || !strings.Contains(joined, `is claimed at /theme with a different value by`) {
-						t.Errorf("%s: status %q reasons %v", ip.Key, ip.Status, ip.Reasons)
-					}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Pointer: "/theme", Cause: CauseClaimed, Rivals: []string{"k/two"}}}
+				if diff := cmp.Diff(want, p.Items[0].Conflicts); diff != "" {
+					t.Errorf("one: conflicts (-want +got):\n%s", diff)
+				}
+				want[0].Rivals = []string{"k/one"}
+				if diff := cmp.Diff(want, p.Items[1].Conflicts); diff != "" {
+					t.Errorf("two: conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -821,11 +874,13 @@ func TestPlanJSON(t *testing.T) {
 			selection: []string{"k1/one", "k2/two"},
 			sources:   map[string][]byte{"perm.jsonc": []byte(`{"a":1}`), "note.md": []byte("## Rules\n\nbody\n")},
 			want: func(t *testing.T, p *Plan) {
-				if !strings.Contains(strings.Join(p.Items[0].Reasons, "; "), "is also contributed as a file or section by k2/two") {
-					t.Errorf("json claimant reasons %v", p.Items[0].Reasons)
+				wantJSON := []Conflict{{Kind: kit.KindJSON, File: "AGENTS.md", Cause: CauseClaimedAsFileOrSection, Rivals: []string{"k2/two"}}}
+				if diff := cmp.Diff(wantJSON, p.Items[0].Conflicts); diff != "" {
+					t.Errorf("json claimant conflicts (-want +got):\n%s", diff)
 				}
-				if !strings.Contains(strings.Join(p.Items[1].Reasons, "; "), "is also contributed as json by k1/one") {
-					t.Errorf("section claimant reasons %v", p.Items[1].Reasons)
+				wantSection := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Cause: CauseClaimedAsJSON, Rivals: []string{"k1/one"}}}
+				if diff := cmp.Diff(wantSection, p.Items[1].Conflicts); diff != "" {
+					t.Errorf("section claimant conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -1236,8 +1291,12 @@ func TestPlanFileUpdates(t *testing.T) {
 		"user modification with different incoming is a conflict": {
 			current: "user content\n", source: v2,
 			want: func(t *testing.T, ip *ItemPlan) {
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
-					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindFile, File: "skills/one/SKILL.md", Owner: "k/one", Cause: CauseModified}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 				if len(ip.Actions) != 0 {
 					t.Errorf("actions = %v, want none", ip.Actions)
@@ -1317,8 +1376,12 @@ func TestPlanSectionUpdates(t *testing.T) {
 		"user modification with different incoming is a conflict": {
 			current: file(user), source: v2,
 			want: func(t *testing.T, ip *ItemPlan) {
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
-					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindSection, File: "AGENTS.md", Block: "k/one", Owner: "k/one", Cause: CauseModified}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -1412,8 +1475,12 @@ func TestPlanJSONUpdates(t *testing.T) {
 		"user modification with different incoming is a conflict": {
 			current: "{\n  \"a\": 99\n}\n", source: `{"a":2}`,
 			want: func(t *testing.T, ip *ItemPlan) {
-				if ip.Status != StatusError || !strings.Contains(strings.Join(ip.Reasons, "; "), "was modified after installation") {
-					t.Fatalf("status %q reasons %v", ip.Status, ip.Reasons)
+				if ip.Status != StatusError {
+					t.Fatalf("status %q, want error", ip.Status)
+				}
+				want := []Conflict{{Kind: kit.KindJSON, File: "config.jsonc", Pointer: "/a", Owner: "k/one", Cause: CauseModified}}
+				if diff := cmp.Diff(want, ip.Conflicts); diff != "" {
+					t.Errorf("conflicts (-want +got):\n%s", diff)
 				}
 				if len(ip.Actions) != 0 {
 					t.Errorf("actions = %v, want none", ip.Actions)

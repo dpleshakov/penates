@@ -1291,3 +1291,52 @@ func TestApplySummaryExcluded(t *testing.T) {
 		t.Errorf("the excluded item wrote a file: %v", err)
 	}
 }
+
+// TestApplySummaryConflictRenders pins the excluded item's conflict line on
+// the summary and the results: the planner returns the conflict as
+// structure, and the screens spell the same line the structure describes.
+func TestApplySummaryConflictRenders(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	// The target already holds the file the kit would install: the planner
+	// refuses to touch it as possible user content.
+	if err := os.MkdirAll(filepath.Join(target, "skills", "good"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user's own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	// The summary spells the conflict before anything is written.
+	m := drive(t, app.Initial(kitDir), "enter", "space", "a")
+	sm := m.(*model)
+	if sm.screen != screenSummary {
+		t.Fatalf("screen after apply = %v, want summary", sm.screen)
+	}
+	view := sm.View()
+	want := "skills/good/SKILL.md exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user"
+	for _, part := range []string{"excluded:", "ex/good", want} {
+		if !strings.Contains(view, part) {
+			t.Errorf("summary misses %q:\n%s", part, view)
+		}
+	}
+
+	// The confirmation runs the apply: the results repeat the same line, and
+	// nothing is written.
+	m = drive(t, m, "enter")
+	rm := m.(*model)
+	if rm.screen != screenResults || !strings.Contains(rm.lastResults, want) {
+		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	}
+	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
+		t.Errorf("the user's file did not survive: %v", err)
+	}
+}

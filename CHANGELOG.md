@@ -20,6 +20,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Applying is confirmed through a summary first (RFC 10.2): it lists every change per item with the reason of each action, the removals marked with `d` together with the content they leave behind, the items kept unchanged with a warning when the kit content differs, and every excluded item with its reasons. Nothing is written until the summary is confirmed with enter; esc returns to the list with the selection intact. The variable form interrupts before anything is written, and a required variable answered with an empty string shows the item excluded on the summary instead of asking again.
 
 ### Changed
+- The README introduces the tool to a new reader — the problem it solves, the main screen, a minimal kit, and the ownership rules — instead of a summary paragraph with links to the design documents.
 - Updating an item no longer releases ownership of the json values its new version stops declaring: owned files, blocks, and json locations stay recorded exactly as installed until the item is removed, so a removal still cleans up everything penates wrote and a later version that declares the location again evaluates the user's content against the installation base.
 
 ### Fixed

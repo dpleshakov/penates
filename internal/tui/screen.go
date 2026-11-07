@@ -25,8 +25,9 @@ import (
 // terminals and the details view on enter, the filter input, and the
 // first-run state with the add-kit input. The screen keeps no selection of
 // its own: the pending actions of the target in the registry are the
-// selection, saved on every toggle. The target list, the command palette,
-// the help screen, and the kit management dialogs are later tasks.
+// selection, saved on every toggle. Selecting an item with variables opens
+// the variable form in the details (7.3). The target list, the command
+// palette, the help screen, and the kit management dialogs are later tasks.
 
 // App carries the wiring the screens work through: the state store and the
 // lock store of one penates data directory.
@@ -93,7 +94,6 @@ type screen int
 
 const (
 	screenList screen = iota
-	screenForm
 	screenSummary
 	screenResults
 )
@@ -146,15 +146,21 @@ type model struct {
 
 	changelogCache map[string][]ChangelogEntry
 
-	// answers are the variable answers given in this session's apply-time
-	// form; they win over the answers remembered in the pending actions.
-	answers     map[string]map[string]string
-	formFields  []formField
-	formCursor  int
-	formInput   textinput.Model
-	pending     *pendingApply
-	summary     string
-	lastResults string
+	// The variable form of the selection (7.3): open on selecting an item
+	// with variables, it takes the details pane or the details view until
+	// enter accepts the answers into the pending actions or esc clears the
+	// selection. formFromView records a view that was open before the form,
+	// so closing returns to it instead of the tree.
+	formOpen     bool
+	formKey      string
+	formFromView bool
+	formFields   []formField
+	formCursor   int
+	formAnswers  map[string]string
+	formInput    textinput.Model
+	pending      *pendingApply
+	summary      string
+	lastResults  string
 }
 
 // noticeTickMsg ages the notice line; the tick re-arms while a notice is
@@ -172,7 +178,7 @@ func (m *model) showNotice(text string) tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	if m.adding || m.screen == screenForm {
+	if m.adding || m.formOpen {
 		return textinput.Blink
 	}
 	return nil
@@ -196,8 +202,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.screen {
 		case screenList:
 			return m.updateList(msg)
-		case screenForm:
-			return m.updateForm(msg)
 		case screenSummary:
 			return m.updateSummary(msg)
 		case screenResults:
@@ -230,10 +234,14 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateList dispatches the keys of the main screen: the details view
-// first, then the filter and the add-kit input, then the tree.
+// updateList dispatches the keys of the main screen: the variable form
+// first, then the details view, the filter and the add-kit input, then the
+// tree.
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.notice.Clear()
+	if m.formOpen {
+		return m.updateForm(msg)
+	}
 	if m.view {
 		return m.updateView(msg)
 	}
@@ -414,7 +422,9 @@ func (m *model) spaceUnderCursor() tea.Cmd {
 
 // spaceOnItem toggles the default action of the item's status (7.1); a set
 // action clears (the footer names it "space unselect"). An item whose
-// status has no default action stays untouched.
+// status has no default action stays untouched. A selection of an item
+// with variables opens the form (7.3) — an update introducing a new one
+// included; a reset selects nothing and opens none.
 func (m *model) spaceOnItem(item ItemRow) tea.Cmd {
 	if item.Pending != nil {
 		return m.setPending(item.Key, func(it *state.ItemPending) { *it = state.ItemPending{} })
@@ -423,13 +433,19 @@ func (m *model) spaceOnItem(item ItemRow) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return m.setPending(item.Key, func(it *state.ItemPending) {
+	cmd := m.setPending(item.Key, func(it *state.ItemPending) {
 		if def == PendingReset {
 			it.Reset = true
 		} else {
 			it.Select = true
 		}
 	})
+	if def != PendingReset {
+		if c := m.openForm(item.Key); c != nil {
+			cmd = c
+		}
+	}
+	return cmd
 }
 
 // toggleRemove toggles removal on the row under the cursor (7.1): any
@@ -840,8 +856,9 @@ func (m *model) pendingActions() *state.Pending {
 	return m.reg.Pending[m.target]
 }
 
-// currentAnswers merges the answers remembered in the pending actions with
-// the ones given in this session's form; the form's answers win.
+// currentAnswers is the answer set the planning uses: the answers given at
+// selection time, held in the pending actions. They win over the ones
+// recorded in the lock, as plan answers do.
 func (m *model) currentAnswers() map[string]map[string]string {
 	out := map[string]map[string]string{}
 	if pending := m.pendingActions(); pending != nil {
@@ -851,21 +868,12 @@ func (m *model) currentAnswers() map[string]map[string]string {
 			}
 		}
 	}
-	for key, a := range m.answers {
-		merged := map[string]string{}
-		for id, v := range out[key] {
-			merged[id] = v
-		}
-		for id, v := range a {
-			merged[id] = v
-		}
-		out[key] = merged
-	}
 	return out
 }
 
-// answersFor is the answer set of one item: the pending answers with the
-// session's form answers over them.
+// answersFor is the answer set of one item: the answers held in the
+// pending actions; the Variables section falls back to the lock's record
+// per variable.
 func (m *model) answersFor(key string) map[string]string {
 	return m.currentAnswers()[key]
 }
@@ -994,8 +1002,6 @@ func (m *model) View() string {
 	}
 	fl := fullWidthLayout(l)
 	switch m.screen {
-	case screenForm:
-		return fl.Render(m.formFrame())
 	case screenSummary:
 		return fl.Render(m.summaryFrame())
 	case screenResults:
@@ -1004,9 +1010,9 @@ func (m *model) View() string {
 	return l.Render(m.listFrame(l))
 }
 
-// fullWidthLayout lays a non-tree screen out: the rows of the form, the
-// summary and the results are prose across the whole width, not the tree,
-// so no details pane takes its share (2.1).
+// fullWidthLayout lays a non-tree screen out: the rows of the summary and
+// the results are prose across the whole width, not the tree, so no
+// details pane takes its share (2.1).
 func fullWidthLayout(l Layout) Layout {
 	return Layout{Width: l.Width, Height: l.Height, Mode: ModeMedium, TreeWidth: l.Width, Columns: Columns{Tags: true, Description: true}}
 }
@@ -1034,12 +1040,19 @@ func (m *model) listFrame(l Layout) Frame {
 	}
 	f.Rows = lines
 	f.Cursor = cursor
-	if m.view {
+	// The form shows in the details view, and over any other width when no
+	// pane carries it: the lines render live from the draft, the window
+	// clips them (5, 7.3).
+	if m.view || (m.formOpen && l.Mode != ModeWide) {
 		h := l.Height - headerLines - footerLines
 		if m.noticeLine() != "" {
 			h--
 		}
-		f.Rows = ScrollWindow(m.viewLines, m.viewOffset, h)
+		lines := m.viewLines
+		if m.formOpen {
+			lines = RenderItemForm(m.formDetails(), m.width, m.set)
+		}
+		f.Rows = ScrollWindow(lines, m.viewOffset, h)
 		f.Cursor = 0
 	}
 	f.Details = m.detailsPane(l)
@@ -1158,8 +1171,11 @@ func (m *model) inputLine() string {
 }
 
 // footer names the keys of the row under the cursor, then the global keys
-// (2.1, 12).
+// (2.1, 12); the open form names its own.
 func (m *model) footer(width int) string {
+	if m.formOpen {
+		return formFooter
+	}
 	if m.view {
 		keys := "esc close · ↑↓ scroll"
 		if !m.viewKit {
@@ -1228,10 +1244,14 @@ func defaultVerb(p Pending, s Status) string {
 }
 
 // detailsPane is the details content of the row under the cursor on wide
-// terminals (2.2); the view leaves the pane out.
+// terminals (2.2); the view leaves the pane out, and the open form takes
+// the pane's place (7.3).
 func (m *model) detailsPane(l Layout) []string {
 	if l.Mode != ModeWide || m.view || len(m.rows) == 0 {
 		return nil
+	}
+	if m.formOpen {
+		return RenderItemForm(m.formDetails(), l.DetailsWidth, m.set)
 	}
 	switch r := m.rows[m.cursor]; r.Kind {
 	case KindItem:
@@ -1257,34 +1277,6 @@ func (m *model) viewportHeight() int {
 		v = 1
 	}
 	return v
-}
-
-// formFrame is the apply-time variable form (carried over until task 06).
-func (m *model) formFrame() Frame {
-	var rows []string
-	rows = append(rows, "required variables:", "")
-	for i, f := range m.formFields {
-		if i < m.formCursor {
-			continue
-		}
-		prefix := "  "
-		if i == m.formCursor {
-			prefix = "> "
-		}
-		prompt := f.prompt
-		if prompt == "" {
-			prompt = f.varID
-		}
-		rows = append(rows, prefix+prompt)
-		if i == m.formCursor {
-			rows = append(rows, "  "+m.formInput.View())
-		}
-	}
-	return Frame{
-		Header: "penates  " + m.target,
-		Rows:   rows,
-		Footer: fmt.Sprintf("variable %d of %d · enter next · esc cancel", m.formCursor+1, len(m.formFields)),
-	}
 }
 
 // summaryFrame is the apply summary the enter key confirms (carried over

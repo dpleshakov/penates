@@ -115,7 +115,7 @@ apply-time form interruption is removed.
 variables and check prefill, gating, and `esc`; answers land in the
 state pending and the summary shows substituted content; nothing asks
 for variables at apply time.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-07 `add-kit-and-management`
 **Description:** The kit flows of section 6: the inline input with

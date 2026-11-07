@@ -85,7 +85,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 | Target | A harness configuration directory into which items are installed. |
 | Lock | The per-target record of installed items and of everything penates owns in the target. |
 | Tag | A free-form label on an item, used only for display and filtering. |
-| Variable | A per-item parameter whose value is requested at installation and substituted into templated contributions. |
+| Variable | A per-item parameter whose value is requested when the item is selected and substituted into templated contributions. |
 
 ## 6. The model
 
@@ -363,6 +363,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - The tree groups items under their kit's row. Each item shows its state as a glyph — available, installed, update or downgrade available, modified, conflict, broken, warning, orphan, kit unavailable — and its pending action as a separate mark at the right edge. An unreadable kit is collapsed and marked; installed items no attached kit provides form an orphans group at the end.
 - `space` toggles the default action of the item's status — install, update, downgrade, or the reset of a broken item. A major update opens its details with the changelog first and is selected by the second press. `d` marks an installed item for removal; `r` requests reset where the interface names the key (7.6).
 - `enter` shows the details of the row: description, status with the reason and the next step, the pending verb, tags, variables, contributions, changelog. On a wide terminal the same content sits in a pane beside the tree and follows the cursor.
+- Selecting an item with variables — or an update that introduces a new one — turns the details into a form: the fields are prefilled with the stored answers, `tab` moves between them, `enter` is accepted only when every required field holds a value, and `esc` clears the selection. The answers are remembered with the pending actions and reach the lock on apply; nothing is asked at apply time.
 - `/` filters the tree by id, tags and description; kit rows keep their groups and show the match counts.
 - With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is; entering a kit path attaches the kit at its `target_hint`.
 - Startup opens the target that was active when penates last exited. On a later run, the previous selection is restored as the active selection; deselecting is one key.

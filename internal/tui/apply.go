@@ -5,9 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/dpleshakov/penates/internal/apply"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -16,87 +13,30 @@ import (
 )
 
 // The apply flow the main screen drives: the pending actions of the target
-// collect into one apply, the variable form interrupts before anything is
-// planned, the summary confirms, and the perform plumbing applies with the
-// same ordering as before — removals first, the installs planned from the
-// target as the removals leave it. Forms live at apply time until task 06
-// moves them to selection time; the summary keeps its format until task 09.
-
-// formField is one missing required variable the variable form asks for.
-type formField struct {
-	key    string
-	varID  string
-	prompt string
-}
+// collect into one apply, the summary confirms, and the perform plumbing
+// applies with the same ordering as before — removals first, the installs
+// planned from the target as the removals leave it. Nothing asks for
+// variables here: the forms live at selection time (7.3), and a selection
+// whose required answers went missing plans as excluded; the summary keeps
+// its format until task 09.
 
 // pendingApply is one apply waiting on the summary's confirmation: the
-// pending actions it was built from, the answers it plans with, and the
-// paths its planning touches.
+// pending actions it was built from, and the paths its planning touches.
 type pendingApply struct {
 	selection   []string
 	removals    []string
 	resets      map[string]bool
-	answers     map[string]map[string]string
 	paths       []string
 	sharedPaths []string
 }
 
-// updateForm feeds the current field; enter records the answer and moves on,
-// and the last one resumes the apply the form interrupted.
-func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "esc" {
-		m.screen = screenList
-		return m, nil
-	}
-	if msg.String() == "enter" {
-		f := m.formFields[m.formCursor]
-		if m.answers == nil {
-			m.answers = map[string]map[string]string{}
-		}
-		if m.answers[f.key] == nil {
-			m.answers[f.key] = map[string]string{}
-		}
-		m.answers[f.key][f.varID] = strings.TrimSpace(m.formInput.Value())
-		m.formCursor++
-		if m.formCursor < len(m.formFields) {
-			m.formInput.Reset()
-			return m, textinput.Blink
-		}
-		if m.pending == nil {
-			m.screen = screenList
-			return m, nil
-		}
-		m.buildSummary(m.pending)
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.formInput, cmd = m.formInput.Update(msg)
-	return m, cmd
-}
-
 // beginApply collects what the target's pending actions would apply and
-// moves to the summary it waits on. The required variables neither the lock
-// nor the collected answers provide are asked for first: the summary must
-// show the templated content as substituted.
+// moves to the summary it waits on.
 func (m *model) beginApply() {
 	p := m.collectApply()
-	m.pending = p
 	if len(p.selection) == 0 && len(p.removals) == 0 {
 		m.lastResults = "nothing selected\n"
 		m.screen = screenResults
-		return
-	}
-	if missing := plan.MissingVars(m.kits, p.selection, m.lk, p.answers); len(missing) > 0 {
-		m.formFields = nil
-		for _, key := range p.selection {
-			for _, v := range missing[key] {
-				m.formFields = append(m.formFields, formField{key: key, varID: v.ID, prompt: v.Prompt})
-			}
-		}
-		m.formCursor = 0
-		m.formInput.Reset()
-		m.formInput.Focus()
-		m.screen = screenForm
 		return
 	}
 	m.buildSummary(p)
@@ -124,7 +64,6 @@ func (m *model) collectApply() *pendingApply {
 	}
 	sort.Strings(p.selection)
 	sort.Strings(p.removals)
-	p.answers = m.currentAnswers()
 
 	var paths []string
 	seen := map[string]bool{}

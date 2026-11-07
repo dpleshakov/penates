@@ -41,6 +41,8 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnd}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -279,23 +281,28 @@ func TestRegisterListApplyFlow(t *testing.T) {
 		t.Fatalf("fresh good row = %+v", r)
 	}
 
-	// Select both items and apply: the form asks for the varitem's required
-	// variable first.
-	m = drive(t, m, "down", "space", "down", "space", "a")
+	// Select the good item, then the varitem: its selection opens the
+	// variable form at selection time (7.3), with the required field
+	// prefilled honestly empty.
+	m = drive(t, m, "down", "space", "down", "space")
 	fm := m.(*model)
-	if fm.screen != screenForm {
-		t.Fatalf("screen after apply = %v, want form", fm.screen)
+	if !fm.formOpen || fm.screen != screenList {
+		t.Fatalf("screen = %v, form open = %v; want the form open on the list", fm.screen, fm.formOpen)
 	}
-	if len(fm.formFields) != 1 || fm.formFields[0].key != "ex/varitem" || fm.formFields[0].varID != "p" || fm.formFields[0].prompt != "pick a word" {
+	if len(fm.formFields) != 1 || fm.formFields[0].varID != "p" || fm.formFields[0].prompt != "pick a word" || !fm.formFields[0].required {
 		t.Fatalf("form fields = %+v", fm.formFields)
 	}
 
-	// The answer leads to the summary first: nothing is written until the
-	// summary is confirmed.
-	m = drive(t, m, "answered", "enter")
+	// The answer lands in the pending answers, and the apply goes straight
+	// to the summary: nothing asks for variables at apply time. Nothing is
+	// written until the summary is confirmed.
+	m = drive(t, m, "answered", "enter", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after form = %v, want summary", sm.screen)
+	}
+	if sm.formOpen {
+		t.Fatal("the form stayed open after enter accepted the answers")
 	}
 	m = drive(t, m, "enter")
 	rm := m.(*model)
@@ -685,20 +692,22 @@ func TestRemoveWithFormResume(t *testing.T) {
 		t.Fatalf("install:\n%s", rm.lastResults)
 	}
 
-	// The form interrupts before anything is written: the removal of the
-	// marked item waits for the summary's confirmation.
-	m = drive(t, m, "enter", "down", "down", "down", "space", "up", "up", "d", "a")
+	// The selection of the varitem opens the form; nothing is planned or
+	// written while it waits, and the removal of the marked item waits for
+	// the summary's confirmation.
+	m = drive(t, m, "enter", "down", "down", "down", "space")
 	fm := m.(*model)
-	if fm.screen != screenForm {
-		t.Fatalf("screen after apply = %v, want form", fm.screen)
+	if !fm.formOpen {
+		t.Fatal("the selection of an item with variables opened no form")
 	}
 	if _, err := os.Stat(filepath.Join(target, "AGENTS.md")); err != nil {
-		t.Fatalf("the removal ran before the form: %v", err)
+		t.Fatalf("the selection ran before the form: %v", err)
 	}
 
-	// The answer leads to the summary; it lists the removal and the install
-	// together.
-	m = drive(t, m, "answered", "enter")
+	// The answer lands in the pending answers; marking the removal and
+	// applying goes straight to the summary, and it lists the removal and
+	// the install together.
+	m = drive(t, m, "answered", "enter", "up", "up", "d", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after form = %v, want summary", sm.screen)
@@ -834,9 +843,11 @@ func TestItemDetailsView(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	// Install both items so the answers of varitem are recorded.
+	// Install both items so the answers of varitem are recorded: the form
+	// asks at selection now, the apply goes straight through the summary.
+	// The drive ends on the results screen.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "down", "space", "a", "answered", "enter", "enter")
+	m = drive(t, m, "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/varitem") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -1309,13 +1320,26 @@ func TestApplySummaryExcluded(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	// Only the varitem is selected: its required variable opens the form,
-	// and the empty answer leaves the variable without a value.
+	// A selection whose required answers are missing — one restored from an
+	// earlier session, say — plans as excluded: nothing asks for variables
+	// at apply time (7.3).
+	// The target must be registered before the pending actions seed: the
+	// kit attaches, then the selection without answers goes into the state.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "down", "space", "a", "enter")
+	m = drive(t, m, "enter")
+	if err := stateStore.Update(func(reg *state.Registry) error {
+		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
+			"ex/varitem": {Select: true},
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m = resize(t, app.Initial(""), 100, 30)
+	m = drive(t, m, "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
-		t.Fatalf("screen after form = %v, want summary", sm.screen)
+		t.Fatalf("screen after apply = %v, want summary without a form", sm.screen)
 	}
 	view := sm.View()
 	for _, want := range []string{"excluded:", "ex/varitem", `required variable "p" has no value`} {

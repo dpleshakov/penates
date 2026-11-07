@@ -1,6 +1,6 @@
 # 2026-11-07-tasks-tui-core.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -88,4 +88,4 @@ per-item progress.
 the existing reconciliation repairs (test); a mixed plan stepped through
 produces the same lock and target content as the monolithic path (test);
 step boundaries expose per-item start and result.
-**Status:** Pending
+**Status:** Done

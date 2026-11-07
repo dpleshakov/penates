@@ -49,7 +49,7 @@ func TestApplyInstalls(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results := Apply(root, stagedPlan(kitDir, "k/one"), lk, store)
+	results := Apply(root, stagedPlan(kitDir, "k/one"), lk, store, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("results = %+v", results)
 	}
@@ -133,7 +133,7 @@ func TestApplyKeepsRecordedContent(t *testing.T) {
 		Status:  plan.StatusInstall,
 		Actions: []plan.Action{{Kind: plan.ActionFile, To: "skills/one/SKILL.md", Content: []byte("updated\n")}},
 	}}}
-	results := Apply(root, p, lk, store)
+	results := Apply(root, p, lk, store, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("results = %+v", results)
 	}
@@ -177,7 +177,7 @@ func TestApplyFailureLeavesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results := Apply(root, stagedPlan(kitDir, "k/one"), lk, store)
+	results := Apply(root, stagedPlan(kitDir, "k/one"), lk, store, nil)
 	if len(results) != 1 || results[0].Err == nil {
 		t.Fatalf("results = %+v, want one failure", results)
 	}
@@ -216,7 +216,7 @@ func TestFailureOfOneItemDoesNotBlockTheNext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results := Apply(root, stagedPlan(kitDir, "k/bad", "k/good"), lk, store)
+	results := Apply(root, stagedPlan(kitDir, "k/bad", "k/good"), lk, store, nil)
 	if len(results) != 2 {
 		t.Fatalf("results = %+v", results)
 	}
@@ -291,7 +291,7 @@ func TestRemoveExecutesThePlan(t *testing.T) {
 			{Kind: plan.ActionRemove, To: "config.jsonc"},
 		}},
 	}}
-	results := Remove(root, p, lk, store)
+	results := Remove(root, p, lk, store, nil)
 	if len(results) != 4 {
 		t.Fatalf("results = %+v", results)
 	}
@@ -354,7 +354,7 @@ func TestRemoveRejectsForeignActions(t *testing.T) {
 		Key: "k/one", Status: plan.StatusRemove,
 		Actions: []plan.Action{{Kind: plan.ActionFile, To: "skills/one/SKILL.md", Content: []byte("x")}},
 	}}}
-	results := Remove(root, p, lk, store)
+	results := Remove(root, p, lk, store, nil)
 	if len(results) != 1 || results[0].Err == nil {
 		t.Fatalf("results = %+v, want one failure", results)
 	}
@@ -404,7 +404,7 @@ func TestApplyInstallsJSON(t *testing.T) {
 		JSONLocations: map[string][]plan.Location{"config.jsonc": {loc}},
 		Answers:       map[string]string{"root": "/opt/x"},
 	}}}
-	results := Apply(root, p, lk, store)
+	results := Apply(root, p, lk, store, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("results = %+v", results)
 	}
@@ -452,7 +452,7 @@ func TestApplyRecordsCoOwnershipWithoutWrites(t *testing.T) {
 		Key: "k/two", KitName: "k", ItemID: "two", Version: "1.0.0", Status: plan.StatusInstall,
 		JSONLocations: map[string][]plan.Location{"config.jsonc": {loc}},
 	}}}
-	results := Apply(root, p, lk, store)
+	results := Apply(root, p, lk, store, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("results = %+v", results)
 	}

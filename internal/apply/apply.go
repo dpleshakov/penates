@@ -1,6 +1,6 @@
-// Package apply executes a plan: applies an item completely or not at all, writes
-// atomically through temp files, updates the lock on success, and reconciles after an
-// interruption.
+// Package apply executes a plan step by step: every step applies or removes one
+// item completely or not at all, writes atomically through temp files, records
+// the lock only for completed items, and reconciles after an interruption.
 package apply
 
 import (
@@ -27,16 +27,41 @@ type Result struct {
 	Err error
 }
 
-// Apply executes every installable item of a plan into the target root. Each item is
-// staged in full — every file written to a temp name beside its destination — before
-// anything is renamed into place, and the lock records the item only after all of
-// its files are in place, so the lock never describes an item that is not fully
-// applied. A failing item leaves no files and no empty directories behind; the items
-// around it are unaffected.
-func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result {
+// StepEvent reports one boundary of a step: the start of a step, then its
+// result. A client shows per-item progress from the stream of events.
+type StepEvent struct {
+	// Key is the item key the step executes.
+	Key string
+	// Start marks the start boundary; the result boundary reports it false.
+	Start bool
+	// Err is the step's failure, set on the result boundary only.
+	Err error
+}
+
+// emit reports one step boundary to on, which may be nil.
+func emit(on func(StepEvent), ev StepEvent) {
+	if on != nil {
+		on(ev)
+	}
+}
+
+// Apply executes every installable item of a plan into the target root, one
+// step per item. Each item is staged in full — every file written to a temp
+// name beside its destination — before anything is renamed into place, and the
+// lock records the item only after all of its files are in place, so the lock
+// never describes an item that is not fully applied. A failing item leaves no
+// files and no empty directories behind; the items around it are unaffected.
+// on, when not nil, sees the start and the result of every step, so a client
+// can show per-item progress. The caller plans from a snapshot fresh to the
+// target and hands the steps that plan: a step writes what its planning
+// observed, nothing more.
+func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store, on func(StepEvent)) []Result {
 	var results []Result
 	for _, ip := range p.Installable() {
-		if err := applyItem(root, ip, lk, store); err != nil {
+		emit(on, StepEvent{Key: ip.Key, Start: true})
+		err := ApplyItem(root, ip, lk, store)
+		emit(on, StepEvent{Key: ip.Key, Err: err})
+		if err != nil {
 			results = append(results, Result{Key: ip.Key, Err: err})
 			continue
 		}
@@ -45,7 +70,12 @@ func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result
 	return results
 }
 
-func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
+// ApplyItem executes one install step: it applies the item plan completely or
+// not at all, writing atomically through temp files, and the lock records the
+// item only after all of its files are in place, so the lock never describes
+// an item that is not fully applied. A failing step leaves no files and no
+// empty directories behind.
+func ApplyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
 	var createdDirs []string
 	var staged []string
 	fail := func(err error) error {
@@ -148,16 +178,23 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	return nil
 }
 
-// Remove executes every removal item of a plan into the target root.
-// Content actions are staged like writes and renamed into place only after
-// the whole item is staged, and the deletions happen after the staging, so a
-// failing item leaves the target as it was. On success the item's lock record
-// dies, the shared files deleted here leave the created list, and the
+// Remove executes every removal item of a plan into the target root, one step
+// per item. Content actions are staged like writes and renamed into place only
+// after the whole item is staged, and the deletions happen after the staging,
+// so a failing item leaves the target as it was. On success the item's lock
+// record dies, the shared files deleted here leave the created list, and the
 // directories penates created for the item are removed while they are empty.
-func Remove(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result {
+// on, when not nil, sees the start and the result of every step, so a client
+// can show per-item progress. The caller plans from a snapshot fresh to the
+// target and hands the steps that plan: a step writes what its planning
+// observed, nothing more.
+func Remove(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store, on func(StepEvent)) []Result {
 	var results []Result
 	for _, ip := range p.Removals() {
-		if err := removeItem(root, ip, lk, store); err != nil {
+		emit(on, StepEvent{Key: ip.Key, Start: true})
+		err := RemoveItem(root, ip, lk, store)
+		emit(on, StepEvent{Key: ip.Key, Err: err})
+		if err != nil {
 			results = append(results, Result{Key: ip.Key, Err: err})
 			continue
 		}
@@ -166,7 +203,11 @@ func Remove(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Resul
 	return results
 }
 
-func removeItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
+// RemoveItem executes one removal step: it rewrites and deletes what the item
+// plan describes, and the lock stops recording the item only after the target
+// is rewritten and the deletions are done. A failing step leaves the target as
+// it was and the item recorded.
+func RemoveItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
 	rec := lk.Items[ip.Key]
 	if rec == nil {
 		return fmt.Errorf("remove %s: the item is not recorded in the lock", ip.Key)

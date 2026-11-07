@@ -1063,7 +1063,7 @@ func (m *model) performApply(p *pendingApply) {
 			remove[key] = true
 		}
 		rp := plan.BuildRemoval(plan.Input{Lock: m.lk, Snapshot: snap, Remove: remove})
-		results := apply.Remove(m.target, rp, m.lk, m.app.Locks)
+		results := apply.Remove(m.target, rp, m.lk, m.app.Locks, nil)
 		errors := map[string]string{}
 		removed := map[string]bool{}
 		for _, r := range results {
@@ -1134,7 +1134,7 @@ func (m *model) performApply(p *pendingApply) {
 			Reconciled: m.reconcil,
 		})
 		m.resets = nil
-		results := apply.Apply(m.target, planned, m.lk, m.app.Locks)
+		results := apply.Apply(m.target, planned, m.lk, m.app.Locks, nil)
 		errors := map[string]string{}
 		for _, r := range results {
 			if r.Err != nil {

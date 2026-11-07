@@ -87,7 +87,7 @@ func TestInstallEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources, Answers: fresh})
-		results := Apply(targetDir, p, lk, locks)
+		results := Apply(targetDir, p, lk, locks, nil)
 		for _, r := range results {
 			if r.Err != nil {
 				t.Fatalf("apply %s: %v", r.Key, r.Err)
@@ -196,7 +196,7 @@ func TestRemoveEndToEnd(t *testing.T) {
 		Snapshot:  snap,
 		Sources:   sources,
 	})
-	results := Apply(targetDir, p, lk, locks)
+	results := Apply(targetDir, p, lk, locks, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("install results = %+v", results)
 	}
@@ -224,7 +224,7 @@ func TestRemoveEndToEnd(t *testing.T) {
 	if len(rp.Items) != 1 || rp.Items[0].Status != plan.StatusRemove {
 		t.Fatalf("removal plan = %+v", rp.Items)
 	}
-	results = Remove(targetDir, rp, lk, locks)
+	results = Remove(targetDir, rp, lk, locks, nil)
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("removal results = %+v", results)
 	}
@@ -303,7 +303,7 @@ func TestReconcileAfterInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := plan.Build(plan.Input{Kits: []*kit.Kit{k}, Selection: []string{"demo/one"}, Lock: lk, Snapshot: snap, Sources: sources})
-	results := Apply(targetDir, p, lk, locks)
+	results := Apply(targetDir, p, lk, locks, nil)
 	for _, r := range results {
 		if r.Err != nil {
 			t.Fatalf("install %s: %v", r.Key, r.Err)
@@ -372,7 +372,7 @@ func TestReconcileAfterInterruption(t *testing.T) {
 	if len(p.Items[0].Actions) != 1 || p.Items[0].Actions[0].To != "skills/one/conf.md" {
 		t.Fatalf("repair actions = %v, want the lost file alone", p.Items[0].Actions)
 	}
-	results = Apply(targetDir, p, lk, locks)
+	results = Apply(targetDir, p, lk, locks, nil)
 	for _, r := range results {
 		if r.Err != nil {
 			t.Fatalf("repair %s: %v", r.Key, r.Err)
@@ -498,7 +498,7 @@ func TestInstallSectionEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources})
-		results := Apply(targetDir, p, lk, locks)
+		results := Apply(targetDir, p, lk, locks, nil)
 		for _, r := range results {
 			if r.Err != nil {
 				t.Fatalf("apply %s: %v", r.Key, r.Err)
@@ -629,7 +629,7 @@ func TestInstallJSONEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := plan.Build(plan.Input{Kits: kits, Selection: selection, Lock: lk, Snapshot: snap, Sources: sources})
-		results := Apply(targetDir, p, lk, locks)
+		results := Apply(targetDir, p, lk, locks, nil)
 		for _, r := range results {
 			if r.Err != nil {
 				t.Fatalf("apply %s: %v", r.Key, r.Err)

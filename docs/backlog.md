@@ -18,6 +18,11 @@ Accepted work that has not started yet, in priority order.
 **Context:** v1 ships the variable alone (docs/tui-screens.md, 3.3). The sketched scheme, if detection is wanted: `PENATES_ASCII` overrides everything; on Windows, a console output code page other than 65001 selects the ASCII set; on Unix, an encoding other than UTF-8 in LC_ALL, LC_CTYPE, or LANG does. The open question is less feasibility than need: whether users run terminals that are both broken for Unicode and not known to them. Decide after the new TUI sees real use.
 **Added:** 2026-11-07, in the TUI rework discussion
 
+### `tui-tempdir-flake`
+**Goal:** Attribute the intermittent `internal/tui` test failure on this machine — a Windows temp-directory cleanup error, seen roughly once per twenty runs — and fix it if it is ours.
+**Context:** Observed while reviewing the apply-stepping change; the step bodies changed nothing about file operations, and the failure happens in the test cleanup, after the test body passed. Prime suspect is the environment: Windows go.exe driven from WSL over the drvfs mount, possibly with antivirus locking fresh files. If the CI Windows leg never shows it, close the entry as environmental.
+**Added:** 2026-11-07, during the TUI core tasks
+
 ### `mouse-support`
 **Goal:** Additive mouse input for the TUI: a click moves the cursor, clicking the pending column toggles the default action, the wheel scrolls, and clicking the target in the header opens the target list (docs/tui-screens.md, 3.3).
 **Context:** Postponed from the v1 TUI rework: the keyboard covers every action, so the mouse adds convenience only; the design does not depend on it.

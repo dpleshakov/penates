@@ -181,7 +181,7 @@ func TestTargetListAddTarget(t *testing.T) {
 	// esc cancels the input and keeps the list.
 	lm = drive(t, lm, "esc").(*model)
 	if lm.list.adding || lm.list == nil {
-		t.Fatalf("adding %v, list %v; want the input cancelled, the list open", lm.list.adding, lm.list != nil)
+		t.Fatalf("adding %v, list %v; want the input canceled, the list open", lm.list.adding, lm.list != nil)
 	}
 	lm = drive(t, lm, "enter").(*model)
 

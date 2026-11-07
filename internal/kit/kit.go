@@ -170,9 +170,7 @@ func Load(dir string) (*Kit, error) {
 		}
 		errs := make([]error, 0, len(problems)+1)
 		errs = append(errs, err)
-		for _, p := range problems {
-			errs = append(errs, p)
-		}
+		errs = append(errs, problems...)
 		return nil, errors.Join(errs...)
 	}
 	if len(problems) > 0 {
@@ -276,13 +274,14 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 	it.Tags = f.Tags
 	it.HasChangelog = fileExists(filepath.Join(dir, "CHANGELOG.md"))
 
-	if f.ID == "" {
+	switch {
+	case f.ID == "":
 		fail(file, "id", "is required")
-	} else if !idSyntax.MatchString(f.ID) {
+	case !idSyntax.MatchString(f.ID):
 		fail(file, "id", "must match %s", idSyntax)
-	} else if ids[f.ID] {
+	case ids[f.ID]:
 		fail(file, "id", "%q is already used by another item in this kit", f.ID)
-	} else {
+	default:
 		ids[f.ID] = true
 	}
 
@@ -295,14 +294,15 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 	seenVar := map[string]bool{}
 	for i, v := range f.Vars {
 		field := fmt.Sprintf("vars[%d]", i)
-		if v.ID == "" {
+		switch {
+		case v.ID == "":
 			fail(file, field+".id", "is required")
-		} else if seenVar[v.ID] {
+		case seenVar[v.ID]:
 			fail(file, field+".id", "%q is declared twice", v.ID)
-		} else {
+		default:
 			seenVar[v.ID] = true
 		}
-		it.Vars = append(it.Vars, Var{ID: v.ID, Prompt: v.Prompt, Required: v.Required})
+		it.Vars = append(it.Vars, Var(v))
 	}
 
 	for i, c := range f.Contributes {
@@ -339,7 +339,6 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 			continue
 		}
 		it.Contributes = append(it.Contributes, resolveSource(dir, kind, src, c.To, c.Template, field, file, fail)...)
-
 	}
 
 	return it, problems

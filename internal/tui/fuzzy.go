@@ -42,7 +42,8 @@ func FuzzyMatch(pattern, s string) (int, bool) {
 			return 0, false
 		}
 		score += 2
-		if prev < 0 {
+		switch {
+		case prev < 0:
 			// The first match: at the start of the string, or after a
 			// word boundary.
 			if found == 0 {
@@ -50,10 +51,10 @@ func FuzzyMatch(pattern, s string) (int, bool) {
 			} else if fuzzBoundary(t, found) {
 				score += 2
 			}
-		} else if found == prev+1 {
+		case found == prev+1:
 			// Extending a consecutive run.
 			score += 2
-		} else {
+		default:
 			// Every skipped rune costs; landing after a word boundary
 			// wins the cost back once.
 			score -= found - prev - 1

@@ -1,7 +1,7 @@
 // Package plan is the pure decision core: kits, lock, snapshot, and source
 // contents in; a plan out — self-contained actions with final content bytes,
 // plain reasons and structured conflicts per item, and the JSON locations
-// each item owns. It implements the behaviour rules of the product concept
+// each item owns. It implements the behavior rules of the product concept
 // (docs/concept.md) — among them the three-state conflict model and the
 // per-location table for json contributions — and performs no I/O.
 package plan

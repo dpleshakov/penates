@@ -96,25 +96,26 @@ func (m mark) rendered(set Set) string {
 type Status int
 
 const (
-	// StatusAvailable: not installed.
+	// StatusAvailable — not installed.
 	StatusAvailable Status = iota
-	// StatusInstalled: matches the kit.
+	// StatusInstalled — matches the kit.
 	StatusInstalled
-	// StatusUpdate: an update is available.
+	// StatusUpdate — an update is available.
 	StatusUpdate
-	// StatusDowngrade: a downgrade is available.
+	// StatusDowngrade — a downgrade is available.
 	StatusDowngrade
-	// StatusModified: modified by the user; kit content unchanged.
+	// StatusModified — modified by the user; kit content unchanged.
 	StatusModified
-	// StatusConflict.
+	// StatusConflict — a claimed location collides: with a rival, another
+	// owner, or changed content.
 	StatusConflict
-	// StatusBroken: owned content is missing from the target.
+	// StatusBroken — owned content is missing from the target.
 	StatusBroken
-	// StatusWarning: kit content changed without a version change.
+	// StatusWarning — kit content changed without a version change.
 	StatusWarning
-	// StatusOrphan: removed from its kit.
+	// StatusOrphan — removed from its kit.
 	StatusOrphan
-	// StatusUnavailable: the kit cannot be read.
+	// StatusUnavailable — the kit cannot be read.
 	StatusUnavailable
 )
 
@@ -144,11 +145,11 @@ func (s Status) Mark(set Set) string { return statusMarks[s].rendered(set) }
 type Pending int
 
 const (
-	// PendingApply: install, update or downgrade.
+	// PendingApply — install, update or downgrade.
 	PendingApply Pending = iota
-	// PendingReset: reset to kit.
+	// PendingReset — reset to kit.
 	PendingReset
-	// PendingRemove.
+	// PendingRemove — removal of the installed item.
 	PendingRemove
 )
 

@@ -1,6 +1,6 @@
 // Command penates installs kit items into agent harness configuration directories.
 //
-// The product behaviour is specified in docs/concept.md; the modules and their rules
+// The product behavior is specified in docs/concept.md; the modules and their rules
 // in docs/architecture.md.
 package main
 

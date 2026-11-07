@@ -267,6 +267,8 @@ func (m *model) clearNotice() {
 	m.noticeUndo = nil
 }
 
+// Init schedules the commands the opening view needs: the input blink, the
+// first preview read, and the aging of a visible notice.
 func (m *model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	switch {
@@ -285,6 +287,8 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Update applies one bubbletea message and returns the model and the
+// commands it produced.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -421,7 +425,7 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // view: the preview view of 6.2 keeps the flow's keys. A key press clears
 // the notice — except u acting on the undo the notice offers (11.2).
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if !(msg.String() == "u" && m.notice.Visible() && m.noticeUndo != nil) {
+	if msg.String() != "u" || !m.notice.Visible() || m.noticeUndo == nil {
 		m.clearNotice()
 	}
 	if m.dialog != nil {

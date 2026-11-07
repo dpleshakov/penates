@@ -53,7 +53,7 @@ by `PENATES_ASCII=1`, and the ASCII spinner fallback of 10.2.
 **Definition of done:** table tests cover every status and pending mark
 in the Unicode and ASCII sets, with and without NO_COLOR; the spinner
 falls back to `|` `/` `-` `\`.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `tree-model`
 **Description:** The pure model behind the body (3.4): one tree of kit

@@ -43,7 +43,7 @@ key or after a few seconds.
 64, and below-minimum sizes and assert regions, dropped columns,
 shortening, and the minimum-size message; a resize test re-lays out
 without losing the cursor; the notice clears by key and by timeout.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-02 `visual-language`
 **Description:** The glyph and color tables of 3.1–3.3: status and

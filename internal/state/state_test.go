@@ -76,3 +76,34 @@ func TestQueries(t *testing.T) {
 		t.Errorf("Targets (-want +got):\n%s", diff)
 	}
 }
+
+func TestDefaultDirXDGConfigHome(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", base)
+
+	dir, err := DefaultDir()
+	if err != nil {
+		t.Fatalf("DefaultDir: %v", err)
+	}
+	if want := filepath.Join(base, "penates"); dir != want {
+		t.Errorf("DefaultDir = %q, want %q", dir, want)
+	}
+}
+
+func TestDefaultDirUnderHome(t *testing.T) {
+	home := t.TempDir()
+	// An empty XDG_CONFIG_HOME counts as unset, so the default branch applies.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	// os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows; set both so
+	// the test is deterministic on every OS.
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	dir, err := DefaultDir()
+	if err != nil {
+		t.Fatalf("DefaultDir: %v", err)
+	}
+	if want := filepath.Join(home, ".config", "penates"); dir != want {
+		t.Errorf("DefaultDir = %q, want %q", dir, want)
+	}
+}

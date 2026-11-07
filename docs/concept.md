@@ -177,7 +177,7 @@ penates supports global harness configuration directories only. A target is regi
 
 ### 6.7 Application state
 
-All state is kept in the penates data directory (`os.UserConfigDir()/penates`). Nothing is written into a target other than the contributions themselves.
+All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty). Nothing is written into a target other than the contributions themselves.
 
 - **Configuration:** registered kits with their paths, registered targets, the mapping of kits to targets, and the most recent selection per target.
 - **Lock:** one file per target, keyed by the target path.

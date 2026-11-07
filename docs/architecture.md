@@ -49,7 +49,7 @@ only client.
 |---|---|
 | `cmd/penates` | Process entry: argument handling, wiring, running the TUI. No logic. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. |
-| `internal/state` | Application state (concept: application state): registered kits and targets, the kit-to-target mapping, the last selection, variable answers. Persists under `os.UserConfigDir()/penates`. |
+| `internal/state` | Application state (concept: application state): registered kits and targets, the kit-to-target mapping, the last selection, variable answers. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. |
 | `internal/lock` | The per-target lock (concept: application state): read, write, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
 | `internal/markdown` | Pure text manipulation over managed blocks in shared Markdown files: parses the block layout and performs the append, replace, and removal operations section contributions are planned and removed with (concept: section contributions, removal). Knows no file system. |

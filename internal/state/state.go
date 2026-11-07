@@ -1,6 +1,3 @@
-// Package state holds the application state: registered kits and targets, the
-// kit-to-target mapping, the last selection, and variable answers. It persists under
-// os.UserConfigDir()/penates and writes nothing anywhere else.
 package state
 
 import (
@@ -36,14 +33,17 @@ type State struct {
 	Selections map[string][]string `json:"selections"`
 }
 
-// DefaultDir returns the penates data directory under the user configuration
-// directory.
+// DefaultDir returns the penates data directory: $XDG_CONFIG_HOME/penates when
+// XDG_CONFIG_HOME is set and non-empty, otherwise ~/.config/penates.
 func DefaultDir() (string, error) {
-	base, err := os.UserConfigDir()
+	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
+		return filepath.Join(base, "penates"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "penates"), nil
+	return filepath.Join(home, ".config", "penates"), nil
 }
 
 // Open returns the store of dir, creating the directory if needed.

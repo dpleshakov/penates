@@ -19,8 +19,8 @@ Accepted work that has not started yet, in priority order.
 **Added:** 2026-11-07, in the TUI rework discussion
 
 ### `tui-tempdir-flake`
-**Goal:** Attribute the intermittent `internal/tui` test failure on this machine — a Windows temp-directory cleanup error, seen roughly once per twenty runs — and fix it if it is ours.
-**Context:** Observed while reviewing the apply-stepping change; the step bodies changed nothing about file operations, and the failure happens in the test cleanup, after the test body passed. Prime suspect is the environment: Windows go.exe driven from WSL over the drvfs mount, possibly with antivirus locking fresh files. If the CI Windows leg never shows it, close the entry as environmental.
+**Goal:** Track the intermittent `internal/tui` test failure on this machine and fix it if it ever turns out to be ours.
+**Context:** The exact failure is `t.TempDir` RemoveAll cleanup: `unlinkat …\TestListStatuses…\locks: The directory is not empty` — seen roughly once per twenty full runs, always after the test body passed. Not a busy handle (Windows would refuse with "being used by another process"): the deletion of files inside `locks` lags behind the directory removal on the WSL drvfs mount, likely widened by antivirus scanning fresh files. The tui tests hit the window most because they save locks most. Nothing in the code holds handles across the cleanup, and the apply-stepping change did not touch the step bodies. Expected to be unreachable on the CI runners' native file systems; close after CI confirms, or if it ever shows there, treat as a real defect.
 **Added:** 2026-11-07, during the TUI core tasks
 
 ### `mouse-support`

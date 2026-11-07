@@ -67,7 +67,7 @@ rows; pending actions per row following the 7.1 table.
 lock, snapshot, and plans — summaries count by glyph, frozen rows keep
 their groups, filter counts are right, default actions follow statuses;
 the model performs no I/O.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `details-renderer`
 **Description:** The shared content of the details pane and the details

@@ -1636,6 +1636,16 @@ func TestBuildRemoval(t *testing.T) {
 	bHash := hashOf([]byte(`"b"`))
 	fileHash := hashOf([]byte("installed\n"))
 	userHash := hashOf([]byte("user changed\n"))
+
+	// wantKept asserts the one kept note of an item plan: the path, the
+	// pointer of a kept json value, and the reason it stayed.
+	wantKept := func(t *testing.T, ip *ItemPlan, path, pointer, reason string) {
+		t.Helper()
+		if len(ip.Kept) != 1 || ip.Kept[0].Path != path || ip.Kept[0].Pointer != pointer || ip.Kept[0].Reason != reason {
+			t.Errorf("kept = %v, want {%s pointer:%s %s}", ip.Kept, path, pointer, reason)
+		}
+	}
+
 	tests := map[string]struct {
 		lockItems map[string]*lock.Item
 		created   []string
@@ -1663,8 +1673,8 @@ func TestBuildRemoval(t *testing.T) {
 				if a.Kind != ActionRemove || a.To != "skills/one/SKILL.md" || a.Reason != "the owned file is removed unchanged" {
 					t.Errorf("action = %+v", a)
 				}
-				if len(ip.Reports) != 0 {
-					t.Errorf("reports = %v, want none", ip.Reports)
+				if len(ip.Kept) != 0 {
+					t.Errorf("kept = %v, want none", ip.Kept)
 				}
 			},
 		},
@@ -1680,9 +1690,7 @@ func TestBuildRemoval(t *testing.T) {
 				if ip.Status != StatusRemove || len(ip.Actions) != 0 {
 					t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
 				}
-				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], "kept skills/one/SKILL.md: modified by the user") {
-					t.Errorf("reports = %v", ip.Reports)
-				}
+				wantKept(t, ip, "skills/one/SKILL.md", "", "modified by the user")
 			},
 		},
 		"a file the user added beside the owned ones is never planned": {
@@ -1701,9 +1709,9 @@ func TestBuildRemoval(t *testing.T) {
 				if len(ip.Actions) != 1 || ip.Actions[0].To != "skills/one/SKILL.md" {
 					t.Fatalf("actions = %v, want only the owned file", ip.Actions)
 				}
-				for _, note := range ip.Reports {
-					if strings.Contains(note, "extra.md") || strings.Contains(note, "deeper.md") {
-						t.Errorf("the user's file reached the plan: %q", note)
+				for _, note := range ip.Kept {
+					if note.Path == "skills/one/extra.md" || note.Path == "skills/one/deeper.md" {
+						t.Errorf("the user's file reached the plan: %q", note.Path)
 					}
 				}
 			},
@@ -1716,7 +1724,7 @@ func TestBuildRemoval(t *testing.T) {
 			remove: []string{"k/one"},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Kept) != 0 {
 					t.Errorf("item = %+v", ip)
 				}
 			},
@@ -1772,9 +1780,7 @@ func TestBuildRemoval(t *testing.T) {
 				if got := string(a.Content); got != "# Notes\n\n## House rules\n\nuser body\n\ntail\n" {
 					t.Errorf("content =\n%q\nwant the block text kept without its markers", got)
 				}
-				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], "kept the block content in AGENTS.md: modified by the user") {
-					t.Errorf("reports = %v", ip.Reports)
-				}
+				wantKept(t, ip, "AGENTS.md", "", "modified by the user")
 			},
 		},
 		"a block the user deleted already plans nothing": {
@@ -1786,7 +1792,7 @@ func TestBuildRemoval(t *testing.T) {
 			remove: []string{"k/one"},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Kept) != 0 {
 					t.Errorf("item = %+v", ip)
 				}
 			},
@@ -1885,7 +1891,7 @@ func TestBuildRemoval(t *testing.T) {
 			remove: []string{"k/one"},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Kept) != 0 {
 					t.Errorf("item = %+v", ip)
 				}
 			},
@@ -1902,9 +1908,7 @@ func TestBuildRemoval(t *testing.T) {
 				if len(ip.Actions) != 0 {
 					t.Fatalf("actions = %v, want none", ip.Actions)
 				}
-				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/theme" in config.jsonc: modified by the user`) {
-					t.Errorf("reports = %v", ip.Reports)
-				}
+				wantKept(t, ip, "config.jsonc", "/theme", "modified by the user")
 			},
 		},
 		"an array element the user replaced is kept and reported": {
@@ -1919,9 +1923,7 @@ func TestBuildRemoval(t *testing.T) {
 				if len(ip.Actions) != 0 {
 					t.Fatalf("actions = %v, want none: the array is the user's now", ip.Actions)
 				}
-				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/tags" in config.jsonc: modified by the user`) {
-					t.Errorf("reports = %v", ip.Reports)
-				}
+				wantKept(t, ip, "config.jsonc", "/tags", "modified by the user")
 			},
 		},
 		"an array element the user removed is kept and reported": {
@@ -1936,9 +1938,7 @@ func TestBuildRemoval(t *testing.T) {
 				if len(ip.Actions) != 0 {
 					t.Fatalf("actions = %v, want none: the array is the user's now", ip.Actions)
 				}
-				if len(ip.Reports) != 1 || !strings.Contains(ip.Reports[0], `kept "/tags" in config.jsonc: modified by the user`) {
-					t.Errorf("reports = %v", ip.Reports)
-				}
+				wantKept(t, ip, "config.jsonc", "/tags", "modified by the user")
 			},
 		},
 		"a scalar the user replaced with an array holding it loses the value": {
@@ -1961,8 +1961,8 @@ func TestBuildRemoval(t *testing.T) {
 				if strings.Contains(got, `"dark"`) || !strings.Contains(got, `"light"`) {
 					t.Errorf("content =\n%s\nwant the recorded value gone and the user's element kept", got)
 				}
-				if len(ip.Reports) != 0 {
-					t.Errorf("reports = %v, want none", ip.Reports)
+				if len(ip.Kept) != 0 {
+					t.Errorf("kept = %v, want none", ip.Kept)
 				}
 			},
 		},
@@ -1975,7 +1975,7 @@ func TestBuildRemoval(t *testing.T) {
 			remove: []string{"k/one"},
 			want: func(t *testing.T, p *Plan) {
 				ip := p.Items[0]
-				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Reports) != 0 {
+				if ip.Status != StatusRemove || len(ip.Actions) != 0 || len(ip.Kept) != 0 {
 					t.Errorf("item = %+v", ip)
 				}
 			},

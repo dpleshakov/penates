@@ -40,8 +40,7 @@ func registerKitAt(t *testing.T, st *state.Store, name, dir, target string) {
 // the summary, and return to the list.
 func installFirst(t *testing.T, m tea.Model) tea.Model {
 	t.Helper()
-	m = drive(t, m, "down", "space", "a", "enter")
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "down", "space", "a", "enter", "enter")
 	return m
 }
 
@@ -189,16 +188,16 @@ func TestDetachRemoveThenDetachWaitsForTheApply(t *testing.T) {
 
 	// The apply removes the items and completes the deferred detach; the
 	// report names it.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm := m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("screen after apply = %v, want results", rm.screen)
 	}
-	if !strings.Contains(rm.lastResults, "removed  team/titem") {
-		t.Errorf("results miss the removal:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "removed    titem") {
+		t.Errorf("results miss the removal:\n%s", rm.resultText())
 	}
-	if !strings.Contains(rm.lastResults, "completed the deferred detach of team from "+target) {
-		t.Errorf("results miss the completed detach:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "completed the deferred detach of team from "+target) {
+		t.Errorf("results miss the completed detach:\n%s", rm.resultText())
 	}
 
 	reg := registryOf(t, st)
@@ -238,11 +237,11 @@ func TestDetachDeferredDroppedByTheApply(t *testing.T) {
 	if err := st.DeferDetachKit("team", target); err != nil {
 		t.Fatal(err)
 	}
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "dropped the deferred detach of team from "+target) ||
-		!strings.Contains(rm.lastResults, "installed items remain: team/titem") {
-		t.Errorf("results miss the dropped detach:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "dropped the deferred detach of team from "+target) ||
+		!strings.Contains(rm.resultText(), "installed items remain: team/titem") {
+		t.Errorf("results miss the dropped detach:\n%s", rm.resultText())
 	}
 	reg := registryOf(t, st)
 	if names := reg.KitsFor(target); len(names) != 1 {

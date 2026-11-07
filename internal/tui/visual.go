@@ -159,6 +159,27 @@ var pendingMarks = [...]mark{
 	PendingRemove: {unicode: "−", ascii: "-", role: roleRed},
 }
 
+// The path marks of the apply screens (10.1): what the apply does to one
+// path of an item, and the two no-write states. The table of 10.1 gives the
+// glyphs and the colors; the ASCII set keeps the glyphs, they are plain
+// ASCII already.
+var (
+	// markCreate: a file, block or JSON value is created.
+	markCreate = mark{unicode: "+", ascii: "+", role: roleGreen}
+	// markReplace: owned content is replaced.
+	markReplace = mark{unicode: "~", ascii: "~", role: roleYellow}
+	// markDelete: owned content is deleted.
+	markDelete = mark{unicode: "-", ascii: "-", role: roleRed}
+	// markKeep: no write; owned content is kept and remains owned.
+	markKeep = mark{unicode: "=", ascii: "=", role: roleDim}
+	// markRelease: no write; content is kept and released from the lock.
+	markRelease = mark{unicode: "!", ascii: "!", role: roleYellow}
+)
+
+// doneMark is the check of a finished step of the apply (10.2, 10.3); the
+// ASCII set spells it like the pending mark of 3.2 spells its check.
+var doneMark = mark{unicode: "✓", ascii: "+", role: roleGreen}
+
 // Glyph returns the pending glyph of the set (3.2), uncolored.
 func (p Pending) Glyph(set Set) string { return pendingMarks[p].glyph(set) }
 

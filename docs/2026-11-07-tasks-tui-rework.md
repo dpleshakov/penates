@@ -157,7 +157,7 @@ notes; the session record printed to the terminal on exit (10.4).
 golden test; stepping drives the progress view item by item; results
 and the exit record list the applied changes; an interruption between
 steps is repaired on the next start.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-10 `overlays-and-startup`
 **Description:** The remaining overlays and startup flows: the command

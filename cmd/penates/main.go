@@ -37,6 +37,15 @@ func run() error {
 	if len(os.Args) > 1 {
 		kitPath = os.Args[1]
 	}
-	_, err = tea.NewProgram(app.Initial(kitPath), tea.WithAltScreen()).Run()
-	return err
+	final, err := tea.NewProgram(app.Initial(kitPath), tea.WithAltScreen()).Run()
+	if err != nil {
+		return err
+	}
+	// The changes applied during the session print to the regular output
+	// after the interface closes, so a record remains in the terminal
+	// history (10.4); nothing prints when nothing was applied.
+	if rec := tui.ExitRecord(final); rec != "" {
+		fmt.Print(rec)
+	}
+	return nil
 }

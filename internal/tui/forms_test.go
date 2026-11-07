@@ -155,12 +155,12 @@ func TestSelectionFormView(t *testing.T) {
 	if m.screen != screenSummary {
 		t.Fatalf("screen after apply = %v, want summary", m.screen)
 	}
-	if view := m.View(); !strings.Contains(view, "ex/varitem 1.0.0") {
+	if view := m.View(); !strings.Contains(view, "install  varitem 1.0.0") {
 		t.Errorf("the summary misses the planned var item:\n%s", view)
 	}
-	m = drive(t, m, "enter").(*model)
-	if !strings.Contains(m.lastResults, "applied  ex/varitem 1.0.0") {
-		t.Fatalf("apply:\n%s", m.lastResults)
+	m = driveAll(t, m, "enter").(*model)
+	if !strings.Contains(m.resultText(), "installed  varitem 1.0.0") {
+		t.Fatalf("apply:\n%s", m.resultText())
 	}
 	data, err := os.ReadFile(filepath.Join(target, "skills", "varitem", "v.md"))
 	if err != nil || string(data) != "var answered on dev\n" {
@@ -288,9 +288,9 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 
 	// Install the var item with its two answers.
 	m := openFormKit(t, app, kitDir, 100, 30)
-	m = drive(t, m, "space", "answered", "tab", "dev", "enter", "a", "enter").(*model)
-	if !strings.Contains(m.lastResults, "applied  ex/varitem 1.0.0") {
-		t.Fatalf("install:\n%s", m.lastResults)
+	m = driveAll(t, m, "space", "answered", "tab", "dev", "enter", "a", "enter", "enter").(*model)
+	if !strings.Contains(m.resultText(), "installed  varitem 1.0.0") {
+		t.Fatalf("install:\n%s", m.resultText())
 	}
 
 	// The kit publishes 1.1.0 introducing a third, required variable.
@@ -326,9 +326,9 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 	}
 
 	// The update applies with the stored answers substituted.
-	m = drive(t, m, "a", "enter").(*model)
-	if !strings.Contains(m.lastResults, "applied  ex/varitem 1.1.0") {
-		t.Fatalf("update apply:\n%s", m.lastResults)
+	m = driveAll(t, m, "a", "enter", "enter").(*model)
+	if !strings.Contains(m.resultText(), "updated    varitem 1.1.0") {
+		t.Fatalf("update apply:\n%s", m.resultText())
 	}
 	data, err := os.ReadFile(filepath.Join(target, "skills", "varitem", "v.md"))
 	if err != nil || string(data) != "var answered on dev\n" {

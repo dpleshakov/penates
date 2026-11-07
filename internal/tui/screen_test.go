@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/muesli/termenv"
 
+	"github.com/dpleshakov/penates/internal/apply"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/state"
 )
@@ -53,6 +54,51 @@ func drive(t *testing.T, m tea.Model, keys ...string) tea.Model {
 	t.Helper()
 	for _, k := range keys {
 		m, _ = m.Update(key(k))
+	}
+	return m
+}
+
+// flush runs cmd and feeds the messages it produces back into the model the
+// way the runtime does, together with every command those updates return.
+// The chain continues only through the messages of the apply run — its queue,
+// its step events, its outcome — so the recurring ticks of the spinner, the
+// notice, the debounce and the caret update the model once and stop: the
+// tests drive time themselves.
+func flush(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
+	t.Helper()
+	pending := []tea.Cmd{cmd}
+	for n := 0; n < 1000 && len(pending) > 0; n++ {
+		c := pending[0]
+		pending = pending[1:]
+		if c == nil {
+			continue
+		}
+		msg := c()
+		if msg == nil {
+			continue
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			pending = append(batch, pending...)
+			continue
+		}
+		var next tea.Cmd
+		m, next = m.Update(msg)
+		switch msg.(type) {
+		case []applyStep, apply.StepEvent, applyDoneMsg:
+			pending = append(pending, next)
+		}
+	}
+	return m
+}
+
+// driveAll feeds keys to the model like drive and runs the commands the
+// updates return: the apply flow lands the way it does under the runtime.
+func driveAll(t *testing.T, m tea.Model, keys ...string) tea.Model {
+	t.Helper()
+	for _, k := range keys {
+		var cmd tea.Cmd
+		m, cmd = m.Update(key(k))
+		m = flush(t, m, cmd)
 	}
 	return m
 }
@@ -270,7 +316,7 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	// Enter opens the first-target input of 6.4 — the kit proposes a
 	// target and none is registered — and the second registers it and
 	// attaches; the tree shows both items, none installed.
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	lm = m.(*model)
 	if lm.inputKind != inputNone || lm.target != target {
 		t.Fatalf("target = %q, input %v; want %q attached", lm.target, lm.inputKind, target)
@@ -285,7 +331,7 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	// Select the good item, then the varitem: its selection opens the
 	// variable form at selection time (7.3), with the required field
 	// prefilled honestly empty.
-	m = drive(t, m, "down", "space", "down", "space")
+	m = driveAll(t, m, "down", "space", "down", "space")
 	fm := m.(*model)
 	if !fm.formOpen || fm.screen != screenList {
 		t.Fatalf("screen = %v, form open = %v; want the form open on the list", fm.screen, fm.formOpen)
@@ -297,7 +343,7 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	// The answer lands in the pending answers, and the apply goes straight
 	// to the summary: nothing asks for variables at apply time. Nothing is
 	// written until the summary is confirmed.
-	m = drive(t, m, "answered", "enter", "a")
+	m = driveAll(t, m, "answered", "enter", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after form = %v, want summary", sm.screen)
@@ -305,13 +351,13 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	if sm.formOpen {
 		t.Fatal("the form stayed open after enter accepted the answers")
 	}
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	rm := m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("screen after summary = %v, want results", rm.screen)
 	}
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
-		t.Errorf("results miss the applied items:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") || !strings.Contains(rm.resultText(), "installed  varitem 0.1.0") {
+		t.Errorf("results miss the applied items:\n%s", rm.resultText())
 	}
 
 	installed, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
@@ -336,7 +382,7 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	// Back to the list: the applied items hold their selection, and applying
 	// the same selection again reuses the recorded answers — no form, straight
 	// to the summary that keeps everything, then the results.
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	good, varitem := itemRow(lm, "ex/good"), itemRow(lm, "ex/varitem")
 	if !good.Installed || good.Pending == nil || *good.Pending != PendingApply || !varitem.Installed {
@@ -345,17 +391,17 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	if n := lm.pendingCount(); n != 2 {
 		t.Errorf("pending count = %d, want 2", n)
 	}
-	m = drive(t, m, "a")
+	m = driveAll(t, m, "a")
 	if m.(*model).screen != screenSummary {
 		t.Fatalf("re-apply screen = %v, want summary without a form", m.(*model).screen)
 	}
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("re-apply screen = %v, want results without a form", rm.screen)
 	}
-	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") || !strings.Contains(rm.lastResults, "kept     ex/varitem: already installed") {
-		t.Errorf("re-apply results:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "kept       good 1.0.0  already installed") || !strings.Contains(rm.resultText(), "kept       varitem 0.1.0  already installed") {
+		t.Errorf("re-apply results:\n%s", rm.resultText())
 	}
 }
 
@@ -379,7 +425,7 @@ func TestAddKitInputEditing(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(otherKit)})
 	// The first enter opens the first-target input of 6.4 — the typed
 	// kit's hint prefills it — the second registers and attaches.
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 
 	lm := m.(*model)
 	st, err := stateStore.LoadRegistry()
@@ -406,10 +452,10 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("first apply:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
+		t.Fatalf("first apply:\n%s", rm.resultText())
 	}
 
 	// The kit publishes 1.1.0 with new content: the tree shows the update.
@@ -425,10 +471,10 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 
 	// The held selection applies the update.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
-		t.Fatalf("update apply:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "updated    good 1.1.0") {
+		t.Fatalf("update apply:\n%s", rm.resultText())
 	}
 	data, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
 	if err != nil || string(data) != "good skill v2\n" {
@@ -457,21 +503,22 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified || r.Pending == nil {
 		t.Fatalf("modified row = %+v", r)
 	}
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed") {
-		t.Fatalf("apply over a user modification:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "kept       good 1.1.0  already installed") {
+		t.Fatalf("apply over a user modification:\n%s", rm.resultText())
 	}
 	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
 	if err != nil || string(data) != "user change\n" {
 		t.Fatalf("user modification overwritten without a reset: %q, %v", data, err)
 	}
 
-	// With the reset requested, the kit content replaces the user's change.
-	m = drive(t, m, "enter", "down", "r", "a", "enter")
+	// With the reset requested, the kit content replaces the user's change;
+	// the result names the verb.
+	m = driveAll(t, m, "enter", "down", "r", "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.1.0") {
-		t.Fatalf("reset apply:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "reset      good 1.1.0") {
+		t.Fatalf("reset apply:\n%s", rm.resultText())
 	}
 	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
 	if err != nil || string(data) != "good skill v2\n" {
@@ -491,27 +538,27 @@ func TestRemoveFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// Back to the list: the installed row takes the removal mark, and the
 	// apply removes it.
-	m = drive(t, m, "enter", "down", "d")
+	m = driveAll(t, m, "enter", "down", "d")
 	lm := m.(*model)
 	r := itemRow(lm, "ex/good")
 	if !r.Installed || r.Pending == nil || *r.Pending != PendingRemove {
 		t.Fatalf("row after d = %+v, want installed and marked", r)
 	}
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "removed  ex/good") {
-		t.Fatalf("removal apply:\n%s", rm.lastResults)
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "removed    good") {
+		t.Fatalf("removal apply:\n%s", rm.resultText())
 	}
-	if strings.Contains(rm.lastResults, "excluded") {
-		t.Errorf("removal reported an exclusion:\n%s", rm.lastResults)
+	if strings.Contains(rm.resultText(), "excluded") {
+		t.Errorf("removal reported an exclusion:\n%s", rm.resultText())
 	}
 
 	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
@@ -530,13 +577,13 @@ func TestRemoveFlow(t *testing.T) {
 
 	// The tree no longer offers the item as installed, and d on it does
 	// nothing.
-	m = drive(t, m, "enter", "down")
+	m = driveAll(t, m, "enter", "down")
 	lm = m.(*model)
 	r = itemRow(lm, "ex/good")
 	if r.Installed || r.Pending != nil {
 		t.Fatalf("row after removal = %+v", r)
 	}
-	m = drive(t, m, "d")
+	m = driveAll(t, m, "d")
 	if r := itemRow(m.(*model), "ex/good"); r.Pending != nil {
 		t.Error("d marked a row that is not installed")
 	}
@@ -554,20 +601,20 @@ func TestRemoveReportsKeptContent(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// The user edits the installed file; the removal keeps it and says so.
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = drive(t, m, "enter", "down", "d", "a", "enter")
+	m = driveAll(t, m, "enter", "down", "d", "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "removed  ex/good") || !strings.Contains(rm.lastResults, "kept skills/good/SKILL.md: modified by the user") {
-		t.Fatalf("removal over a modification:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "removed    good") || !strings.Contains(rm.resultText(), "skills/good/SKILL.md kept: modified by the user") {
+		t.Fatalf("removal over a modification:\n%s", rm.resultText())
 	}
 	data, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
 	if err != nil || string(data) != "user edit\n" {
@@ -605,7 +652,7 @@ func TestOrphanRemoval(t *testing.T) {
 	app := NewApp(stateStore, locks)
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[2] != "gone/old" {
 		t.Fatalf("items = %v", keys)
@@ -617,10 +664,10 @@ func TestOrphanRemoval(t *testing.T) {
 
 	// The orphan removes from the lock alone, without any kit: its row sits
 	// in the orphans group at the end of the tree.
-	m = drive(t, m, "down", "down", "down", "down", "d", "a", "enter")
+	m = driveAll(t, m, "down", "down", "down", "down", "d", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "removed  gone/old") {
-		t.Fatalf("orphan removal:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "removed    old") {
+		t.Fatalf("orphan removal:\n%s", rm.resultText())
 	}
 	fresh, err := locks.Load(target)
 	if err != nil {
@@ -643,21 +690,21 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  one 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// Mark the installed item for removal and select another writer of the
 	// same shared file: one apply must land the target on two's block alone.
-	m = drive(t, m, "enter", "down", "down", "space", "up", "d", "a", "enter")
+	m = driveAll(t, m, "enter", "down", "down", "space", "up", "d", "a", "enter")
 	rm = m.(*model)
 	if rm.screen != screenResults {
 		t.Fatalf("screen = %v, want results", rm.screen)
 	}
-	if !strings.Contains(rm.lastResults, "removed  ex/one") || !strings.Contains(rm.lastResults, "applied  ex/two 1.0.0") {
-		t.Fatalf("removal and install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "removed    one") || !strings.Contains(rm.resultText(), "installed  two 1.0.0") {
+		t.Fatalf("removal and install:\n%s", rm.resultText())
 	}
 
 	data, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
@@ -689,16 +736,16 @@ func TestRemoveWithFormResume(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  one 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// The selection of the varitem opens the form; nothing is planned or
 	// written while it waits, and the removal of the marked item waits for
 	// the summary's confirmation.
-	m = drive(t, m, "enter", "down", "down", "down", "space")
+	m = driveAll(t, m, "enter", "down", "down", "down", "space")
 	fm := m.(*model)
 	if !fm.formOpen {
 		t.Fatal("the selection of an item with variables opened no form")
@@ -710,26 +757,26 @@ func TestRemoveWithFormResume(t *testing.T) {
 	// The answer lands in the pending answers; marking the removal and
 	// applying goes straight to the summary, and it lists the removal and
 	// the install together.
-	m = drive(t, m, "answered", "enter", "up", "up", "d", "a")
+	m = driveAll(t, m, "answered", "enter", "up", "up", "d", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after form = %v, want summary", sm.screen)
 	}
 	view := sm.View()
-	if !strings.Contains(view, "removals:") || !strings.Contains(view, "ex/one 1.0.0") || !strings.Contains(view, "changes:") {
+	if !strings.Contains(view, "remove   one 1.0.0") || !strings.Contains(view, "install  varitem 0.1.0") {
 		t.Errorf("the summary misses the removal or the install:\n%s", view)
 	}
 
 	// The confirmation applies: the varitem installs into the target as the
 	// removal left it; the removed item is reported as removed, not as
 	// excluded or installed again.
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	rm = m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/varitem 0.1.0") {
-		t.Fatalf("resumed apply:\n%s", rm.lastResults)
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "installed  varitem 0.1.0") {
+		t.Fatalf("resumed apply:\n%s", rm.resultText())
 	}
-	if strings.Contains(rm.lastResults, "the item is not installed") || strings.Contains(rm.lastResults, "applied  ex/one") {
-		t.Errorf("the removed item leaked into the results:\n%s", rm.lastResults)
+	if strings.Contains(rm.resultText(), "the item is not installed") || strings.Contains(rm.resultText(), "installed  one") {
+		t.Errorf("the removed item leaked into the results:\n%s", rm.resultText())
 	}
 
 	data, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
@@ -749,7 +796,7 @@ func TestRemoveWithFormResume(t *testing.T) {
 	}
 
 	// The tree drops every mark of the removed row.
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/one"); r.Installed || r.Pending != nil {
 		t.Errorf("row of the removed item = %+v", r)
@@ -768,7 +815,7 @@ func TestListFilter(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[0] != "ex/alpha" || keys[2] != "ex/gamma" {
 		t.Fatalf("items = %v", keys)
@@ -776,7 +823,7 @@ func TestListFilter(t *testing.T) {
 
 	// The filter matches a description and hides the rest; the kit row stays
 	// with its match counts (7.5).
-	m = drive(t, m, "/", "review")
+	m = driveAll(t, m, "/", "review")
 	lm = m.(*model)
 	if !lm.filtering {
 		t.Fatal("typing / did not open the filter")
@@ -792,7 +839,7 @@ func TestListFilter(t *testing.T) {
 	}
 
 	// esc clears the filter and shows everything again.
-	m = drive(t, m, "esc")
+	m = driveAll(t, m, "esc")
 	lm = m.(*model)
 	if lm.filtering || lm.filter.Value() != "" {
 		t.Fatalf("esc left the filter open or set: %v %q", lm.filtering, lm.filter.Value())
@@ -802,14 +849,14 @@ func TestListFilter(t *testing.T) {
 	}
 
 	// A tag matches too.
-	m = drive(t, m, "/", "opencode-v2")
+	m = driveAll(t, m, "/", "opencode-v2")
 	lm = m.(*model)
 	if keys := itemKeys(lm); len(keys) != 1 || keys[0] != "ex/alpha" {
 		t.Fatalf("items after 'opencode-v2' = %v", keys)
 	}
 
 	// enter closes the filter and keeps it applied.
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	if lm.filtering || lm.filter.Value() != "opencode-v2" || len(itemKeys(lm)) != 1 {
 		t.Fatalf("after enter: filtering %v, filter %q, items %v", lm.filtering, lm.filter.Value(), itemKeys(lm))
@@ -817,7 +864,7 @@ func TestListFilter(t *testing.T) {
 
 	// No match: only the add-kit row remains, and acting on it changes
 	// nothing.
-	m = drive(t, m, "/", "zzz", "space", "down", "i")
+	m = driveAll(t, m, "/", "zzz", "space", "down", "i")
 	lm = m.(*model)
 	if len(lm.rows) != 1 || lm.rows[0].Kind != KindAddKit || lm.screen != screenList {
 		t.Fatalf("after no-match: rows %v, screen %v", lm.rows, lm.screen)
@@ -825,13 +872,13 @@ func TestListFilter(t *testing.T) {
 
 	// With the filter applied, selection and apply still act on the row the
 	// filter shows.
-	m = drive(t, m, "esc", "/", "beta", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "esc", "/", "beta", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/beta 1.0.0") {
-		t.Fatalf("filtered apply:\n%s", rm.lastResults)
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "installed  beta 1.0.0") {
+		t.Fatalf("filtered apply:\n%s", rm.resultText())
 	}
-	if strings.Contains(rm.lastResults, "ex/alpha") || strings.Contains(rm.lastResults, "ex/gamma") {
-		t.Errorf("the filter leaked into the selection:\n%s", rm.lastResults)
+	if strings.Contains(rm.resultText(), "ex/alpha") || strings.Contains(rm.resultText(), "ex/gamma") {
+		t.Errorf("the filter leaked into the selection:\n%s", rm.resultText())
 	}
 }
 
@@ -850,15 +897,15 @@ func TestItemDetailsView(t *testing.T) {
 	// asks at selection now, the apply goes straight through the summary.
 	// The drive ends on the results screen.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/varitem") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  varitem") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// enter opens the details view of the row under the cursor; the first
 	// item carries a changelog and tags.
-	m = drive(t, m, "enter", "down", "enter")
+	m = driveAll(t, m, "enter", "down", "enter")
 	dm := m.(*model)
 	if !dm.view || dm.viewKit {
 		t.Fatalf("view after enter = %v %v, want the item view open", dm.view, dm.viewKit)
@@ -875,7 +922,7 @@ func TestItemDetailsView(t *testing.T) {
 
 	// esc returns to the tree; the second item shows its templated
 	// contribution and the answer the installation recorded.
-	m = drive(t, m, "esc", "down", "enter")
+	m = driveAll(t, m, "esc", "down", "enter")
 	dm = m.(*model)
 	if !dm.view {
 		t.Fatalf("view after esc, down, enter = %v, want the item view open", dm.view)
@@ -891,7 +938,7 @@ func TestItemDetailsView(t *testing.T) {
 	}
 
 	// esc brings the tree back.
-	m = drive(t, m, "esc")
+	m = driveAll(t, m, "esc")
 	if m.(*model).view {
 		t.Fatal("esc did not close the view")
 	}
@@ -910,7 +957,7 @@ func TestListStatuses(t *testing.T) {
 
 	// Nothing is installed: both rows show the available glyph.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "ex/dup" || keys[1] != "ex/plain" {
 		t.Fatalf("items = %v", keys)
@@ -923,7 +970,7 @@ func TestListStatuses(t *testing.T) {
 	}
 
 	// Selecting sets the pending action.
-	m = drive(t, m, "down", "down", "space")
+	m = driveAll(t, m, "down", "down", "space")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Pending == nil || *r.Pending != PendingApply {
 		t.Fatalf("selected row = %+v", r)
@@ -933,12 +980,12 @@ func TestListStatuses(t *testing.T) {
 	}
 
 	// Applying makes the item installed.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  plain 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusInstalled {
 		t.Fatalf("installed row = %+v", r)
@@ -1023,13 +1070,14 @@ func TestListStatuses(t *testing.T) {
 	}
 
 	// The held selection repairs the broken item; the tree shows installed
-	// again.
-	m = drive(t, m, "a", "enter")
+	// again. The repair applies at the installed version: the result speaks
+	// of it as an update of the recorded item.
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/plain 1.0.0") {
-		t.Fatalf("repair:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "updated    plain 1.0.0") {
+		t.Fatalf("repair:\n%s", rm.resultText())
 	}
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusInstalled {
 		t.Fatalf("after repair the row = %+v", r)
@@ -1043,7 +1091,7 @@ func TestListStatuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = resize(t, app.Initial(""), 100, 30)
-	m = drive(t, m, "down", "space")
+	m = driveAll(t, m, "down", "space")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/dup"); r.Status != StatusConflict {
 		t.Fatalf("conflict row = %+v", r)
@@ -1052,7 +1100,7 @@ func TestListStatuses(t *testing.T) {
 	if !strings.Contains(view, "✗") || !strings.Contains(view, "already has a heading") {
 		t.Errorf("no conflict glyph or reason:\n%s", view)
 	}
-	m = drive(t, m, "space")
+	m = driveAll(t, m, "space")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/dup"); r.Status != StatusAvailable || r.Pending != nil {
 		t.Fatalf("deselected conflict row = %+v", r)
@@ -1092,14 +1140,14 @@ func TestListStatuses(t *testing.T) {
 	if m.(*model).inputKind != inputAddKit {
 		t.Fatalf("input = %v, want the add-kit input for the new kit", m.(*model).inputKind)
 	}
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	// The orphans group of the previous step still holds gone/old; the
 	// unreadable kit sits collapsed above it.
 	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "team/titem" || keys[1] != "gone/old" {
 		t.Fatalf("items of the collapsed unreadable kit = %v", keys)
 	}
-	m = drive(t, m, "space")
+	m = driveAll(t, m, "space")
 	lm = m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[0] != "ex/plain" {
 		t.Fatalf("items after expanding the unreadable kit = %v", keys)
@@ -1133,17 +1181,17 @@ func TestKitGroups(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(dirA), 100, 30)
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if lm.rows[0].Kind != KindKit || lm.rows[0].Kit.Name != "aaa" || lm.rows[0].Kit.Path != dirA {
 		t.Fatalf("first group = %+v", lm.rows[0])
 	}
 
 	// Attaching the second kit lands on the same target: two groups.
-	m = drive(t, m, "end", "enter")
+	m = driveAll(t, m, "end", "enter")
 	m = resize(t, m, 100, 30)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(dirB)})
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	if lm.rows[0].Kit.Name != "aaa" || lm.rows[2].Kit.Name != "bbb" || lm.rows[2].Kit.Path != dirB {
 		t.Fatalf("groups = %+v", lm.rows)
@@ -1153,7 +1201,7 @@ func TestKitGroups(t *testing.T) {
 	}
 
 	// A filter that nothing in aaa matches hides aaa's header as well.
-	m = drive(t, m, "/", "bone")
+	m = driveAll(t, m, "/", "bone")
 	lm = m.(*model)
 	if lm.rows[0].Kit.Name != "bbb" {
 		t.Fatalf("a filter did not hide the empty group: %+v", lm.rows)
@@ -1175,10 +1223,10 @@ func TestReconciliationFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("install:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
+		t.Fatalf("install:\n%s", rm.resultText())
 	}
 
 	// The interrupted apply: a staged temp file lies beside the owned file,
@@ -1201,10 +1249,10 @@ func TestReconciliationFlow(t *testing.T) {
 
 	// The held selection applies: the broken item is repaired at its
 	// installed version.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("repair apply:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "updated    good 1.0.0") {
+		t.Fatalf("repair apply:\n%s", rm.resultText())
 	}
 	if _, err := os.Stat(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
 		t.Errorf("the repair wrote no file: %v", err)
@@ -1220,10 +1268,10 @@ func TestReconciliationFlow(t *testing.T) {
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {
 		t.Fatalf("row after reconciliation = %+v, want modified", r)
 	}
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.lastResults, "kept     ex/good: already installed; the content was modified after installation") {
-		t.Fatalf("apply over a modification:\n%s", rm.lastResults)
+	if !strings.Contains(rm.resultText(), "kept       good 1.0.0  already installed; the content was modified after installation") {
+		t.Fatalf("apply over a modification:\n%s", rm.resultText())
 	}
 	if data, err := os.ReadFile(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil || string(data) != "user edit\n" {
 		t.Errorf("file after apply = %q, %v; want the modification kept", data, err)
@@ -1242,13 +1290,13 @@ func TestApplySummary(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after apply = %v, want summary", sm.screen)
 	}
 	view := sm.View()
-	for _, want := range []string{"changes:", "ex/good 1.0.0", "skills/good/SKILL.md", "target file is absent"} {
+	for _, want := range []string{"install  good 1.0.0", "+ skills/good/SKILL.md"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("summary misses %q:\n%s", want, view)
 		}
@@ -1258,7 +1306,7 @@ func TestApplySummary(t *testing.T) {
 	}
 
 	// esc cancels: back to the tree with the selection held, nothing applied.
-	m = drive(t, m, "esc")
+	m = driveAll(t, m, "esc")
 	lm := m.(*model)
 	if lm.screen != screenList || itemRow(lm, "ex/good").Pending == nil {
 		t.Fatalf("screen after cancel = %v, pending %+v", lm.screen, itemRow(lm, "ex/good").Pending)
@@ -1268,10 +1316,10 @@ func TestApplySummary(t *testing.T) {
 	}
 
 	// The confirmation applies: the summary is seen before the results.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm := m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
+		t.Fatalf("confirmed apply:\n%s", rm.resultText())
 	}
 	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
 		t.Errorf("the confirmed apply wrote no file: %v", err)
@@ -1279,13 +1327,13 @@ func TestApplySummary(t *testing.T) {
 
 	// The removal marked with d joins the summary too: its action and reason
 	// show before anything is deleted, and esc keeps the item in place.
-	m = drive(t, m, "enter", "down", "d", "a")
+	m = driveAll(t, m, "enter", "down", "d", "a")
 	sm = m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after removal apply = %v, want summary", sm.screen)
 	}
 	view = sm.View()
-	for _, want := range []string{"removals:", "ex/good 1.0.0", "the owned file is removed unchanged"} {
+	for _, want := range []string{"remove   good 1.0.0", "- skills/good/SKILL.md"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("removal summary misses %q:\n%s", want, view)
 		}
@@ -1293,7 +1341,7 @@ func TestApplySummary(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
 		t.Errorf("the summary removed the file: %v", err)
 	}
-	m = drive(t, m, "esc")
+	m = driveAll(t, m, "esc")
 	if m.(*model).screen != screenList {
 		t.Fatalf("screen after cancel = %v, want tree", m.(*model).screen)
 	}
@@ -1302,10 +1350,10 @@ func TestApplySummary(t *testing.T) {
 	}
 
 	// Confirming the removal deletes the file.
-	m = drive(t, m, "a", "enter")
+	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "removed  ex/good") {
-		t.Fatalf("confirmed removal:\n%s", rm.lastResults)
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "removed    good") {
+		t.Fatalf("confirmed removal:\n%s", rm.resultText())
 	}
 	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); !os.IsNotExist(err) {
 		t.Errorf("the file survived the confirmed removal: %v", err)
@@ -1329,7 +1377,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	// The target must be registered before the pending actions seed: the
 	// kit attaches, then the selection without answers goes into the state.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter")
+	m = driveAll(t, m, "enter", "enter")
 	if err := stateStore.Update(func(reg *state.Registry) error {
 		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
 			"ex/varitem": {Select: true},
@@ -1339,27 +1387,33 @@ func TestApplySummaryExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = resize(t, app.Initial(""), 100, 30)
-	m = drive(t, m, "a")
+	m = driveAll(t, m, "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after apply = %v, want summary without a form", sm.screen)
 	}
 	view := sm.View()
-	for _, want := range []string{"excluded:", "ex/varitem", `required variable "p" has no value`} {
+	for _, want := range []string{"excluded", "varitem", `required variable "p" has no value`} {
 		if !strings.Contains(view, want) {
 			t.Errorf("summary misses %q:\n%s", want, view)
 		}
 	}
-
-	// The confirmation runs the apply: the results report the same exclusion
-	// and nothing is written.
-	m = drive(t, m, "enter")
-	rm := m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, "excluded ex/varitem") {
-		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	// Every pending item is excluded: enter is unavailable, the footer reads
+	// "nothing to apply" (10.1), and the apply runs on no key.
+	if view := sm.View(); !strings.Contains(view, "nothing to apply") {
+		t.Errorf("the all-excluded footer reads nothing:\n%s", view)
+	}
+	m = driveAll(t, m, "enter")
+	if m.(*model).screen != screenSummary {
+		t.Fatal("enter applied a summary with nothing to apply")
 	}
 	if _, err := os.Stat(filepath.Join(target, "skills", "varitem", "v.md")); !os.IsNotExist(err) {
 		t.Errorf("the excluded item wrote a file: %v", err)
+	}
+	// esc returns to the tree with the selection held.
+	m = driveAll(t, m, "esc")
+	if m.(*model).screen != screenList {
+		t.Fatalf("screen after esc = %v, want the tree", m.(*model).screen)
 	}
 }
 
@@ -1393,18 +1447,21 @@ func TestApplySummaryConflictRenders(t *testing.T) {
 	}
 	view := sm.View()
 	want := "skills/good/SKILL.md exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user"
-	for _, part := range []string{"excluded:", "ex/good", want} {
+	for _, part := range []string{"excluded", "good", want} {
 		if !strings.Contains(view, part) {
 			t.Errorf("summary misses %q:\n%s", part, view)
 		}
 	}
-
-	// The confirmation runs the apply: the results repeat the same line, and
-	// nothing is written.
-	m = drive(t, m, "enter")
-	rm := m.(*model)
-	if rm.screen != screenResults || !strings.Contains(rm.lastResults, want) {
-		t.Fatalf("confirmed apply:\n%s", rm.lastResults)
+	// The excluded item is the only pending one: enter is unavailable, the
+	// footer reads "nothing to apply" (10.1), and the user's file survives
+	// every key.
+	if view := sm.View(); !strings.Contains(view, "nothing to apply") {
+		t.Errorf("the all-excluded footer reads nothing:\n%s", view)
+	}
+	m = drive(t, m, "enter", "esc")
+	lm := m.(*model)
+	if lm.screen != screenList {
+		t.Fatalf("screen after esc = %v, want the tree", lm.screen)
 	}
 	if _, err := os.Stat(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
 		t.Errorf("the user's file did not survive: %v", err)
@@ -1439,12 +1496,12 @@ func TestFirstRun(t *testing.T) {
 	// enter opens the input; the path opens the first-target input of 6.4,
 	// the second enter registers and attaches, and the target becomes the
 	// last active one (11).
-	m = drive(t, m, "enter")
+	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	if lm.inputKind != inputAddKit || lm.pathInput.Value() != "" {
 		t.Fatalf("input %v, path %q; want the empty input open", lm.inputKind, lm.pathInput.Value())
 	}
-	m = drive(t, m, kitDir, "enter", "enter")
+	m = driveAll(t, m, kitDir, "enter", "enter")
 	lm = m.(*model)
 	if lm.inputKind != inputNone || lm.target != target {
 		t.Fatalf("after attach: target %q, input %v; want %q", lm.target, lm.inputKind, target)
@@ -1479,9 +1536,9 @@ func TestMajorGate(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
-	if !strings.Contains(m.(*model).lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("install:\n%s", m.(*model).lastResults)
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
+	if !strings.Contains(m.(*model).resultText(), "installed  good 1.0.0") {
+		t.Fatalf("install:\n%s", m.(*model).resultText())
 	}
 
 	// The kit publishes 2.0.0: a major update (7.2).
@@ -1493,14 +1550,14 @@ func TestMajorGate(t *testing.T) {
 	}
 
 	// The applied selection is still held; space unselects it first.
-	m = drive(t, m, "down", "space")
+	m = driveAll(t, m, "down", "space")
 	if n := m.(*model).pendingCount(); n != 0 {
 		t.Fatalf("space did not unselect the held selection: %d pending", n)
 	}
 
 	// The first space on the row opens the details with the review note;
 	// nothing is selected.
-	m = drive(t, m, "space")
+	m = driveAll(t, m, "space")
 	lm = m.(*model)
 	if !lm.view {
 		t.Fatal("the first space on a major update did not open the details")
@@ -1514,7 +1571,7 @@ func TestMajorGate(t *testing.T) {
 	}
 
 	// The second space — in the view — selects the update.
-	m = drive(t, m, "space")
+	m = driveAll(t, m, "space")
 	lm = m.(*model)
 	if n := lm.pendingCount(); n != 1 {
 		t.Fatalf("the second space did not select: %d pending", n)
@@ -1524,7 +1581,7 @@ func TestMajorGate(t *testing.T) {
 	}
 
 	// esc closes the view; space on the row unselects.
-	m = drive(t, m, "esc", "space")
+	m = driveAll(t, m, "esc", "space")
 	lm = m.(*model)
 	if lm.view {
 		t.Fatal("esc did not close the view")
@@ -1534,7 +1591,7 @@ func TestMajorGate(t *testing.T) {
 	}
 
 	// Reviewed already: the next space on the row selects without the view.
-	m = drive(t, m, "space")
+	m = driveAll(t, m, "space")
 	lm = m.(*model)
 	if lm.view {
 		t.Fatal("a reviewed major update opened the view again")
@@ -1556,7 +1613,7 @@ func TestBreakpoints(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 120, 32)
-	m = drive(t, m, "enter", "enter", "down")
+	m = driveAll(t, m, "enter", "enter", "down")
 	lm := m.(*model)
 
 	// Wide: the details pane of the row under the cursor sits beside the
@@ -1598,7 +1655,7 @@ func TestDetailsViewScroll(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "enter", "down", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "enter")
 	lm := m.(*model)
 	if !lm.view {
 		t.Fatal("enter did not open the view")
@@ -1614,14 +1671,14 @@ func TestDetailsViewScroll(t *testing.T) {
 
 	// pgdn pages the view forward as far as the content goes, pgup back to
 	// the top (5).
-	m = drive(t, m, "pgdn")
+	m = driveAll(t, m, "pgdn")
 	if lm := m.(*model); lm.viewOffset <= 0 {
 		t.Fatalf("after pgdn: offset %d, want a forward window", lm.viewOffset)
 	}
 	if paged := m.(*model).View(); paged == top {
 		t.Error("pgdn did not change the rendered view")
 	}
-	m = drive(t, m, "pgup")
+	m = driveAll(t, m, "pgup")
 	if lm := m.(*model); lm.viewOffset != 0 {
 		t.Fatalf("after pgup: offset %d, want 0", lm.viewOffset)
 	}
@@ -1642,7 +1699,7 @@ func TestHeaderFooter(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 120, 30)
-	m = drive(t, m, "enter", "enter", "down", "space")
+	m = driveAll(t, m, "enter", "enter", "down", "space")
 	lm := m.(*model)
 
 	// The header names the target, the pending count, and the help hint
@@ -1658,25 +1715,25 @@ func TestHeaderFooter(t *testing.T) {
 	}
 
 	// The kit row collapses; the add-kit row adds (12.2, 12.4).
-	m = drive(t, m, "up")
+	m = driveAll(t, m, "up")
 	if view := m.(*model).View(); !strings.Contains(view, "space collapse") {
 		t.Errorf("the kit footer misses the collapse key:\n%s", view)
 	}
-	m = drive(t, m, "end")
+	m = driveAll(t, m, "end")
 	if view := m.(*model).View(); !strings.Contains(view, "enter add kit") {
 		t.Errorf("the add-kit footer misses its key:\n%s", view)
 	}
 
 	// A modified installed item names the reset key (7.1, 7.6).
-	m = drive(t, m, "a", "enter")
-	if !strings.Contains(m.(*model).lastResults, "applied  ex/good 1.0.0") {
-		t.Fatalf("apply:\n%s", m.(*model).lastResults)
+	m = driveAll(t, m, "a", "enter")
+	if !strings.Contains(m.(*model).resultText(), "installed  good 1.0.0") {
+		t.Fatalf("apply:\n%s", m.(*model).resultText())
 	}
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m = resize(t, app.Initial(""), 120, 30)
-	m = drive(t, m, "down")
+	m = driveAll(t, m, "down")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {
 		t.Fatalf("modified row = %+v", r)

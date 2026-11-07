@@ -89,10 +89,24 @@ type ItemPlan struct {
 	// applying would keep everything and update nothing. Set only when
 	// Status is NoAction.
 	Warning bool
-	// Reports are user-facing notes of a removal plan: content the
-	// item does not take away — a file or a value the user modified, a block
-	// whose content is kept without its markers.
-	Reports []string
+	// Kept holds the content a removal plan leaves behind: a modified
+	// file, a modified block in a shared file, a modified or unreadable
+	// JSON value. The screens mark this content with `!` (tui-screens.md
+	// 10.1) and the record on exit names it (10.4).
+	Kept []KeptNote
+}
+
+// KeptNote is one piece of content a removal plan leaves behind instead of
+// taking it away.
+type KeptNote struct {
+	// Path is the target-relative path of the kept file, or of the shared
+	// file that holds the kept block or value.
+	Path string
+	// Pointer is the RFC 6901 pointer of the kept value, when the content
+	// is one JSON location of the shared file.
+	Pointer string
+	// Reason says why the content stayed.
+	Reason string
 }
 
 // Conflict is one collision the planner found, as data: the kind of the
@@ -480,7 +494,7 @@ func planRemoval(key string, in Input, pending map[string]string) *ItemPlan {
 			})
 			continue
 		}
-		ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s: modified by the user", path))
+		ip.Kept = append(ip.Kept, KeptNote{Path: path, Reason: "modified by the user"})
 	}
 
 	for _, file := range sortedKeys(rec.Sections) {
@@ -534,7 +548,7 @@ func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input, pendi
 		text, _ = markdown.Remove(base, sec.Block)
 	} else {
 		text, _ = markdown.Strip(base, sec.Block)
-		ip.Reports = append(ip.Reports, fmt.Sprintf("kept the block content in %s: modified by the user", file))
+		ip.Kept = append(ip.Kept, KeptNote{Path: file, Reason: "modified by the user"})
 	}
 	if in.Lock.CreatedShared(file) && strings.TrimSpace(text) == "" {
 		return nil, &Action{
@@ -568,7 +582,7 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 	}
 	doc, err := jsonc.Parse([]byte(base))
 	if err != nil {
-		ip.Reports = append(ip.Reports, fmt.Sprintf("kept the values in %s: it no longer holds a JSON document", file))
+		ip.Kept = append(ip.Kept, KeptNote{Path: file, Reason: "it no longer holds a JSON document"})
 		return
 	}
 
@@ -600,14 +614,14 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 			// The location no longer holds the recorded value: whatever the
 			// user put there — another element, another value, a whole array
 			// in place of a scalar — it stays, and the removal says so.
-			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: modified by the user", quoteLoc(loc.Pointer), file))
+			ip.Kept = append(ip.Kept, KeptNote{Path: file, Pointer: loc.Pointer, Reason: "modified by the user"})
 			continue
 		}
 		if owners := in.Lock.JSONOwners(file, loc.Pointer, loc.Hash); len(owners) > 1 {
 			continue // another item still owns the value; the record dies alone
 		}
 		if err := removeJSONValue(doc, loc); err != nil {
-			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: %v", quoteLoc(loc.Pointer), file, err))
+			ip.Kept = append(ip.Kept, KeptNote{Path: file, Pointer: loc.Pointer, Reason: err.Error()})
 			continue
 		}
 		changed = true
@@ -1936,12 +1950,4 @@ func walkJSONFrom(frag *jsonc.Doc, start string, visit func(pointer string, elem
 // pointerJoin extends a pointer with one escaped reference token.
 func pointerJoin(ptr, token string) string {
 	return ptr + "/" + jsonc.EscapeToken(token)
-}
-
-// quoteLoc names a location for diagnostics.
-func quoteLoc(ptr string) string {
-	if ptr == "" {
-		return "the root"
-	}
-	return strconv.Quote(ptr)
 }

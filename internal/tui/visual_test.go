@@ -112,6 +112,28 @@ func TestPendingMarks(t *testing.T) {
 	runMarkTable(t, pendingSpec)
 }
 
+// pathMark adapts one mark of the apply screens to the table.
+type pathMark struct{ m mark }
+
+func (p pathMark) Glyph(set Set) string { return p.m.glyph(set) }
+func (p pathMark) Mark(set Set) string  { return p.m.rendered(set) }
+
+// pathSpec is the per-path mark table of 10.1, with the done mark of 10.2
+// and 10.3.
+var pathSpec = []markSpec{
+	{"create", pathMark{markCreate}, "+", "+", roleGreen},
+	{"replace", pathMark{markReplace}, "~", "~", roleYellow},
+	{"delete", pathMark{markDelete}, "-", "-", roleRed},
+	{"keep", pathMark{markKeep}, "=", "=", roleDim},
+	{"release", pathMark{markRelease}, "!", "!", roleYellow},
+	{"done", pathMark{doneMark}, "✓", "+", roleGreen},
+}
+
+// TestPathMarks covers every mark of the apply screens in both sets.
+func TestPathMarks(t *testing.T) {
+	runMarkTable(t, pathSpec)
+}
+
 // TestSetFromEnv selects the ASCII set only on PENATES_ASCII=1 (3.3); there
 // is no automatic detection (backlog ascii-detect).
 func TestSetFromEnv(t *testing.T) {

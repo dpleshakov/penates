@@ -381,7 +381,7 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	// selection turns into the update. Selecting the other kit's item
 	// adds the install: two pending actions. Both kits attach to the
 	// same target, so one dialog can offer both.
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter").(*model)
+	lm := driveAll(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter").(*model)
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
 	lm = resize(t, app.Initial(""), 120, 30).(*model)
 	if lm.pendingCount() != 1 {
@@ -490,13 +490,13 @@ func TestTargetRemoveThenForget(t *testing.T) {
 
 	// The apply removes the item and completes the forget: the target is
 	// gone with its lock file, its installed file removed.
-	lm = drive(t, lm, "enter").(*model)
+	lm = driveAll(t, lm, "enter").(*model)
 	if lm.screen != screenResults {
 		t.Fatalf("screen = %v, want results", lm.screen)
 	}
-	if !strings.Contains(lm.lastResults, "removed  ex/good") ||
-		!strings.Contains(lm.lastResults, "completed the deferred forget of "+targetB) {
-		t.Errorf("results miss the removal or the forget:\n%s", lm.lastResults)
+	if !strings.Contains(lm.resultText(), "removed    good") ||
+		!strings.Contains(lm.resultText(), "completed the deferred forget of "+targetB) {
+		t.Errorf("results miss the removal or the forget:\n%s", lm.resultText())
 	}
 	if _, ok := registryOf(t, st).Targets[targetB]; ok {
 		t.Error("the target survived the forget")

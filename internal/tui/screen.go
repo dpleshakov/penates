@@ -96,6 +96,7 @@ type screen int
 const (
 	screenList screen = iota
 	screenSummary
+	screenProgress
 	screenResults
 )
 
@@ -201,8 +202,18 @@ type model struct {
 	formAnswers  map[string]string
 	formInput    textinput.Model
 	pending      *pendingApply
-	summary      string
-	lastResults  string
+	// The summary of the pending apply (10.1), the offset its body scrolls
+	// with, the steps of the running apply and the spinner frame (10.2), the
+	// outcome the result screen renders (10.3), the channel the run's events
+	// arrive through, and the record of the session's applied changes that
+	// the command prints on exit (10.4).
+	applySummary  *applySummary
+	summaryOffset int
+	progress      []applyStep
+	spinner       int
+	applyCh       chan any
+	outcome       *applyOutcome
+	record        []recordBlock
 }
 
 // noticeTickMsg ages the notice line; the tick re-arms while a notice is
@@ -249,6 +260,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.readPreview()
 		}
 		return m, nil
+	case []applyStep:
+		// The queue of the running apply (10.2); a stale one drops — the
+		// run that sent it is already settled.
+		if m.applyCh == nil {
+			return m, nil
+		}
+		m.progress = msg
+		return m, m.listenApply()
+	case apply.StepEvent:
+		m.stepEvent(msg)
+		return m, m.listenApply()
+	case applyDoneMsg:
+		m.finishApply(msg.out)
+		return m, nil
+	case progressTickMsg:
+		if m.screen == screenProgress {
+			m.spinner++
+			return m, tickProgress()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
@@ -258,6 +289,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case screenSummary:
 			return m.updateSummary(msg)
+		case screenProgress:
+			// The view cannot be left by navigation while the items are
+			// being applied (10.2); ctrl+c above stays a plain quit — the
+			// next start reconciles the interruption.
+			return m, nil
 		case screenResults:
 			return m.updateResults(msg)
 		}
@@ -266,16 +302,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	page := m.viewportHeight()
+	if page < 1 {
+		page = 1
+	}
+	total := 0
+	if m.applySummary != nil {
+		total = len(renderSummary(*m.applySummary, m.width, m.set))
+	}
 	switch msg.String() {
 	case "enter", "y":
-		if m.pending != nil {
-			m.performApply(m.pending)
-		} else {
+		if m.pending == nil {
 			m.screen = screenList
+			return m, nil
 		}
+		if !m.applySummary.applicable() {
+			// Every pending item is excluded: the footer reads "nothing to
+			// apply" and enter does nothing (10.1).
+			return m, nil
+		}
+		return m, m.confirmApply()
 	case "esc", "n", "q":
 		m.pending = nil
+		m.applySummary = nil
 		m.screen = screenList
+	case "up":
+		m.summaryOffset = ScrollOffset(m.summaryOffset-1, total, page)
+	case "down":
+		m.summaryOffset = ScrollOffset(m.summaryOffset+1, total, page)
+	case "pgup":
+		m.summaryOffset = ScrollOffset(m.summaryOffset-page, total, page)
+	case "pgdown":
+		m.summaryOffset = ScrollOffset(m.summaryOffset+page, total, page)
 	}
 	return m, nil
 }
@@ -1039,9 +1097,11 @@ func (m *model) View() string {
 	fl := fullWidthLayout(l)
 	switch m.screen {
 	case screenSummary:
-		return fl.Render(m.summaryFrame())
+		return fl.Render(m.summaryFrame(fl.Width))
+	case screenProgress:
+		return fl.Render(m.progressFrame(fl.Width))
 	case screenResults:
-		return fl.Render(m.resultsFrame())
+		return fl.Render(m.resultsFrame(fl.Width))
 	}
 	// The target list spans the width like the summary does (8.1): the
 	// box sits under the header, no details pane takes its share.
@@ -1386,23 +1446,59 @@ func (m *model) viewportHeight() int {
 	return v
 }
 
-// summaryFrame is the apply summary the enter key confirms (carried over
-// until task 09 reshapes it).
-func (m *model) summaryFrame() Frame {
+// summaryFrame is the apply summary the enter key confirms (10.1): the
+// header with the item, write and exclusion counts, the verb groups with
+// their path marks, and the footer that names the keys — or reads "nothing
+// to apply" when every pending item is excluded.
+func (m *model) summaryFrame(width int) Frame {
+	f := Frame{
+		Header: JoinSides("penates  Apply to "+m.targetLabel(), m.summaryCounts(), width),
+		Cursor: m.summaryOffset,
+	}
+	if m.applySummary == nil {
+		return f
+	}
+	f.Rows = renderSummary(*m.applySummary, width, m.set)
+	if m.applySummary.applicable() {
+		f.Footer = "enter apply · ↑↓ scroll · esc back"
+	} else {
+		f.Footer = "nothing to apply"
+	}
+	return f
+}
+
+// progressFrame is the running apply (10.2): the header counts the steps
+// that finished, the body holds one line per step with the spinner on the
+// one that runs.
+func (m *model) progressFrame(width int) Frame {
+	done := 0
+	for _, st := range m.progress {
+		if st.state == stepDone || st.state == stepFailed {
+			done++
+		}
+	}
 	return Frame{
-		Header: "penates  apply summary  " + m.target,
-		Rows:   strings.Split(strings.TrimRight(m.summary, "\n"), "\n"),
-		Footer: "enter apply · esc cancel",
+		Header: JoinSides("penates  Applying to "+m.targetLabel(), fmt.Sprintf("%d of %d", done, len(m.progress)), width),
+		Rows:   renderProgress(m.progress, m.spinner, m.set),
 	}
 }
 
-// resultsFrame is the report of the last apply.
-func (m *model) resultsFrame() Frame {
-	return Frame{
-		Header: "penates  apply",
-		Rows:   strings.Split(m.lastResults, "\n"),
-		Footer: "any key  back",
+// resultsFrame is the report of the last apply (10.3). A run that stopped
+// before any step shows its failure instead of the counts.
+func (m *model) resultsFrame(width int) Frame {
+	f := Frame{
+		Header: "penates  Applied to " + m.targetLabel(),
+		Footer: "enter back to the list",
 	}
+	if m.outcome == nil {
+		f.Rows = []string{"nothing selected"}
+		return f
+	}
+	if m.outcome.err == "" {
+		f.Header = JoinSides(f.Header, m.resultCounts(), width)
+	}
+	f.Rows = renderResults(m.outcome.err, m.outcome.steps, m.outcome.deferred, m.outcome.errs, m.set)
+	return f
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

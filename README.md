@@ -37,7 +37,10 @@ the right edge. The footer names the keys the row under the cursor answers:
 item, `r` resets it to the kit content where the key applies, `enter` opens
 the details — beside the tree on wide terminals, as a scrolling view
 everywhere — and `/` filters by id, tags and description. `a` collects the
-pending actions into a summary that nothing is applied before.
+pending actions into a summary that nothing is applied before: the items
+group by verb with a mark per path, and confirming runs the apply step by
+step, each item ending in a check or a cross. On exit penates prints what
+was applied during the session to the terminal.
 
 ## A minimal kit
 

@@ -381,10 +381,47 @@ func (m *model) performApply(p *pendingApply) {
 	// again; the resets and removals that ran are consumed.
 	m.settleAfterApply(removed, p.selection)
 
+	// The deferred operations the apply covered complete here: a kit whose
+	// removals landed detaches from the target, one it did not cover is
+	// dropped with the reason in the report (6.7).
+	m.completeDeferred()
+
 	if lk, err := m.app.Locks.Load(m.target); err == nil {
 		m.lk = lk
 	}
 	m.screen = screenResults
+}
+
+// completeDeferred finishes the deferred operations of the target after
+// the apply (6.7): the lock as the apply left it decides — a deferred
+// detach whose kit lost its last installed item completes, one the apply
+// did not finish is dropped with its reason. The report joins the results,
+// the completed operations as well as the dropped ones.
+func (m *model) completeDeferred() {
+	lk, err := m.app.Locks.Load(m.target)
+	if err != nil {
+		m.lastResults += "\ncould not complete the deferred operations: " + err.Error()
+		return
+	}
+	m.lk = lk
+	installed := make([]string, 0, len(lk.Items))
+	for key := range lk.Items {
+		installed = append(installed, key)
+	}
+	sort.Strings(installed)
+	report, err := m.app.State.CompleteDeferred(m.target, installed, m.app.Locks)
+	if err != nil {
+		m.lastResults += "\ncould not complete the deferred operations: " + err.Error()
+		return
+	}
+	for _, line := range report {
+		m.lastResults += line + "\n"
+	}
+	if len(report) > 0 {
+		if err := m.reloadRegistry(); err != nil {
+			m.lastResults += "\ncould not reload the state: " + err.Error()
+		}
+	}
 }
 
 // settleAfterApply folds the apply into the target's pending actions: the

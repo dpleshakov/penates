@@ -139,6 +139,12 @@ type model struct {
 	addInput textinput.Model
 	adding   bool
 
+	// The open modal dialog (6.3, 6.7) and the kit it acts on: the dialog
+	// takes the body while it is open, and the flows keep their context
+	// beside it.
+	dialog     *dialog
+	detachName string
+
 	notice Notice
 	// errLine holds a load problem until the next successful reload; it
 	// shares the notice line (2.1) but does not age out.
@@ -239,6 +245,9 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tree.
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.notice.Clear()
+	if m.dialog != nil {
+		return m.updateDialog(msg)
+	}
 	if m.formOpen {
 		return m.updateForm(msg)
 	}
@@ -355,7 +364,11 @@ func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		cmd = m.spaceUnderCursor()
 	case "d":
-		cmd = m.toggleRemove()
+		if len(m.rows) > 0 && m.rows[m.cursor].Kind == KindKit {
+			cmd = m.detachUnderCursor()
+		} else {
+			cmd = m.toggleRemove()
+		}
 	case "r":
 		cmd = m.toggleReset()
 	case "R":
@@ -673,6 +686,8 @@ func (m *model) enterTarget(dir string) {
 	m.viewOffset = 0
 	m.adding = false
 	m.addInput.Reset()
+	m.dialog = nil
+	m.detachName = ""
 	m.reviewed = map[string]bool{}
 	m.changelogCache = map[string][]ChangelogEntry{}
 	m.errLine = ""
@@ -1022,6 +1037,13 @@ func fullWidthLayout(l Layout) Layout {
 // input and notice lines, and the footer of the row under the cursor.
 func (m *model) listFrame(l Layout) Frame {
 	f := Frame{Header: m.header(l.Width)}
+	// The modal dialog replaces the body while it is open: the box
+	// centered in the width, its keys in the footer (6.3, 6.7).
+	if m.dialog != nil {
+		f.Rows = m.dialog.lines(l.Width, m.set)
+		f.Footer = dialogKeys
+		return f
+	}
 	lines := RenderTree(m.rows, l, m.set)
 	if m.adding && len(lines) > 0 {
 		lines[len(lines)-1] = "  " + AddKitLabel + "  " + m.addInput.View()
@@ -1207,6 +1229,9 @@ func (m *model) rowKeys() string {
 				keys = append(keys, "space collapse")
 			}
 			keys = append(keys, "enter details")
+			if !r.Kit.Orphans && !r.Kit.Detaching {
+				keys = append(keys, "d detach")
+			}
 		case KindItem:
 			item := r.Item
 			if item.Pending != nil {

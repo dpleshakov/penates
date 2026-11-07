@@ -80,7 +80,7 @@ wraps at 100 columns; the view scrolls.
 **Definition of done:** fixture items and kits render the sections of
 5.1 and 5.2 in order with reasons and next steps; wrapping and
 scrolling are tested at fixed sizes.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-05 `main-screen-flip`
 **Description:** Assemble tasks 01–04 into the new model and delete the

@@ -169,7 +169,7 @@ func TestSelectionFormView(t *testing.T) {
 
 	// The answers the apply wrote into the lock stay with the held selection
 	// after it settles; the update flow checks the form they prefill.
-	m = drive(t, m, "enter", "enter", "down", "down").(*model)
+	drive(t, m, "enter", "enter", "down", "down")
 	if answers := pendingAnswers(t, stateStore, target, "ex/varitem"); len(answers) != 2 || answers["p"] != "answered" {
 		t.Fatalf("settled pending answers = %v; want the answers kept", answers)
 	}

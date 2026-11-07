@@ -459,7 +459,7 @@ func TestAddKitPreviewShowsEveryError(t *testing.T) {
 	if !strings.Contains(got, "items/bad/item.yaml") || !strings.Contains(got, "semantic version") {
 		t.Errorf("the preview misses the item-level problem:\n%s", got)
 	}
-	m = drive(t, m, "enter").(*model)
+	drive(t, m, "enter")
 	reg, err := st.LoadRegistry()
 	if err != nil {
 		t.Fatal(err)

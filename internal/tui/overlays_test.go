@@ -669,7 +669,7 @@ func TestReconcileNotice(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := driveAll(t, resize(t, app.Initial(""), 100, 30), "down", "space", "a", "enter", "enter").(*model)
+	driveAll(t, resize(t, app.Initial(""), 100, 30), "down", "space", "a", "enter", "enter")
 
 	// The interruption: the update of alpha moved the content in and left
 	// a staged temp file, the record still holds 1.0.0.
@@ -682,7 +682,7 @@ func TestReconcileNotice(t *testing.T) {
 	}
 
 	// The next start reconciles and reports what it found (11.2).
-	lm = resize(t, app.Initial(""), 100, 30).(*model)
+	lm := resize(t, app.Initial(""), 100, 30).(*model)
 	want := "Reconciled after an interrupted apply: alpha recorded as 1.0.0."
 	if got := lm.notice.Text(); got != want {
 		t.Fatalf("reconcile notice =\n%q\nwant\n%q", got, want)

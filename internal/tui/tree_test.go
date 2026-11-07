@@ -408,10 +408,8 @@ func TestBuildTreeVerdictOnAvailableItem(t *testing.T) {
 func TestBuildTreeSummaries(t *testing.T) {
 	rows := treeRows(nil, nil, "")
 
-	var kinds []RowKind
 	var order []string
 	for _, r := range rows {
-		kinds = append(kinds, r.Kind)
 		switch r.Kind {
 		case KindKit:
 			order = append(order, r.Kit.Name)

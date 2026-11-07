@@ -1122,7 +1122,8 @@ func recordOf(target string, steps []applyStep, record []recordBlock) []recordBl
 	if len(installs)+len(removals) == 0 {
 		return record
 	}
-	entries := append(installs, removals...)
+	entries := installs
+	entries = append(entries, removals...)
 	for i := range record {
 		if record[i].target == target {
 			record[i].entries = append(record[i].entries, entries...)

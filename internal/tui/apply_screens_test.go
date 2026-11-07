@@ -464,7 +464,7 @@ func TestProgressKeys(t *testing.T) {
 		t.Fatal("a key in between did not disarm the quit")
 	}
 	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	next, cmd := next.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := next.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if msg := cmd(); msg != (tea.QuitMsg{}) {
 		t.Fatalf("the second ctrl+c returned %v, want the quit", msg)
 	}

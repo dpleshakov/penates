@@ -266,7 +266,7 @@ func TestTargetListRenameChangesHeader(t *testing.T) {
 	lm = drive(t, lm, "t").(*model)
 	lm.list.cursor = targetIndex(t, lm, targetA)
 	lm = ctrlKey(t, lm, tea.KeyCtrlR)
-	lm = drive(t, lm, "other", "esc").(*model)
+	drive(t, lm, "other", "esc")
 	if n := registryOf(t, st).Targets[targetA].Name; n != "main" {
 		t.Errorf("esc saved %q anyway", n)
 	}
@@ -381,9 +381,9 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	// selection turns into the update. Selecting the other kit's item
 	// adds the install: two pending actions. Both kits attach to the
 	// same target, so one dialog can offer both.
-	lm := driveAll(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter").(*model)
+	driveAll(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter")
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
-	lm = acceptRestore(t, resize(t, app.Initial(""), 120, 30))
+	lm := acceptRestore(t, resize(t, app.Initial(""), 120, 30))
 	if lm.pendingCount() != 1 {
 		t.Fatalf("pending after the restart = %d, want the held selection", lm.pendingCount())
 	}

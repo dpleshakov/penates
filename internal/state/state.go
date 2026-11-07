@@ -391,7 +391,8 @@ func (st *State) RegisterKit(name, kitDir, target string) {
 		}
 		kept = append(kept, a)
 	}
-	st.reg.Attachments = append(kept, Attachment{Kit: name, Target: target})
+	kept = append(kept, Attachment{Kit: name, Target: target})
+	st.reg.Attachments = kept
 	st.Kits[name] = kitDir
 	st.Targets = st.reg.TargetPaths()
 }

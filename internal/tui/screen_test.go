@@ -1394,7 +1394,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	// The target must be registered before the pending actions seed: the
 	// kit attaches, then the selection without answers goes into the state.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = driveAll(t, m, "enter", "enter")
+	driveAll(t, m, "enter", "enter")
 	if err := stateStore.Update(func(reg *state.Registry) error {
 		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
 			"ex/varitem": {Select: true},
@@ -1654,7 +1654,7 @@ func TestBreakpoints(t *testing.T) {
 	}
 
 	// Below the minimum: the message states the size (4.4).
-	m = resize(t, m, 50, 10)
+	resize(t, m, 50, 10)
 	if view := lm.View(); !strings.Contains(view, "penates needs at least") || !strings.Contains(view, "50 × 10") {
 		t.Errorf("no minimum-size message:\n%s", view)
 	}

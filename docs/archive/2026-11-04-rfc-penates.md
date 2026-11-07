@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted |
+| Status | Implemented 2026-11-06; superseded by docs/concept.md |
 | Date | 2026-11-04 |
 | Scope | v1 design |
 

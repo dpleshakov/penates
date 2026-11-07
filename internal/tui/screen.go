@@ -1323,7 +1323,7 @@ func (m *model) changelogOf(it *kit.Item) []ChangelogEntry {
 // readChangelog parses an item changelog: a `## version` heading starts an
 // entry, the lines under it join into its note.
 func readChangelog(path string) []ChangelogEntry {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // the path is built from the registered kit directory
 	if err != nil {
 		return nil
 	}

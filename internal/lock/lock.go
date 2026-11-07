@@ -85,7 +85,7 @@ func (s *Store) Path(target string) string {
 // the target itself is recorded either way, so the lock is self-describing.
 func (s *Store) Load(target string) (*Lock, error) {
 	path := s.Path(target)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // the store builds the path itself
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Lock{Target: target, Items: map[string]*Item{}}, nil
 	}
@@ -105,7 +105,7 @@ func (s *Store) Load(target string) (*Lock, error) {
 // Save writes the lock through a temp file and a rename, creating the locks
 // directory if needed.
 func (s *Store) Save(l *Lock) error {
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.Dir, 0o750); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(l, "", "  ")
@@ -117,9 +117,9 @@ func (s *Store) Save(l *Lock) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

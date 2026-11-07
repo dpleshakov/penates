@@ -109,7 +109,7 @@ func snapshotFile(root, rel string) (FileState, error) {
 	if info.IsDir() {
 		return FileState{Exists: true}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed validRelPath above; root is the user's target
 	if err != nil {
 		return FileState{}, err
 	}
@@ -131,7 +131,7 @@ func snapshotShared(root, rel string) (SharedFileState, error) {
 	if info.IsDir() {
 		return SharedFileState{Exists: true, IsDir: true, Blocks: map[string]string{}}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed validRelPath above; root is the user's target
 	if err != nil {
 		return state, err
 	}

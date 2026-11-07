@@ -482,7 +482,7 @@ func ReadSources(kits []*Kit, selection []string) (map[string][]byte, error) {
 			if _, done := out[path]; done {
 				continue
 			}
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //nolint:gosec // src passed validRelPath at load; the path stays inside the kit
 			if err != nil {
 				return nil, fmt.Errorf("%s: read %s: %w", key, c.Src, err)
 			}
@@ -496,7 +496,7 @@ func ReadSources(kits []*Kit, selection []string) (map[string][]byte, error) {
 // becomes a ValidationError carrying the given display path; parser errors carry
 // their own position.
 func decodeFile(path, display string, out any) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // the loader builds the path from the registered kit directory
 	if err != nil {
 		return &ValidationError{File: display, Msg: fmt.Sprintf("cannot be read: %v", err)}
 	}

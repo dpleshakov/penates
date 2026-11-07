@@ -43,3 +43,8 @@ linters:
         linters:
           - gosec
           - gocritic
+
+issues:
+  # Every identical finding is a real one: the default cap of three per text
+  # hid a third of the gosec and errcheck findings during the 2026-11-07 sweep.
+  max-same-issues: 0

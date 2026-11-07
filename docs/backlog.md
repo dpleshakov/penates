@@ -38,3 +38,8 @@ Accepted work that has not started yet, in priority order.
 **Context:** Postponed from the v1 TUI rework: the keyboard covers every action, so the mouse adds convenience only; the design does not depend on it.
 **Blocked until:** the keyboard implementation of the new TUI (docs/2026-11-07-tasks-tui-rework.md) has landed; revisit the question then
 **Added:** 2026-11-07, in the TUI rework discussion
+
+### `valid-relpath-duplicate`
+**Goal:** One `validRelPath` definition shared by the kit loader and the target snapshot instead of the two identical copies.
+**Context:** kit.go and target.go each define it byte for byte, and the gosec G304 justifications lean on it — a single definition is the one place to check when the path rules change. A tiny internal package or one side adopting the other's copy; found during the lint-findings sweep.
+**Added:** 2026-11-07, during the lint-findings resolution

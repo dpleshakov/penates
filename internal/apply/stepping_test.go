@@ -248,7 +248,7 @@ func TestSteppedRunMatchesMonolithic(t *testing.T) {
 		}
 	}
 	for _, ip := range installs {
-		if err := ApplyItem(root, ip, lk, store); err != nil {
+		if err := Item(root, ip, lk, store); err != nil {
 			t.Fatalf("apply step %s: %v", ip.Key, err)
 		}
 	}
@@ -278,7 +278,7 @@ func TestInterruptionBetweenStepsRepairs(t *testing.T) {
 		}
 		assertRepairable(t, root, store)
 		for _, ip := range installs {
-			if err := ApplyItem(root, ip, lk, store); err != nil {
+			if err := Item(root, ip, lk, store); err != nil {
 				t.Fatalf("apply step %s: %v", ip.Key, err)
 			}
 		}
@@ -295,11 +295,11 @@ func TestInterruptionBetweenStepsRepairs(t *testing.T) {
 		if err := RemoveItem(root, removals.Items[0], lk, store); err != nil {
 			t.Fatalf("remove step %s: %v", removals.Items[0].Key, err)
 		}
-		if err := ApplyItem(root, installs[0], lk, store); err != nil {
+		if err := Item(root, installs[0], lk, store); err != nil {
 			t.Fatalf("apply step %s: %v", installs[0].Key, err)
 		}
 		assertRepairable(t, root, store)
-		if err := ApplyItem(root, installs[1], lk, store); err != nil {
+		if err := Item(root, installs[1], lk, store); err != nil {
 			t.Fatalf("apply step %s: %v", installs[1].Key, err)
 		}
 		assertSameRun(t, wantTree, wantLock, root, store)

@@ -127,7 +127,7 @@ func DefaultDir() (string, error) {
 
 // Open returns the store of dir, creating the directory if needed.
 func Open(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
 	return &Store{Dir: dir}, nil
@@ -148,7 +148,7 @@ func newRegistry() *Registry {
 // reported in the registry's Report, and the file is rewritten without them.
 func (s *Store) LoadRegistry() (*Registry, error) {
 	path := filepath.Join(s.Dir, FileName)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // the store builds the path itself
 	if errors.Is(err, fs.ErrNotExist) {
 		return newRegistry(), nil
 	}
@@ -210,9 +210,9 @@ func (s *Store) save(reg *Registry) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

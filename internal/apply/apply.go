@@ -59,7 +59,7 @@ func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store, on func(
 	var results []Result
 	for _, ip := range p.Installable() {
 		emit(on, StepEvent{Key: ip.Key, Start: true})
-		err := ApplyItem(root, ip, lk, store)
+		err := Item(root, ip, lk, store)
 		emit(on, StepEvent{Key: ip.Key, Err: err})
 		if err != nil {
 			results = append(results, Result{Key: ip.Key, Err: err})
@@ -70,12 +70,12 @@ func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store, on func(
 	return results
 }
 
-// ApplyItem executes one install step: it applies the item plan completely or
+// Item executes one install step: it applies the item plan completely or
 // not at all, writing atomically through temp files, and the lock records the
 // item only after all of its files are in place, so the lock never describes
 // an item that is not fully applied. A failing step leaves no files and no
 // empty directories behind.
-func ApplyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
+func Item(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) error {
 	var createdDirs []string
 	var staged []string
 	fail := func(err error) error {
@@ -258,7 +258,7 @@ func RemoveItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 	dirs := append([]string(nil), rec.DirsCreated...)
 	sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
 	for _, dir := range dirs {
-		os.Remove(filepath.Join(root, filepath.FromSlash(dir)))
+		_ = os.Remove(filepath.Join(root, filepath.FromSlash(dir)))
 	}
 
 	// A shared file deleted here also leaves the created list.
@@ -305,6 +305,9 @@ func removeStaged(root string) ([]string, error) {
 		return nil, err
 	}
 	var removed []string
+	// The walk covers the user's target directory: penates itself creates no
+	// symlinks (concept principle 7), the stdlib offers no root-scoped walk,
+	// and a racing local writer is outside this tool's threat model.
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -312,7 +315,7 @@ func removeStaged(root string) ([]string, error) {
 		if !d.Type().IsRegular() || !strings.HasPrefix(d.Name(), stagedPrefix) {
 			return nil
 		}
-		if err := os.Remove(path); err != nil {
+		if err := os.Remove(path); err != nil { //nolint:gosec // the target is the user's directory; penates creates no symlinks (concept 7)
 			return fmt.Errorf("remove staged file %s: %w", path, err)
 		}
 		rel, rerr := filepath.Rel(root, path)
@@ -387,16 +390,16 @@ func stage(dst string, content []byte) (string, error) {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(content); err != nil {
-		tmp.Close()
-		os.Remove(name)
+		_ = tmp.Close()
+		_ = os.Remove(name)
 		return "", err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
+		_ = os.Remove(name)
 		return "", err
 	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		os.Remove(name)
+	if err := os.Chmod(name, 0o644); err != nil { //nolint:gosec // an installed file is an ordinary user file, not a secret
+		_ = os.Remove(name)
 		return "", err
 	}
 	return name, nil
@@ -413,7 +416,7 @@ func mkdirAllTracking(root, dir string) ([]string, error) {
 		// The action targets the root itself; create it when it is missing. The
 		// root is the user's chosen target, not a directory penates created for
 		// the item, so it is not recorded.
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // the target root is an ordinary user directory
 			return nil, err
 		}
 		return nil, nil
@@ -433,7 +436,7 @@ func mkdirAllTracking(root, dir string) ([]string, error) {
 		}
 		cur = parent
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // target directories are ordinary user directories
 		return nil, err
 	}
 	// missing was collected innermost-first; record outermost-first.
@@ -453,9 +456,9 @@ func mkdirAllTracking(root, dir string) ([]string, error) {
 // empty are kept: something else put content there.
 func cleanup(root string, staged, createdDirs []string) {
 	for _, tmp := range staged {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 	}
 	for i := len(createdDirs) - 1; i >= 0; i-- {
-		os.Remove(filepath.Join(root, filepath.FromSlash(createdDirs[i])))
+		_ = os.Remove(filepath.Join(root, filepath.FromSlash(createdDirs[i])))
 	}
 }

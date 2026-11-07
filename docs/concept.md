@@ -171,9 +171,11 @@ Tags have no semantics in penates, now or in future versions. They are displayed
 
 Variants of one capability are separate items, for example `done-v1` and `done-v2`. Mutual exclusion is not declared; it follows from ownership. When item Y conflicts only with contributions owned by installed item X, replacing X with Y is the user's explicit action: mark X for removal and select Y in the same apply.
 
-### 6.6 Targets
+### 6.6 Targets and attachments
 
-penates supports global harness configuration directories only. A target is registered on first use of a kit: the user supplies the kit path, penates proposes `target_hint`, and the user confirms or edits it. The confirmed path is used as given — penates does not verify that it is a global configuration directory, because it knows nothing about harnesses (principle 3).
+penates supports global harness configuration directories only. A target is registered on first use of a kit: the user supplies the kit path, penates proposes `target_hint`, and the user confirms or edits it. The confirmed path is used as given — penates does not verify that it is a global configuration directory, because it knows nothing about harnesses (principle 3). A target exists independently of kits: it may be registered with no kit attached.
+
+A kit attaches to one or more targets, and the attachment is what ties a kit's items to a target: a target's item list shows only the kits attached to it. Detaching a kit removes the attachment alone and never touches the files in the target. A kit with installed items in the target is either detached after the apply that removes them — as a deferred operation — or detached at once with its installed items staying installed and owned, listed for removal. Forgetting a target removes it from the state and deletes its lock; the files in it are never touched and are no longer owned. The forget happens at once on request, or waits as a deferred operation for the apply that removes the target's installed items. A deferred operation completes when the apply removed everything it covers, and is dropped with a reason shown to the user otherwise.
 
 ### 6.7 Application state
 

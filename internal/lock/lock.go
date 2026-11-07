@@ -131,6 +131,15 @@ func (s *Store) Save(l *Lock) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// Delete removes the lock file of a target. A missing file is not an error.
+func (s *Store) Delete(target string) error {
+	err := os.Remove(s.Path(target))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 // FileOwner returns the item key that owns a target file, with the recorded hash of
 // its content at installation.
 func (l *Lock) FileOwner(path string) (itemKey, hash string, ok bool) {

@@ -8,6 +8,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Kits and targets are managed as state operations with their invariants: a kit attaches to a registered target and detaches from it at once, or as a deferred operation that waits for the apply removing its installed items in the target — the deferred operation completes only when that apply removed everything it covers, and is dropped with a shown reason otherwise. A kit path is re-pointed only to a directory that holds a kit with the same name. Forgetting a target deletes its lock and never touches the files in it.
 - A major version bump is marked for review: the update marker of an item whose new major differs from the installed one renders in the error style, next to the version arrow.
 - Selected items with file contributions install from a kit into a harness configuration directory, and a per-target lock records every file that penates writes.
 - Starting with a kit path registers the kit and its target directory; without arguments, the registered target opens directly.

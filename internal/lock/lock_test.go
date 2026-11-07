@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -56,6 +57,37 @@ func TestLoadMissing(t *testing.T) {
 	}
 	if len(l.Items) != 0 {
 		t.Errorf("Items = %v, want empty", l.Items)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	dataDir := t.TempDir()
+	store := NewStore(dataDir)
+	target := filepath.Join(dataDir, "target")
+
+	l := &Lock{Target: target, Items: map[string]*Item{"example/git-via-gh": {}}}
+	if err := store.Save(l); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := store.Delete(target); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Stat(store.Path(target)); !os.IsNotExist(err) {
+		t.Errorf("the lock file survived the delete: %v", err)
+	}
+	// The lock reads back as the empty one.
+	got, err := store.Load(target)
+	if err != nil {
+		t.Fatalf("Load after Delete: %v", err)
+	}
+	if len(got.Items) != 0 {
+		t.Errorf("Items after Delete = %v, want empty", got.Items)
+	}
+
+	// Deleting a lock that is not there is not an error.
+	if err := store.Delete(target); err != nil {
+		t.Fatalf("Delete of a missing lock: %v", err)
 	}
 }
 

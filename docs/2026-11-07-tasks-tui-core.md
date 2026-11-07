@@ -47,7 +47,10 @@ format change with the refusal, in the same commit.
 ### TASK-02 `state-operations`
 **Description:** Operations over the schema with their invariants: attach a
 kit to a target; detach — immediate when the kit holds no installed items
-in that target, deferred until the covering apply otherwise; edit kit path,
+in that target, deferred until the covering apply otherwise. Which path
+runs is the interface's choice (the dialogs of tui-screens 6.7 and 8.3),
+so both are operations with their invariants and the immediate one never
+touches the lock; edit kit path,
 accepted only when the new directory holds a kit with the same name; forget
 target, which deletes the target's lock — lock.Store learns deletion — and
 never touches the target's files. Deferred operations complete when the
@@ -58,7 +61,7 @@ attach and both detach paths, edit-path validation accepting a matching
 name and rejecting a mismatch with the reason, forget deleting the lock and
 leaving the target directory untouched, deferred completion and dropping;
 concept.md 6.6 states targets and attachment in the same commit.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `plan-conflict-structure`
 **Description:** internal/plan reports conflicts as structure instead of

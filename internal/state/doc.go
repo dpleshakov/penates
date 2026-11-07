@@ -1,5 +1,8 @@
-// Package state holds the application state: registered kits and targets, the
-// kit-to-target mapping, the last selection, and variable answers. It persists under
-// ~/.config/penates on every OS, honoring XDG_CONFIG_HOME, and writes nothing
-// anywhere else.
+// Package state holds the application state: the registry — kits, targets,
+// attachments between them, the last active target — and the pending actions
+// of each target with their deferred operations and variable answers. It
+// persists under ~/.config/penates on every OS, honoring XDG_CONFIG_HOME, and
+// saves on every mutation. An old-format state file is refused with the path
+// to delete. The state the current TUI reads is a compatibility view of the
+// registry until the TUI rewrite replaces it.
 package state

@@ -42,7 +42,7 @@ mutation-level saves, and the old-format refusal; the existing TUI tests
 pass unchanged through the compatibility layer; architecture.md (state
 row) and concept.md 6.7 describe the new model and CHANGELOG records the
 format change with the refusal, in the same commit.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-02 `state-operations`
 **Description:** Operations over the schema with their invariants: attach a

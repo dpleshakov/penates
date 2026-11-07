@@ -179,8 +179,11 @@ penates supports global harness configuration directories only. A target is regi
 
 All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty). Nothing is written into a target other than the contributions themselves.
 
-- **Configuration:** registered kits with their paths, registered targets, the mapping of kits to targets, and the most recent selection per target.
+- **Configuration:** the registry — registered kits (name to directory), registered targets (path, with an optional display name), the attachments between them (a kit attaches to several targets; a target exists without kits), and the last active target.
+- **Pending actions:** per target, the actions chosen since its last apply — select, reset and remove per item — the deferred operations waiting for that apply (detach kit, forget target), and the variable answers given at selection time. The answers stay until the apply writes them into the lock, so a restored selection does not ask again. Pending actions are saved on every mutation; entries that no longer hold are dropped at load with a report the interface can show.
 - **Lock:** one file per target, keyed by the target path.
+
+The state file carries a format version. A file of another version — the pre-registry format among them — is refused with an error naming the file to delete: the project has no releases, so old files are deleted, not migrated.
 
 The lock records, per installed item:
 

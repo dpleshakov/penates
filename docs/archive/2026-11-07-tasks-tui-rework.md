@@ -1,6 +1,6 @@
 # 2026-11-07-tasks-tui-rework.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -171,4 +171,4 @@ dialog (11.3); the double `ctrl+c` force quit without dialogs (12.1).
 help lists the bindings and the glyph legends; attach and detach notices
 offer a working undo; restore drops invalid actions with a notice; both
 quit paths behave per 11.3 and 12.1.
-**Status:** Pending
+**Status:** Done

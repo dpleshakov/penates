@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,7 @@ const (
 	dialogDetach       = "detach"
 	dialogForgetTarget = "forgetTarget"
 	dialogRestore      = "restore"
+	dialogQuit         = "quit"
 )
 
 // dialog is one open modal: the question and the options, the cursor over
@@ -113,17 +115,46 @@ func (m *model) chooseDialog() tea.Cmd {
 		t := m.restoreTarget
 		switch d.chosen {
 		case 0:
-			// Restore keeps the actions: they were saved with the target
-			// and the tree already shows them (11.1).
+			// Restore keeps the valid actions; the ones that no longer
+			// name anything they can act on are dropped and reported on
+			// the notice line (11.1).
 			m.closeDialog()
-			return nil
+			return m.restorePending(t)
 		case 1:
 			m.closeDialog()
 			return m.discardPendingItems(t)
 		}
+	case dialogQuit:
+		m.closeDialog()
+		if d.chosen == 0 {
+			// The pending actions stay saved; the next start offers them
+			// for restoration (11.3).
+			return tea.Quit
+		}
+		return nil
 	}
 	m.closeDialog()
 	return nil
+}
+
+// openQuitDialog asks what to do about the pending actions before quitting
+// (11.3): the default is Quit — leaving is what q asked for — and esc goes
+// back. They are saved either way.
+func (m *model) openQuitDialog() {
+	n := m.pendingCount()
+	verb := "have"
+	if n == 1 {
+		verb = "has"
+	}
+	text := fmt.Sprintf("%d pending %s %s not been applied. They will be offered for restoration on the next start.",
+		n, plural(n, "action", "actions"), verb)
+	m.dialog = &dialog{
+		kind:    dialogQuit,
+		title:   "Quit",
+		body:    wrapIndent(text, "", "", ProseLimit),
+		options: []string{"Quit", "Back"},
+		chosen:  0,
+	}
 }
 
 // closeDialog tears the modal down and forgets what it acted on.

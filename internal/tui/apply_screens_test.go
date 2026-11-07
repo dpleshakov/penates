@@ -451,9 +451,22 @@ func TestProgressKeys(t *testing.T) {
 			t.Fatalf("the %s key left the progress view", k)
 		}
 	}
-	_, cmd := lm.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	// The double ctrl+c of 12.1 stays available on the progress view: the
+	// first press arms the quit, a key in between disarms it, the second
+	// quits at once.
+	next, _ := lm.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	lm = next.(*model)
+	if lm.screen != screenProgress || !lm.ctrlcArmed {
+		t.Fatalf("the first ctrl+c did not arm the quit: screen %v, armed %v", lm.screen, lm.ctrlcArmed)
+	}
+	next, _ = lm.Update(key("down"))
+	if next.(*model).ctrlcArmed {
+		t.Fatal("a key in between did not disarm the quit")
+	}
+	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := next.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if msg := cmd(); msg != (tea.QuitMsg{}) {
-		t.Fatalf("ctrl+c returned %v, want the quit", msg)
+		t.Fatalf("the second ctrl+c returned %v, want the quit", msg)
 	}
 }
 

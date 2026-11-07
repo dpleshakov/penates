@@ -383,7 +383,7 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	// same target, so one dialog can offer both.
 	lm := driveAll(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter").(*model)
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
-	lm = resize(t, app.Initial(""), 120, 30).(*model)
+	lm = acceptRestore(t, resize(t, app.Initial(""), 120, 30))
 	if lm.pendingCount() != 1 {
 		t.Fatalf("pending after the restart = %d, want the held selection", lm.pendingCount())
 	}

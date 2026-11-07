@@ -416,8 +416,8 @@ func (m *model) openAttachDialog(k *kit.Kit) tea.Cmd {
 // attachOfferAt registers the kit and attaches it to target — RegisterKit
 // and AttachKit do the work, and AttachKit registers a new target — then
 // moves to the target when it differs from the current one. The notice
-// confirms the change (11.2); the undo offer rides on it once the u key
-// works (task 10).
+// confirms the change and offers the undo of 11.2: u detaches the kit
+// again while the notice lives.
 func (m *model) attachOfferAt(o *attachOffer, target string) tea.Cmd {
 	if err := m.app.State.RegisterKit(o.kit.Name, o.kit.Dir); err != nil {
 		return m.showNotice(err.Error())
@@ -431,8 +431,10 @@ func (m *model) attachOfferAt(o *attachOffer, target string) tea.Cmd {
 	m.closeInput()
 	// The target the kit attached to opens — a full reload: the kit joins
 	// the target's tree only when its kits load again.
-	m.enterTarget(target)
-	return m.showNotice(fmt.Sprintf("Attached %s at %s.", o.kit.Name, displayPath(target)))
+	entered := m.enterTarget(target)
+	name := o.kit.Name
+	undo := func() tea.Cmd { return m.detachKit(name) }
+	return tea.Batch(entered, m.showUndoable(fmt.Sprintf("Attached %s at %s.", name, displayPath(target)), undo))
 }
 
 // applyEditKit points the kit to the directory the input names (6.6): the
@@ -454,8 +456,8 @@ func (m *model) applyEditKit() tea.Cmd {
 	name := m.editName
 	dir := displayPath(p.dir)
 	m.closeInput()
-	m.enterTarget(m.target)
-	return m.showNotice(fmt.Sprintf("Pointed %s to %s.", name, dir))
+	entered := m.enterTarget(m.target)
+	return tea.Batch(entered, m.showNotice(fmt.Sprintf("Pointed %s to %s.", name, dir)))
 }
 
 // completePath completes the path input to the next candidate (6.2): the
@@ -847,7 +849,12 @@ func (m *model) detachUnderCursor() tea.Cmd {
 	if r.Kind != KindKit || r.Kit.Orphans || r.Kit.Detaching {
 		return nil
 	}
-	name := r.Kit.Name
+	return m.detachKitFlow(r.Kit.Name)
+}
+
+// detachKitFlow opens the detach flow of one kit of the target (6.7): the
+// path the palette's Detach kit takes as well, for the kit it was given.
+func (m *model) detachKitFlow(name string) tea.Cmd {
 	installed := m.installedItems(name)
 	if len(installed) == 0 {
 		return m.detachKit(name)
@@ -940,8 +947,8 @@ func (m *model) detachWithRemovals(kitName string) tea.Cmd {
 
 // detachKit detaches the kit from the target at once (6.7): the files in
 // the target are not touched, its installed items move to the orphans
-// group, and the notice confirms the change (11.2). The undo offer rides
-// on the same notice once the u key works (task 10).
+// group, and the notice confirms the change and offers the undo of 11.2 —
+// u attaches the kit back while the notice lives.
 func (m *model) detachKit(kitName string) tea.Cmd {
 	if err := m.app.State.DetachKit(kitName, m.target); err != nil {
 		return m.showNotice(err.Error())
@@ -950,5 +957,21 @@ func (m *model) detachKit(kitName string) tea.Cmd {
 		return m.showNotice(err.Error())
 	}
 	m.refresh()
-	return m.showNotice(fmt.Sprintf("Detached %s.", kitName))
+	t := m.target
+	undo := func() tea.Cmd { return m.attachKitBack(kitName, t) }
+	return m.showUndoable(fmt.Sprintf("Detached %s.", kitName), undo)
+}
+
+// attachKitBack is the undo of a detach (11.2): the kit attaches to the
+// target again — the detach never unregistered it — and the target
+// reopens with the kit's tree.
+func (m *model) attachKitBack(kitName, target string) tea.Cmd {
+	if err := m.app.State.AttachKit(kitName, target); err != nil {
+		return m.showNotice(err.Error())
+	}
+	if err := m.reloadRegistry(); err != nil {
+		return m.showNotice(err.Error())
+	}
+	entered := m.enterTarget(target)
+	return tea.Batch(entered, m.showNotice(fmt.Sprintf("Attached %s at %s.", kitName, displayPath(target))))
 }

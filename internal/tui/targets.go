@@ -387,8 +387,8 @@ func (m *model) switchFromList() tea.Cmd {
 // holds saved pending actions offers them for restoration on entering
 // (11.1).
 func (m *model) switchTarget(dir string) tea.Cmd {
-	m.enterTarget(dir)
-	return m.offerRestore()
+	entered := m.enterTarget(dir)
+	return tea.Batch(entered, m.offerRestore())
 }
 
 // offerRestore opens the restore dialog of 11.1 when the entered target
@@ -469,10 +469,34 @@ func restoreItemID(key string) string {
 	return key
 }
 
+// restorePending keeps the restored actions of the target (11.1) after
+// checking they still name something they can act on: the ones that do
+// not are dropped and reported on the notice line. The target is the one
+// the dialog offered; only the entered one holds the loaded kits the
+// check reads.
+func (m *model) restorePending(t string) tea.Cmd {
+	if t != m.target {
+		return nil
+	}
+	dropped, err := m.dropInvalidPending()
+	if err != nil {
+		return m.showNotice(err.Error())
+	}
+	if dropped > 0 {
+		return m.showNotice(fmt.Sprintf("Dropped %d invalid pending %s.", dropped, plural(dropped, "action", "actions")))
+	}
+	return nil
+}
+
 // discardPendingItems starts the target with no pending actions (11.1):
 // the item actions go with their answers; the deferred operations stay —
-// they are not actions but operations waiting for their apply.
+// they are not actions but operations waiting for their apply. The notice
+// reports how many went (11.1: the drops are reported).
 func (m *model) discardPendingItems(t string) tea.Cmd {
+	n := 0
+	if p := m.pendingActionsOf(t); p != nil {
+		n = len(p.Items)
+	}
 	err := m.app.State.Update(func(reg *state.Registry) error {
 		p, ok := reg.Pending[t]
 		if !ok {
@@ -491,6 +515,9 @@ func (m *model) discardPendingItems(t string) tea.Cmd {
 		return m.showNotice(err.Error())
 	}
 	m.refresh()
+	if n > 0 {
+		return m.showNotice(fmt.Sprintf("Discarded %d pending %s.", n, plural(n, "action", "actions")))
+	}
 	return nil
 }
 
@@ -530,7 +557,7 @@ func (m *model) openForgetDialog(t string) {
 // summary opens; the forget waits behind the apply as a deferred
 // operation and completes with it.
 func (m *model) forgetAfterRemovals(t string) tea.Cmd {
-	m.enterTarget(t)
+	entered := m.enterTarget(t)
 	var keys []string
 	if m.lk != nil {
 		for key := range m.lk.Items {
@@ -540,18 +567,18 @@ func (m *model) forgetAfterRemovals(t string) tea.Cmd {
 	sort.Strings(keys)
 	for _, key := range keys {
 		if err := m.editPending(key, func(ip *state.ItemPending) { ip.Remove = true }); err != nil {
-			return m.showNotice(err.Error())
+			return tea.Batch(entered, m.showNotice(err.Error()))
 		}
 	}
 	if err := m.app.State.DeferForgetTarget(t); err != nil {
-		return m.showNotice(err.Error())
+		return tea.Batch(entered, m.showNotice(err.Error()))
 	}
 	if err := m.reloadRegistry(); err != nil {
-		return m.showNotice(err.Error())
+		return tea.Batch(entered, m.showNotice(err.Error()))
 	}
 	m.refresh()
 	m.beginApply()
-	return nil
+	return entered
 }
 
 // forgetTargetNow is the second option of 8.3, and the first one when the
@@ -567,18 +594,19 @@ func (m *model) forgetTargetNow(t string) tea.Cmd {
 	if err := m.reloadRegistry(); err != nil {
 		return m.showNotice(err.Error())
 	}
+	var entered tea.Cmd
 	if t == m.target {
 		m.closeTargetList()
 		paths := m.reg.TargetPaths()
 		if len(paths) == 0 {
-			m.enterTarget("")
+			entered = m.enterTarget("")
 		} else {
-			m.enterTarget(paths[0])
+			entered = m.enterTarget(paths[0])
 		}
 	} else if m.list != nil {
 		m.refreshTargetList()
 	}
-	return m.showNotice("Forgot target " + displayPath(t) + ".")
+	return tea.Batch(entered, m.showNotice("Forgot target "+displayPath(t)+"."))
 }
 
 // read is what a debounce tick performs while the list is open (6.2): the

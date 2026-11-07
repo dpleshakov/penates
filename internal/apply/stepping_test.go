@@ -320,9 +320,12 @@ func assertRepairable(t *testing.T, root string, store *lock.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := Reconcile(root, lk, snap)
+	rec, staged, err := Reconcile(root, lk, snap)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
+	}
+	if len(staged) != 0 {
+		t.Errorf("staged after the interruption = %v, want none", staged)
 	}
 	if len(rec.Broken) != 0 {
 		t.Errorf("broken after the interruption = %v, want none", rec.Broken)

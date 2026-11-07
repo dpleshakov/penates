@@ -277,30 +277,35 @@ func RemoveItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 // Reconcile reconciles the lock with the target after an interruption:
 // the staged temp files an interrupted apply left beside their
 // destinations are removed, and the installed items whose recorded content
-// the target holds modified or has lost are reported. snap must cover the
-// paths the lock records; the client reads them with lock.RecordedPaths.
-func Reconcile(root string, lk *lock.Lock, snap *target.Snapshot) (*plan.Reconciliation, error) {
-	if err := removeStaged(root); err != nil {
-		return nil, err
+// the target holds modified or has lost are reported. It returns the
+// reconciliation and the staged paths it removed, relative to root with
+// slash separators — the evidence that an apply was interrupted at all,
+// for the client to report. snap must cover the paths the lock records;
+// the client reads them with lock.RecordedPaths.
+func Reconcile(root string, lk *lock.Lock, snap *target.Snapshot) (*plan.Reconciliation, []string, error) {
+	staged, err := removeStaged(root)
+	if err != nil {
+		return nil, nil, err
 	}
-	return plan.Reconcile(lk, snap), nil
+	return plan.Reconcile(lk, snap), staged, nil
 }
 
 // stagedPrefix names the temp files stage writes beside their destinations.
 const stagedPrefix = ".penates-"
 
 // removeStaged deletes the temp files of an interrupted apply: regular files
-// named .penates-* anywhere under root. A target that does not exist yet has
-// nothing to clean; directories and anything else the pattern may name are
-// left alone.
-func removeStaged(root string) error {
+// named .penates-* anywhere under root, returned as root-relative slash
+// paths. A target that does not exist yet has nothing to clean; directories
+// and anything else the pattern may name are left alone.
+func removeStaged(root string) ([]string, error) {
 	if _, err := os.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	var removed []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -310,8 +315,14 @@ func removeStaged(root string) error {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove staged file %s: %w", path, err)
 		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = path
+		}
+		removed = append(removed, filepath.ToSlash(rel))
 		return nil
 	})
+	return removed, err
 }
 
 // withoutPath drops one path from a list, keeping the order of the rest.

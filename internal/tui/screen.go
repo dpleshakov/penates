@@ -27,7 +27,7 @@ import (
 // its own: the pending actions of the target in the registry are the
 // selection, saved on every toggle. Selecting an item with variables opens
 // the variable form in the details (7.3). The target list, the command
-// palette, the help screen, and the kit management dialogs are later tasks.
+// palette, the help screen, and the kit management dialogs overlay it.
 
 // App carries the wiring the screens work through: the state store and the
 // lock store of one penates data directory.
@@ -73,6 +73,7 @@ func (a *App) Initial(kitPath string) tea.Model {
 		}
 		if t, ok := attachmentTarget(reg, k.Name); ok {
 			m.enterTarget(t)
+			m.offerRestore()
 			return m
 		}
 		m.startAddKit(kitPath)
@@ -88,6 +89,9 @@ func (a *App) Initial(kitPath string) tea.Model {
 	default:
 		m.enterTarget(paths[0])
 	}
+	// A target that opens with saved pending actions offers their
+	// restoration at startup, the way switching to it does (11.1).
+	m.offerRestore()
 	return m
 }
 
@@ -182,7 +186,25 @@ type model struct {
 	forgetItems   int
 	restoreTarget string
 
+	// The command palette of 9 and the kit picker it opens when a kit
+	// command runs outside a kit (9: they ask for one).
+	palette *commandPalette
+	kitPick *kitPick
+
+	// The full help of 12.5: the bindings and the glyph legends, scrolled
+	// like the details view.
+	helpOpen   bool
+	helpLines  []string
+	helpOffset int
+
 	notice Notice
+	// noticeUndo is the command u runs while the notice names an immediate
+	// configuration change (11.2): one press performs the reverse
+	// operation. Any other key or the age-out drops the binding.
+	noticeUndo func() tea.Cmd
+	// ctrlcArmed marks the quit the first ctrl+c armed (12.1): the second
+	// quits at once, any other key disarms.
+	ctrlcArmed bool
 	// errLine holds a load problem until the next successful reload; it
 	// shares the notice line (2.1) but does not age out.
 	errLine string
@@ -230,16 +252,37 @@ func (m *model) showNotice(text string) tea.Cmd {
 	return tickNotice()
 }
 
+// showUndoable puts a notice on the notice line and binds u to undo while
+// the notice lives (11.2): one press performs the reverse operation of the
+// immediate configuration change the notice names.
+func (m *model) showUndoable(text string, undo func() tea.Cmd) tea.Cmd {
+	m.noticeUndo = undo
+	return m.showNotice(text)
+}
+
+// clearNotice clears the notice line, and the undo offer it carried, if
+// any (11.2).
+func (m *model) clearNotice() {
+	m.notice.Clear()
+	m.noticeUndo = nil
+}
+
 func (m *model) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	switch {
 	case m.inputKind != inputNone:
 		// The path input's initial preview read (6.2): an input that
 		// already names a kit — the prefilled one of 6.1 — shows it.
-		return tea.Batch(textinput.Blink, tickPreview(m.previewSeq))
+		cmds = append(cmds, textinput.Blink, tickPreview(m.previewSeq))
 	case m.formOpen:
-		return textinput.Blink
+		cmds = append(cmds, textinput.Blink)
 	}
-	return nil
+	// A notice the startup showed — the reconciliation of an interrupted
+	// apply — ages out on its own.
+	if m.notice.Visible() {
+		cmds = append(cmds, tickNotice())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -252,6 +295,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.notice.Visible() {
 			return m, tickNotice()
 		}
+		// The notice aged out; the undo it offered goes with it (11.2).
+		m.noticeUndo = nil
 		return m, nil
 	case previewTickMsg:
 		// A stale tick drops: the edit it was scheduled for is gone
@@ -281,9 +326,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		// The double ctrl+c of 12.1: the first press arms the quit and
+		// shows the notice, any other key disarms, the second quits at
+		// once, without dialogs — the pending actions are saved on every
+		// mutation, and an interrupted apply is repaired by
+		// reconciliation (11.2). The progress view is not left by
+		// navigation, yet the double press reaches it the same way
+		// (10.2).
 		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
+			if m.ctrlcArmed {
+				return m, tea.Quit
+			}
+			m.ctrlcArmed = true
+			return m, m.showNotice("press ctrl+c again to quit")
 		}
+		m.ctrlcArmed = false
 		switch m.screen {
 		case screenList:
 			return m.updateList(msg)
@@ -291,8 +348,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSummary(msg)
 		case screenProgress:
 			// The view cannot be left by navigation while the items are
-			// being applied (10.2); ctrl+c above stays a plain quit — the
-			// next start reconciles the interruption.
+			// being applied (10.2); the double ctrl+c above stays the one
+			// way out — the next start reconciles the interruption.
 			return m, nil
 		case screenResults:
 			return m.updateResults(msg)
@@ -349,28 +406,35 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if _, ok := m.reg.Targets[m.target]; !ok {
 			paths := m.reg.TargetPaths()
 			if len(paths) == 0 {
-				m.enterTarget("")
-			} else {
-				m.enterTarget(paths[0])
+				return m, m.enterTarget("")
 			}
-			return m, nil
+			return m, m.enterTarget(paths[0])
 		}
 	}
-	m.enterTarget(m.target)
-	return m, nil
+	return m, m.enterTarget(m.target)
 }
 
 // updateList dispatches the keys of the main screen: the modal dialog
-// first, then the target list overlay, the variable form, the path input
-// of the kit flows, the details view, the filter, and the tree. The input
-// sits over the view: the preview view of 6.2 keeps the flow's keys.
+// first, then the target list overlay, the command palette and the kit
+// picker, the variable form, the path input of the kit flows, the details
+// view, the help screen, the filter, and the tree. The input sits over the
+// view: the preview view of 6.2 keeps the flow's keys. A key press clears
+// the notice — except u acting on the undo the notice offers (11.2).
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	m.notice.Clear()
+	if !(msg.String() == "u" && m.notice.Visible() && m.noticeUndo != nil) {
+		m.clearNotice()
+	}
 	if m.dialog != nil {
 		return m.updateDialog(msg)
 	}
 	if m.list != nil {
 		return m.updateTargetList(msg)
+	}
+	if m.palette != nil {
+		return m.updatePalette(msg)
+	}
+	if m.kitPick != nil {
+		return m.updateKitPick(msg)
 	}
 	if m.formOpen {
 		return m.updateForm(msg)
@@ -380,6 +444,9 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.view {
 		return m.updateView(msg)
+	}
+	if m.helpOpen {
+		return m.updateHelp(msg)
 	}
 	if m.filtering {
 		return m.updateFilter(msg)
@@ -479,12 +546,7 @@ func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		cmd = m.toggleReset()
 	case "R":
-		m.enterTarget(m.target)
-		n := 0
-		if m.reg != nil {
-			n = len(m.reg.KitsFor(m.target))
-		}
-		return m, m.showNotice(fmt.Sprintf("Rescanned %d kits.", n))
+		return m, m.rescanKits()
 	case "e":
 		// 12.2: the relocation input of 6.6 opens on the kit row, a
 		// readable kit included.
@@ -506,11 +568,155 @@ func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		// 12.1: the target list of 8.1 opens under the header.
 		return m, m.openTargetList()
+	case "ctrl+p":
+		// 12.1: the command palette of 9 opens over the body.
+		return m, m.openPalette()
+	case "?":
+		// 12.5: the full help opens over the body.
+		m.openHelp()
+		return m, nil
+	case "u":
+		// 11.2: the undo the notice offers, while it lives.
+		if m.notice.Visible() && m.noticeUndo != nil {
+			undo := m.noticeUndo
+			m.noticeUndo = nil
+			return m, undo()
+		}
 	case "q":
-		return m, tea.Quit
+		return m, m.quit()
 	}
 	m.clampCursor()
 	return m, cmd
+}
+
+// quit quits, asking about the pending actions first (11.3): a target
+// that holds pending item actions opens the dialog — they are saved
+// either way and offered for restoration on the next start — an empty one
+// quits at once.
+func (m *model) quit() tea.Cmd {
+	if m.pendingCount() > 0 {
+		m.openQuitDialog()
+		return nil
+	}
+	return tea.Quit
+}
+
+// rescanKits re-reads the kits of the target (12.1, R) and reports what
+// the rescan changed (11.2): the new item rows, the ones that became
+// updates, the ones that became orphans — the diff of the tree before and
+// after — and the pending actions the rescan invalidated, dropped and
+// counted in the same message.
+func (m *model) rescanKits() tea.Cmd {
+	before := rowStatuses(m.rows)
+	cmd := m.enterTarget(m.target)
+	after := rowStatuses(m.rows)
+	n := 0
+	if m.reg != nil {
+		n = len(m.reg.KitsFor(m.target))
+	}
+	newItems, updates, orphans := 0, 0, 0
+	for key, status := range after {
+		was, seen := before[key]
+		switch {
+		case !seen:
+			newItems++
+		case status == StatusUpdate && was != StatusUpdate:
+			updates++
+		case status == StatusOrphan && was != StatusOrphan:
+			orphans++
+		}
+	}
+	var parts []string
+	if newItems > 0 {
+		parts = append(parts, fmt.Sprintf("%d new %s", newItems, plural(newItems, "item", "items")))
+	}
+	if updates > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", updates, plural(updates, "update", "updates")))
+	}
+	if orphans > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", orphans, plural(orphans, "orphan", "orphans")))
+	}
+	dropped, err := m.dropInvalidPending()
+	if err != nil {
+		return tea.Batch(cmd, m.showNotice(err.Error()))
+	}
+	if dropped > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending %s dropped", dropped, plural(dropped, "action", "actions")))
+	}
+	text := fmt.Sprintf("Rescanned %d %s.", n, plural(n, "kit", "kits"))
+	if len(parts) > 0 {
+		text = fmt.Sprintf("Rescanned %d %s: %s.", n, plural(n, "kit", "kits"), strings.Join(parts, ", "))
+	}
+	return tea.Batch(cmd, m.showNotice(text))
+}
+
+// rowStatuses maps the item rows of a built tree by key to their statuses;
+// the rescan diff compares two of these maps.
+func rowStatuses(rows []Row) map[string]Status {
+	out := make(map[string]Status, len(rows))
+	for _, r := range rows {
+		if r.Kind == KindItem {
+			out[r.Item.Key] = r.Item.Status
+		}
+	}
+	return out
+}
+
+// dropInvalidPending drops the saved item actions that no longer name
+// anything they can act on (11.1, 11.2) and returns how many went.
+func (m *model) dropInvalidPending() (int, error) {
+	p := m.pendingActions()
+	if p == nil || len(p.Items) == 0 {
+		return 0, nil
+	}
+	var gone []string
+	for key, item := range p.Items {
+		if !m.validPendingAction(key, item) {
+			gone = append(gone, key)
+		}
+	}
+	if len(gone) == 0 {
+		return 0, nil
+	}
+	sort.Strings(gone)
+	err := m.app.State.Update(func(reg *state.Registry) error {
+		p := reg.Pending[m.target]
+		if p == nil {
+			return nil
+		}
+		for _, key := range gone {
+			delete(p.Items, key)
+		}
+		if len(p.Items) == 0 && len(p.Deferred) == 0 {
+			delete(reg.Pending, m.target)
+		} else {
+			reg.Pending[m.target] = p
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := m.reloadRegistry(); err != nil {
+		return len(gone), err
+	}
+	m.refresh()
+	return len(gone), nil
+}
+
+// validPendingAction reports whether one saved action still names
+// something it can act on (11.1): a removal and a reset need the
+// installed record, a selection needs its kit item — a kit that stopped
+// providing the item, or one that no longer reads, leaves the selection
+// nothing to plan for. Whether the item still holds the version it held
+// when the action was saved the state does not record, so a version
+// change alone keeps the action.
+func (m *model) validPendingAction(key string, item *state.ItemPending) bool {
+	installed := m.lk != nil && m.lk.Items[key] != nil
+	if (item.Remove || item.Reset) && installed {
+		return true
+	}
+	return item.Select && m.kitItem(key) != nil
 }
 
 // toKitRow moves the cursor to the kit row above the cursor (12.3).
@@ -729,13 +935,15 @@ func attachmentTarget(reg *state.Registry, kitName string) (string, bool) {
 // enterTarget loads everything the tree of one target shows: the registry,
 // the kits attached to it, the lock, and the snapshot. The lock is
 // reconciled with the target before anything is shown or planned: the
-// staged files of an interrupted apply leave the target, and the items
-// whose recorded content the target holds modified or has lost take their
-// statuses. The selection is then planned against the snapshot, which
-// turns the conflict and warning outcomes of the planner into row
-// statuses. Opening a target remembers it as the last active one (11).
-// An empty directory is the first-run state: nothing loads.
-func (m *model) enterTarget(dir string) {
+// staged files of an interrupted apply leave the target — their removal is
+// reported on the notice line with the items the interruption touched
+// (11.2) — and the items whose recorded content the target holds modified
+// or has lost take their statuses. The selection is then planned against
+// the snapshot, which turns the conflict and warning outcomes of the
+// planner into row statuses. Opening a target remembers it as the last
+// active one (11). An empty directory is the first-run state: nothing
+// loads. The command returned arms the notice's timer when one showed.
+func (m *model) enterTarget(dir string) tea.Cmd {
 	m.screen = screenList
 	m.target = dir
 	m.cursor = 0
@@ -762,7 +970,7 @@ func (m *model) enterTarget(dir string) {
 	m.reviewed = map[string]bool{}
 	m.changelogCache = map[string][]ChangelogEntry{}
 	m.errLine = ""
-	m.notice.Clear()
+	m.clearNotice()
 
 	if err := m.rememberTarget(dir); err != nil {
 		m.errLine = err.Error()
@@ -770,7 +978,7 @@ func (m *model) enterTarget(dir string) {
 	reg, err := m.app.State.LoadRegistry()
 	if err != nil {
 		m.errLine = err.Error()
-		return
+		return nil
 	}
 	m.reg = reg
 
@@ -780,7 +988,7 @@ func (m *model) enterTarget(dir string) {
 	m.kits = nil
 	if dir == "" {
 		m.refresh()
-		return
+		return nil
 	}
 
 	m.lk, err = m.app.Locks.Load(dir)
@@ -810,14 +1018,59 @@ func (m *model) enterTarget(dir string) {
 		m.snap = nil
 	}
 	m.reconcil = nil
+	var notice tea.Cmd
 	if m.snap != nil && m.lk != nil {
-		if rec, err := apply.Reconcile(dir, m.lk, m.snap); err != nil {
+		rec, staged, err := apply.Reconcile(dir, m.lk, m.snap)
+		if err != nil {
 			m.errLine = "reconcile: " + err.Error()
 		} else {
 			m.reconcil = rec
+			// Staged files found means an apply was interrupted here
+			// (11.2); the notice names the items it touched.
+			if len(staged) > 0 {
+				notice = m.showNotice(reconcileNotice(rec, m.lk))
+			}
 		}
 	}
 	m.refresh()
+	return notice
+}
+
+// reconcileNotice names what the reconciliation of an interrupted apply
+// found (11.2): the items whose recorded content the interruption left
+// modified or lost, each with the version its record holds.
+func reconcileNotice(rec *plan.Reconciliation, lk *lock.Lock) string {
+	seen := map[string]bool{}
+	var keys []string
+	for key := range rec.Modified {
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+	for key := range rec.Broken {
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return "Reconciled after an interrupted apply."
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		version := ""
+		if rec := lk.Items[key]; rec != nil {
+			version = rec.Version
+		}
+		_, id, _ := strings.Cut(key, "/")
+		if id == "" {
+			id = key
+		}
+		parts = append(parts, fmt.Sprintf("%s recorded as %s", id, version))
+	}
+	return "Reconciled after an interrupted apply: " + strings.Join(parts, ", ") + "."
 }
 
 // rememberTarget saves the target as the last active one (11).
@@ -944,10 +1197,16 @@ func (m *model) rebuildPlans() {
 // pendingActions is the pending object of the current target, nil when the
 // target holds none.
 func (m *model) pendingActions() *state.Pending {
+	return m.pendingActionsOf(m.target)
+}
+
+// pendingActionsOf is the pending object of one target, nil when it holds
+// none.
+func (m *model) pendingActionsOf(t string) *state.Pending {
 	if m.reg == nil {
 		return nil
 	}
-	return m.reg.Pending[m.target]
+	return m.reg.Pending[t]
 }
 
 // currentAnswers is the answer set the planning uses: the answers given at
@@ -1108,6 +1367,11 @@ func (m *model) View() string {
 	if m.list != nil {
 		return fl.Render(m.listFrame(fl))
 	}
+	// The command palette spans the width the same way (9): its box sits
+	// under the header, centered like the target list's.
+	if m.palette != nil || m.kitPick != nil {
+		return fl.Render(m.paletteFrame(fl))
+	}
 	return l.Render(m.listFrame(l))
 }
 
@@ -1190,6 +1454,16 @@ func (m *model) listFrame(l Layout) Frame {
 			lines = RenderItemForm(m.formDetails(), m.width, m.set)
 		}
 		f.Rows = ScrollWindow(lines, m.viewOffset, h)
+		f.Cursor = 0
+	}
+	// The full help of 12.5 takes the body the way the details view does:
+	// its lines scroll, the footer names its keys.
+	if m.helpOpen {
+		h := l.Height - headerLines - footerLines
+		if m.noticeLine() != "" {
+			h--
+		}
+		f.Rows = ScrollWindow(m.helpLines, m.helpOffset, h)
 		f.Cursor = 0
 	}
 	f.Details = m.detailsPane(l)
@@ -1343,6 +1617,9 @@ func (m *model) footer(width int) string {
 		}
 		return keys
 	}
+	if m.helpOpen {
+		return "esc close · ↑↓ scroll"
+	}
 	if m.filtering {
 		return "enter keep filter · esc clear"
 	}
@@ -1405,10 +1682,10 @@ func defaultVerb(p Pending, s Status) string {
 }
 
 // detailsPane is the details content of the row under the cursor on wide
-// terminals (2.2); the view leaves the pane out, and the open form or the
-// preview takes the pane's place (7.3, 6.2).
+// terminals (2.2); the view, the help and the form leave the pane out, and
+// the open form or the preview takes the pane's place (7.3, 6.2).
 func (m *model) detailsPane(l Layout) []string {
-	if l.Mode != ModeWide || m.view || len(m.rows) == 0 {
+	if l.Mode != ModeWide || m.view || m.helpOpen || len(m.rows) == 0 {
 		return nil
 	}
 	if m.formOpen {
@@ -1459,6 +1736,7 @@ func (m *model) summaryFrame(width int) Frame {
 		return f
 	}
 	f.Rows = renderSummary(*m.applySummary, width, m.set)
+	f.Notice = m.noticeLine()
 	if m.applySummary.applicable() {
 		f.Footer = "enter apply · ↑↓ scroll · esc back"
 	} else {
@@ -1480,6 +1758,9 @@ func (m *model) progressFrame(width int) Frame {
 	return Frame{
 		Header: JoinSides("penates  Applying to "+m.targetLabel(), fmt.Sprintf("%d of %d", done, len(m.progress)), width),
 		Rows:   renderProgress(m.progress, m.spinner, m.set),
+		// The notice line carries the armed ctrl+c of 12.1 while the
+		// items apply.
+		Notice: m.noticeLine(),
 	}
 }
 
@@ -1498,6 +1779,7 @@ func (m *model) resultsFrame(width int) Frame {
 		f.Header = JoinSides(f.Header, m.resultCounts(), width)
 	}
 	f.Rows = renderResults(m.outcome.err, m.outcome.steps, m.outcome.deferred, m.outcome.errs, m.set)
+	f.Notice = m.noticeLine()
 	return f
 }
 

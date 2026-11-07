@@ -44,6 +44,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeySpace}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "ctrl+p":
+		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -121,6 +125,19 @@ func itemKeys(m *model) []string {
 		}
 	}
 	return out
+}
+
+// acceptRestore accepts the restore dialog a start with saved pending
+// actions opens (11.1): the flows under test drive the tree, so the offer
+// is taken and the actions stay. A start without the offer returns the
+// model as it is.
+func acceptRestore(t *testing.T, m tea.Model) *model {
+	t.Helper()
+	lm := m.(*model)
+	if lm.dialog != nil && lm.dialog.kind == dialogRestore {
+		return drive(t, m, "enter").(*model)
+	}
+	return lm
 }
 
 // itemRow finds an item row of the built tree by its key.
@@ -460,7 +477,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 
 	// The kit publishes 1.1.0 with new content: the tree shows the update.
 	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm := m.(*model)
 	r := itemRow(lm, "ex/good")
 	if r.InstalledVersion != "1.0.0" || r.KitVersion != "1.1.0" || r.Status != StatusUpdate {
@@ -483,7 +500,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 
 	// The kit publishes 0.9.0: shown as a downgrade.
 	bumpKit(t, kitDir, "0.9.0", "good skill v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusDowngrade {
 		t.Fatalf("downgrade row = %+v", r)
@@ -498,7 +515,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified || r.Pending == nil {
 		t.Fatalf("modified row = %+v", r)
@@ -997,7 +1014,7 @@ func TestListStatuses(t *testing.T) {
 	// A higher kit version is an update, with the arrow in the version
 	// column.
 	bumpStatusKit(t, kitDir, "1.1.0", "plain v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)
@@ -1008,7 +1025,7 @@ func TestListStatuses(t *testing.T) {
 
 	// A lower kit version is a downgrade.
 	bumpStatusKit(t, kitDir, "0.9.0", "plain v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusDowngrade {
 		t.Fatalf("downgrade row = %+v", r)
@@ -1020,7 +1037,7 @@ func TestListStatuses(t *testing.T) {
 	// A major bump is marked for review: the row carries the major flag
 	// (7.2).
 	bumpStatusKit(t, kitDir, "2.0.0", "plain v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusUpdate || !r.Major {
 		t.Fatalf("major row = %+v", r)
@@ -1032,7 +1049,7 @@ func TestListStatuses(t *testing.T) {
 	// The same version with changed content warns while the item is
 	// selected: applying would keep everything.
 	bumpStatusKit(t, kitDir, "1.0.0", "plain v2 changed\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusWarning {
 		t.Fatalf("warning row = %+v", r)
@@ -1047,7 +1064,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "skills", "plain", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusModified {
 		t.Fatalf("modified row = %+v", r)
@@ -1060,7 +1077,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.Remove(filepath.Join(targetDir, "skills", "plain", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusBroken {
 		t.Fatalf("broken row = %+v", r)
@@ -1090,7 +1107,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "AGENTS.md"), []byte("notes\n\n## Dup rules\n\nhand written\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	m = driveAll(t, m, "down", "space")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/dup"); r.Status != StatusConflict {
@@ -1117,7 +1134,7 @@ func TestListStatuses(t *testing.T) {
 	if err := locks.Save(lk); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[2] != "gone/old" {
 		t.Fatalf("items = %v", keys)
@@ -1136,7 +1153,7 @@ func TestListStatuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	teamDir := writeTeamKit(t, targetDir)
-	m = resize(t, app.Initial(teamDir), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(teamDir), 100, 30))
 	if m.(*model).inputKind != inputAddKit {
 		t.Fatalf("input = %v, want the add-kit input for the new kit", m.(*model).inputKind)
 	}
@@ -1238,7 +1255,7 @@ func TestReconciliationFlow(t *testing.T) {
 	if err := os.Remove(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusBroken {
 		t.Fatalf("row after reconciliation = %+v, want broken", r)
@@ -1263,7 +1280,7 @@ func TestReconciliationFlow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {
 		t.Fatalf("row after reconciliation = %+v, want modified", r)
@@ -1386,7 +1403,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	m = driveAll(t, m, "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
@@ -1543,7 +1560,7 @@ func TestMajorGate(t *testing.T) {
 
 	// The kit publishes 2.0.0: a major update (7.2).
 	bumpKit(t, kitDir, "2.0.0", "good skill v2\n")
-	m = resize(t, app.Initial(""), 100, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusUpdate || !r.Major {
 		t.Fatalf("major row = %+v", r)
@@ -1732,7 +1749,7 @@ func TestHeaderFooter(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = resize(t, app.Initial(""), 120, 30)
+	m = acceptRestore(t, resize(t, app.Initial(""), 120, 30))
 	m = driveAll(t, m, "down")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {

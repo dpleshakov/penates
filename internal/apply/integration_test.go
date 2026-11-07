@@ -457,9 +457,12 @@ func TestReconcileAfterInterruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := Reconcile(targetDir, lk, snap)
+	rec, staged, err := Reconcile(targetDir, lk, snap)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
+	}
+	if len(staged) != 2 {
+		t.Fatalf("staged removed = %v, want both staged files", staged)
 	}
 	if len(rec.Modified) != 1 || !rec.Modified["demo/one"] {
 		t.Errorf("modified = %v, want demo/one", rec.Modified)
@@ -528,9 +531,12 @@ func TestReconcileAfterInterruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err = Reconcile(targetDir, fresh, snap)
+	rec, staged, err = Reconcile(targetDir, fresh, snap)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(staged) != 0 {
+		t.Errorf("staged after the repair = %v, want none", staged)
 	}
 	if len(rec.Broken) != 0 {
 		t.Errorf("broken after the repair = %v, want none", rec.Broken)

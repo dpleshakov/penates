@@ -295,7 +295,7 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 
 	// The kit publishes 1.1.0 introducing a third, required variable.
 	bumpFormKit(t, kitDir, "1.1.0", "q")
-	m = resize(t, app.Initial(""), 100, 30).(*model)
+	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
 	if r := itemRow(m, "ex/varitem"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)
 	}

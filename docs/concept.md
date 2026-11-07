@@ -343,7 +343,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 ### 10.2 Main screen
 
 ```
- penates  ~/.config/opencode                                         3 pending · ? help
+ penates  ~/.config/opencode ▾                                     3 pending · ? help
 
   ▾ personal-opencode     ●2 ↑1 ✗1      ~/kits/opencode
     ● writing                           1.0.0          Text editing skill
@@ -367,6 +367,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - `/` filters the tree by id, tags and description; kit rows keep their groups and show the match counts.
 - With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is. The add-kit input completes directory names, the kit previews beside the input while the path names one, and the `target_hint` it proposes is confirmed — or edited — as the target before the kit attaches (10.1).
 - Startup opens the target that was active when penates last exited. On a later run, the previous selection is restored as the active selection; deselecting is one key.
+- The registered targets are managed from the list that `t` opens under the header: fuzzy search over the display name and the path, the current target marked beside the counts of its kits and installed items, `+ add target` with directory completion, `ctrl+r` renaming the display name the header shows, and `ctrl+d` removing the target — its installed items are removed through the summary and the target is forgotten when the apply completes, or the target is forgotten at once, its lock deleted and its files left unmanaged. Pending actions belong to their target: switching between targets saves them for the target being left and asks nothing, and switching to a target that holds saved pending actions offers them for restoration.
 - Before applying, a summary lists every change per item and every excluded item with its reason; items marked for removal join the same summary. The apply runs only after the summary is confirmed.
 
 ## 11. Rejected directions

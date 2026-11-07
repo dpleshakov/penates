@@ -15,19 +15,23 @@ import (
 // The kinds of dialog the screens open. The kind tells chooseDialog what
 // the chosen option does.
 const (
-	dialogAttach = "attach"
-	dialogDetach = "detach"
+	dialogAttach       = "attach"
+	dialogDetach       = "detach"
+	dialogForgetTarget = "forgetTarget"
+	dialogRestore      = "restore"
 )
 
 // dialog is one open modal: the question and the options, the cursor over
-// the chosen one. The model holds the dialog's context — the kit it acts
-// on — beside it.
+// the chosen one. The model holds the dialog's context — the kit or the
+// target it acts on — beside it. keys names the key line inside the
+// bottom border; empty falls back to dialogKeys.
 type dialog struct {
 	kind    string
 	title   string
 	body    []string
 	options []string
 	chosen  int
+	keys    string
 }
 
 // dialogKeys is the key line the open dialog names (6.3, 6.7 mockups: it
@@ -36,7 +40,8 @@ const dialogKeys = "enter choose · esc cancel"
 
 // updateDialog feeds the keys of the open dialog: the arrows move, enter
 // chooses, esc cancels. Every other key is ignored — a modal takes the
-// keyboard while it is open.
+// keyboard while it is open. The restore dialog's esc starts with no
+// pending actions (11.1: "esc start with none").
 func (m *model) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
@@ -50,6 +55,11 @@ func (m *model) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m, m.chooseDialog()
 	case "esc":
+		if m.dialog.kind == dialogRestore {
+			t := m.restoreTarget
+			m.closeDialog()
+			return m, m.discardPendingItems(t)
+		}
 		m.closeDialog()
 	}
 	return m, nil
@@ -82,6 +92,35 @@ func (m *model) chooseDialog() tea.Cmd {
 			m.closeDialog()
 			return m.detachKit(name)
 		}
+	case dialogForgetTarget:
+		t, n := m.forgetTarget, m.forgetItems
+		switch d.chosen {
+		case 0:
+			m.closeDialog()
+			if n == 0 {
+				// Nothing installed: the summary would confirm an empty
+				// apply, so the forget goes straight through the
+				// operation the deferred one would complete with (8.3).
+				return m.forgetTargetNow(t)
+			}
+			m.closeTargetList()
+			return m.forgetAfterRemovals(t)
+		case 1:
+			m.closeDialog()
+			return m.forgetTargetNow(t)
+		}
+	case dialogRestore:
+		t := m.restoreTarget
+		switch d.chosen {
+		case 0:
+			// Restore keeps the actions: they were saved with the target
+			// and the tree already shows them (11.1).
+			m.closeDialog()
+			return nil
+		case 1:
+			m.closeDialog()
+			return m.discardPendingItems(t)
+		}
 	}
 	m.closeDialog()
 	return nil
@@ -92,17 +131,21 @@ func (m *model) closeDialog() {
 	m.dialog = nil
 	m.attach = nil
 	m.detachName = ""
+	m.forgetTarget = ""
+	m.forgetItems = 0
+	m.restoreTarget = ""
 }
 
 // The box glyphs of the dialog frame; the ASCII set draws the same box
-// with plain characters (3.3).
+// with plain characters (3.3). lm and rm are the left and right caps of
+// a separator border inside the box.
 type boxGlyphs struct {
-	tl, tr, bl, br, h, v string
+	tl, tr, bl, br, h, v, lm, rm string
 }
 
 var (
-	unicodeBox = boxGlyphs{"╭", "╮", "╰", "╯", "─", "│"}
-	asciiBox   = boxGlyphs{"+", "+", "+", "+", "-", "|"}
+	unicodeBox = boxGlyphs{"╭", "╮", "╰", "╯", "─", "│", "├", "┤"}
+	asciiBox   = boxGlyphs{"+", "+", "+", "+", "-", "|", "|", "|"}
 )
 
 // lines renders the dialog as body lines (6.3, 6.7 mockups): the box
@@ -124,7 +167,11 @@ func (d *dialog) lines(width int, set Set) []string {
 			inner = append(inner, " "+o)
 		}
 	}
-	inner = append(inner, "", dialogKeys)
+	keys := d.keys
+	if keys == "" {
+		keys = dialogKeys
+	}
+	inner = append(inner, "", keys)
 
 	// One blank column of padding inside each border; the title never
 	// squeezes the border fill to nothing.

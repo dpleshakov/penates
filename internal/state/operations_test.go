@@ -758,3 +758,28 @@ func TestRegisterKit(t *testing.T) {
 		t.Errorf("registered dir = %q, want the refused registration to change nothing", k.Dir)
 	}
 }
+
+func TestRegisterTarget(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// A target registers without a kit attached to it.
+	if err := store.RegisterTarget("/targets/wsl"); err != nil {
+		t.Fatalf("RegisterTarget: %v", err)
+	}
+	reg := loadRegistry(t, store)
+	if _, ok := reg.Targets["/targets/wsl"]; !ok {
+		t.Errorf("targets = %v, want /targets/wsl registered", reg.Targets)
+	}
+
+	// A target path is the identity: registering it again changes nothing
+	// and is not an error.
+	if err := store.RegisterTarget("/targets/wsl"); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	if n := len(loadRegistry(t, store).Targets); n != 1 {
+		t.Errorf("targets = %d, want 1", n)
+	}
+}

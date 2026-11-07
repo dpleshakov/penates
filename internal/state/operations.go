@@ -54,6 +54,20 @@ func (s *Store) AttachKit(kit, target string) error {
 	})
 }
 
+// RegisterTarget records a target directory without attaching a kit to
+// it. Registering an already registered target changes nothing — a target
+// path is the target's identity, so there is one entry per path. The
+// operation saves the registry.
+func (s *Store) RegisterTarget(target string) error {
+	return s.Update(func(reg *Registry) error {
+		if _, ok := reg.Targets[target]; ok {
+			return nil
+		}
+		reg.Targets[target] = Target{}
+		return nil
+	})
+}
+
 // DetachKit removes the attachment of the registered kit from the target
 // at once, whether or not the kit holds installed items there. The files
 // in the target are not touched: installed items stay installed and

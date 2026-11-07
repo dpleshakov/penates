@@ -143,7 +143,7 @@ task 10.
 per-target pending actions and offering restoration; rename changes the
 header; both removal paths end in the right state — items removed and
 the target forgotten, or the lock deleted and the files untouched.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-09 `apply-screens`
 **Description:** The apply screens of section 10: the summary in the

@@ -173,6 +173,13 @@ type model struct {
 	// beside it.
 	dialog     *dialog
 	detachName string
+	// The target list overlay of 8.1 and the targets its dialogs act on:
+	// the forget dialog keeps the path and the installed count it opened
+	// with, the restore dialog the target it offers (11.1).
+	list          *targetList
+	forgetTarget  string
+	forgetItems   int
+	restoreTarget string
 
 	notice Notice
 	// errLine holds a load problem until the next successful reload; it
@@ -277,18 +284,35 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "q" {
 		return m, tea.Quit
 	}
+	// An apply may have completed the forget of the current target: the
+	// screen cannot return to it, so the first registered path opens — or
+	// the first run, when none is.
+	if m.reg != nil {
+		if _, ok := m.reg.Targets[m.target]; !ok {
+			paths := m.reg.TargetPaths()
+			if len(paths) == 0 {
+				m.enterTarget("")
+			} else {
+				m.enterTarget(paths[0])
+			}
+			return m, nil
+		}
+	}
 	m.enterTarget(m.target)
 	return m, nil
 }
 
 // updateList dispatches the keys of the main screen: the modal dialog
-// first, then the variable form, the path input of the kit flows, the
-// details view, the filter, and the tree. The input sits over the view:
-// the preview view of 6.2 keeps the flow's keys.
+// first, then the target list overlay, the variable form, the path input
+// of the kit flows, the details view, the filter, and the tree. The input
+// sits over the view: the preview view of 6.2 keeps the flow's keys.
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.notice.Clear()
 	if m.dialog != nil {
 		return m.updateDialog(msg)
+	}
+	if m.list != nil {
+		return m.updateTargetList(msg)
 	}
 	if m.formOpen {
 		return m.updateForm(msg)
@@ -421,6 +445,9 @@ func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.filter.Focus()
 	case "a":
 		m.beginApply()
+	case "t":
+		// 12.1: the target list of 8.1 opens under the header.
+		return m, m.openTargetList()
 	case "q":
 		return m, tea.Quit
 	}
@@ -649,6 +676,7 @@ func attachmentTarget(reg *state.Registry, kitName string) (string, bool) {
 // statuses. The selection is then planned against the snapshot, which
 // turns the conflict and warning outcomes of the planner into row
 // statuses. Opening a target remembers it as the last active one (11).
+// An empty directory is the first-run state: nothing loads.
 func (m *model) enterTarget(dir string) {
 	m.screen = screenList
 	m.target = dir
@@ -672,6 +700,7 @@ func (m *model) enterTarget(dir string) {
 	m.attach = nil
 	m.dialog = nil
 	m.detachName = ""
+	m.list = nil
 	m.reviewed = map[string]bool{}
 	m.changelogCache = map[string][]ChangelogEntry{}
 	m.errLine = ""
@@ -687,6 +716,15 @@ func (m *model) enterTarget(dir string) {
 	}
 	m.reg = reg
 
+	m.lk = nil
+	m.snap = nil
+	m.reconcil = nil
+	m.kits = nil
+	if dir == "" {
+		m.refresh()
+		return
+	}
+
 	m.lk, err = m.app.Locks.Load(dir)
 	if err != nil {
 		m.errLine = "lock: " + err.Error()
@@ -695,7 +733,6 @@ func (m *model) enterTarget(dir string) {
 	// The kits attached to the target, loaded where they still load; a kit
 	// that fails stays out and the tree shows its group as unreadable
 	// (6.6).
-	m.kits = nil
 	for _, name := range reg.KitsFor(dir) {
 		kk, ok := reg.Kits[name]
 		if !ok {
@@ -1006,6 +1043,11 @@ func (m *model) View() string {
 	case screenResults:
 		return fl.Render(m.resultsFrame())
 	}
+	// The target list spans the width like the summary does (8.1): the
+	// box sits under the header, no details pane takes its share.
+	if m.list != nil {
+		return fl.Render(m.listFrame(fl))
+	}
 	return l.Render(m.listFrame(l))
 }
 
@@ -1026,6 +1068,13 @@ func (m *model) listFrame(l Layout) Frame {
 	if m.dialog != nil {
 		f.Rows = m.dialog.lines(l.Width, m.set)
 		f.Footer = dialogKeys
+		return f
+	}
+	// The target list takes the body the same way (8.1): its keys render
+	// inside the box, the footer stays empty.
+	if m.list != nil {
+		f.Rows = m.list.lines(l.Width, m.set)
+		f.Cursor = m.list.cursor + 2 // the rows start under the top border and the search line
 		return f
 	}
 	lines := RenderTree(m.rows, l, m.set)
@@ -1134,7 +1183,9 @@ var cursorMark = mark{unicode: "▌", ascii: ">", role: roleDim}
 
 // header is the fixed header line (2.1): the application name and target
 // on the left, the pending count and the help hint on the right. The
-// target path shortens from the left when it does not fit (4.3).
+// target carries the arrow that opens the target list — down while the
+// list is closed, up while it shows (8.1) — and its path shortens from
+// the left when it does not fit (4.3).
 func (m *model) header(width int) string {
 	right := ""
 	if n := m.pendingCount(); n > 0 {
@@ -1142,14 +1193,24 @@ func (m *model) header(width int) string {
 	}
 	right += "? help"
 	label := "no target"
+	arrow := ""
 	if m.target != "" {
 		label = m.targetLabel()
+		arrow = " " + m.targetArrowMark().glyph(m.set)
 	}
-	avail := width - ansi.StringWidth(right) - len(headerName)
+	avail := width - ansi.StringWidth(right) - len(headerName) - ansi.StringWidth(arrow)
 	if w := ansi.StringWidth(label); w > avail {
 		label = ShortenLeft(label, avail)
 	}
-	return JoinSides(headerName+label, right, width)
+	return JoinSides(headerName+label+arrow, right, width)
+}
+
+// targetArrowMark is the mark after the target in the header (8.1).
+func (m *model) targetArrowMark() mark {
+	if m.list != nil {
+		return targetOpenMark
+	}
+	return targetClosedMark
 }
 
 // headerName is the application name and the gap before the target.
@@ -1265,7 +1326,7 @@ func (m *model) rowKeys() string {
 			keys = append(keys, "enter add kit")
 		}
 	}
-	keys = append(keys, "/ filter", "a apply")
+	keys = append(keys, "/ filter", "a apply", "t targets")
 	return strings.Join(keys, " · ")
 }
 

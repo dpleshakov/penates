@@ -260,8 +260,13 @@ func (m *model) scrollPreviewView(key string) {
 
 // readPreview is what a debounce tick performs (6.2): the directory
 // candidates of the path input, the existence of the first-target
-// directory, and the kit the path names.
+// directory, and the kit the path names — or, while the target list is
+// open, the candidates and the existence of its add-target input.
 func (m *model) readPreview() {
+	if m.list != nil {
+		m.list.read()
+		return
+	}
 	if m.inputKind == inputNone {
 		return
 	}
@@ -457,17 +462,30 @@ func (m *model) applyEditKit() tea.Cmd {
 // first tab takes the first candidate, the next ones cycle through the
 // list.
 func (m *model) completePath() tea.Cmd {
-	if len(m.completions) == 0 {
+	next, value := nextCompletion(&m.pathInput, m.completions, m.completion)
+	if value == "" {
 		return nil
 	}
-	if m.pathInput.Value() == m.completions[m.completion] {
-		m.completion = (m.completion + 1) % len(m.completions)
-	} else {
-		m.completion = 0
-	}
-	m.pathInput.SetValue(m.completions[m.completion])
+	m.completion = next
+	m.pathInput.SetValue(value)
 	m.previewSeq++
 	return tickPreview(m.previewSeq)
+}
+
+// nextCompletion cycles an input over the directory candidates: the first
+// tab takes the first candidate, the next ones cycle through the list. It
+// returns the index taken and the value set, empty when there are no
+// candidates.
+func nextCompletion(input *textinput.Model, completions []string, completion int) (int, string) {
+	if len(completions) == 0 {
+		return completion, ""
+	}
+	if input.Value() == completions[completion] {
+		completion = (completion + 1) % len(completions)
+	} else {
+		completion = 0
+	}
+	return completion, completions[completion]
 }
 
 // inputPath is the path the path input names: trimmed and absolute. Empty
@@ -766,27 +784,10 @@ func detailLines(width int, text string) []string {
 // completionLines render the dropdown of the directory candidates under
 // the input row (6.2 mockup), aligned under the input text.
 func (m *model) completionLines() []string {
-	if m.inputKind == inputNone || m.view || len(m.completions) == 0 {
+	if m.inputKind == inputNone || m.view {
 		return nil
 	}
-	g := unicodeBox
-	if m.set == ASCIISet {
-		g = asciiBox
-	}
-	w := 0
-	for _, c := range m.completions {
-		if len(c) > w {
-			w = len(c)
-		}
-	}
-	pad := strings.Repeat(" ", m.inputIndent())
-	inner := w + 2
-	lines := make([]string, 0, len(m.completions)+2)
-	lines = append(lines, pad+g.tl+strings.Repeat(g.h, inner)+g.tr)
-	for _, c := range m.completions {
-		lines = append(lines, pad+g.v+" "+fmt.Sprintf("%-*s", w, c)+" "+g.v)
-	}
-	return append(lines, pad+g.bl+strings.Repeat(g.h, inner)+g.br)
+	return completionBox(m.completions, m.inputIndent(), m.set)
 }
 
 // inputIndent is the column the input text starts at, so the dropdown
@@ -805,6 +806,33 @@ func (m *model) inputIndent() int {
 		}
 	}
 	return 0
+}
+
+// completionBox renders the dropdown of the directory candidates under an
+// input whose text starts at the given column (6.2 mockup): the box of
+// the candidates, one per line. Empty candidates render nothing.
+func completionBox(candidates []string, indent int, set Set) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	g := unicodeBox
+	if set == ASCIISet {
+		g = asciiBox
+	}
+	w := 0
+	for _, c := range candidates {
+		if len(c) > w {
+			w = len(c)
+		}
+	}
+	pad := strings.Repeat(" ", indent)
+	inner := w + 2
+	lines := make([]string, 0, len(candidates)+2)
+	lines = append(lines, pad+g.tl+strings.Repeat(g.h, inner)+g.tr)
+	for _, c := range candidates {
+		lines = append(lines, pad+g.v+" "+fmt.Sprintf("%-*s", w, c)+" "+g.v)
+	}
+	return append(lines, pad+g.bl+strings.Repeat(g.h, inner)+g.br)
 }
 
 // detachUnderCursor opens the detach flow of the kit row under the cursor

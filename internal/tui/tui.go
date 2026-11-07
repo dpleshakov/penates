@@ -117,9 +117,10 @@ type row struct {
 }
 
 // statusWord is the bracketed status the list renders for the row: the most
-// specific of the states it holds. The order is the precedence —
-// a planned conflict outranks reconciliation drift, drift outranks the
-// version table, and the frozen statuses outrank selection.
+// specific of the states it holds. The order is the precedence — a planned
+// conflict outranks all, the reconciliation and planner verdicts (broken,
+// warning, modified) outrank the version markers, and the frozen statuses
+// outrank selection.
 func (r row) statusWord() string {
 	switch {
 	case r.conflict:

@@ -1,6 +1,6 @@
 # penates concept
 
-This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04 and implemented in full, is archived unchanged in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md).
+This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04, is archived in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md) with only its status stamped; where the shipped build parted from it, this document states the shipped behaviour.
 
 ## 1. Summary
 
@@ -22,7 +22,7 @@ Agent harnesses such as OpenCode and Claude Code are customized with skills, ins
 
 When both streams live in the same files, keeping machines in sync requires repeated manual merges.
 
-penates addresses the machine axis of this problem: one kit, several machines, each with its own selection and parameters. Tools built around the other axes — per-machine templating, translation between harnesses, distribution from public registries, plain file synchronization — can carry a kit's content, but none of them installs it as versioned units whose ownership protects what the user wrote. Kits may combine content obtained through such tools.
+penates addresses the machine side of this problem: one kit, several machines, each with its own selection and parameters. Tools that vary files per machine through templating, translate one source across harnesses, or distribute content from registries can carry a kit's content, but none of them installs it as versioned units whose recorded ownership protects what the user wrote. Kits may combine content obtained through such tools.
 
 ### 2.1 Requirements
 
@@ -276,7 +276,7 @@ Two items that claim the same file, the same block identifier, or the same JSON 
 
 ### 7.6 Explicit reset
 
-For an item in conflict or with modified content, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content. It is never performed as part of a regular update.
+For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update.
 
 ### 7.7 Atomicity
 
@@ -356,7 +356,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - Statuses: not installed, selected, installed, update available, downgrade available, modified, broken, conflict, orphan, kit unavailable, warning.
 - `/` filters by id, tags and description.
 - `i` shows the description, contributions, changelog, source kit and variable answers.
-- `r` requests reset to kit for a modified or conflicted item; `d` marks an installed item for removal.
+- `r` requests reset to kit for an installed item; `d` marks an installed item for removal.
 - Forms request variables; answers are remembered.
 - On a later run, the previous selection is restored as the active selection on entry; deselecting is one key.
 - Before applying, a summary lists every change per item and every excluded item with its reason; items marked for removal join the same summary. The apply runs only after the summary is confirmed.

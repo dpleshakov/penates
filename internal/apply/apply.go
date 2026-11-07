@@ -32,7 +32,7 @@ type Result struct {
 // anything is renamed into place, and the lock records the item only after all of
 // its files are in place, so the lock never describes an item that is not fully
 // applied. A failing item leaves no files and no empty directories behind; the items
-// around it are unaffected (RFC 7.7).
+// around it are unaffected.
 func Apply(root string, p *plan.Plan, lk *lock.Lock, store *lock.Store) []Result {
 	var results []Result
 	for _, ip := range p.Installable() {
@@ -97,7 +97,7 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	}
 
 	// Shared files this item brought into existence belong to penates as long as
-	// they exist (RFC 6.7).
+	// they exist.
 	var createdShared []string
 	for _, a := range ip.Actions {
 		sharedKind := a.Kind == plan.ActionSection || a.Kind == plan.ActionJSON
@@ -121,9 +121,9 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	// Content the plan keeps standing — a file or block recorded in the lock
 	// that this plan writes no action for — stays recorded with its
 	// installation base: the three-state rules of a later update must still
-	// see the user's modification against it (RFC 7.2). The directories of
+	// see the user's modification against it. The directories of
 	// the earlier install stay recorded, so a removal still cleans them up
-	// while they are empty (RFC 9.1).
+	// while they are empty.
 	if old := lk.Items[ip.Key]; old != nil {
 		for path, hash := range old.Files {
 			if _, written := rec.Files[path]; !written {
@@ -148,7 +148,7 @@ func applyItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store)
 	return nil
 }
 
-// Remove executes every removal item of a plan into the target root (RFC 9).
+// Remove executes every removal item of a plan into the target root.
 // Content actions are staged like writes and renamed into place only after
 // the whole item is staged, and the deletions happen after the staging, so a
 // failing item leaves the target as it was. On success the item's lock record
@@ -213,7 +213,7 @@ func removeItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 	}
 
 	// Directories penates created for the item go while they are empty,
-	// deepest first (RFC 9.1); a directory that holds user files stays.
+	// deepest first; a directory that holds user files stays.
 	dirs := append([]string(nil), rec.DirsCreated...)
 	sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
 	for _, dir := range dirs {
@@ -233,8 +233,8 @@ func removeItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 	return nil
 }
 
-// Reconcile reconciles the lock with the target after an interruption
-// (RFC 7.7): the staged temp files an interrupted apply left beside their
+// Reconcile reconciles the lock with the target after an interruption:
+// the staged temp files an interrupted apply left beside their
 // destinations are removed, and the installed items whose recorded content
 // the target holds modified or has lost are reported. snap must cover the
 // paths the lock records; the client reads them with lock.RecordedPaths.
@@ -285,7 +285,7 @@ func withoutPath(list []string, p string) []string {
 }
 
 // answersOf normalizes the plan's answers for the lock: an item with no
-// variables records an empty, not a null, map (RFC 6.4).
+// variables records an empty, not a null, map.
 func answersOf(ip *plan.ItemPlan) map[string]string {
 	if ip.Answers == nil {
 		return map[string]string{}
@@ -295,7 +295,7 @@ func answersOf(ip *plan.ItemPlan) map[string]string {
 
 // jsonLocations converts the plan's owned locations into their lock form. An
 // item may own locations in a file it did not write: values found satisfied
-// and made co-owned bring no action, yet the lock records them (RFC 7.4).
+// and made co-owned bring no action, yet the lock records them.
 func jsonLocations(locs map[string][]plan.Location) map[string][]lock.Location {
 	if len(locs) == 0 {
 		return nil

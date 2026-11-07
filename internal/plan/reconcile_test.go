@@ -9,7 +9,7 @@ import (
 	"github.com/dpleshakov/penates/internal/target"
 )
 
-// TestReconcile compares a lock with snapshots (RFC 7.7): content that
+// TestReconcile compares a lock with snapshots: content that
 // differs marks its item modified, content that is missing marks it broken,
 // and content that stands as recorded marks nothing.
 func TestReconcile(t *testing.T) {
@@ -152,7 +152,7 @@ func TestReconcile(t *testing.T) {
 
 // TestPlanRepairsBrokenItems plans an item the reconciliation marked broken
 // at its installed version: the lost content is installed again through the
-// ordinary absent-content rules (RFC 7.7).
+// ordinary absent-content rules.
 func TestPlanRepairsBrokenItems(t *testing.T) {
 	const frag = "installed fragment\n"
 	base := hashOf([]byte(frag))
@@ -243,7 +243,7 @@ func TestPlanRepairsBrokenItems(t *testing.T) {
 }
 
 // TestPlanModifiedNoAction keeps a modified item at its installed version and
-// names the modification in the no-action reason (RFC 7.7).
+// names the modification in the no-action reason.
 func TestPlanModifiedNoAction(t *testing.T) {
 	const frag = "installed body\n"
 	it := item("one", "skills/one/SKILL.md")

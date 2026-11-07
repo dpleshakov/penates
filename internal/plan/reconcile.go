@@ -7,7 +7,7 @@ import (
 )
 
 // Reconciliation is the outcome of comparing the lock with the target by
-// recorded hashes (RFC 7.7): which installed items the target no longer
+// recorded hashes: which installed items the target no longer
 // describes faithfully. Both sets stay nil while every item stands as
 // recorded.
 type Reconciliation struct {
@@ -34,7 +34,7 @@ func (r *Reconciliation) ModifiedItem(key string) bool {
 }
 
 // Reconcile compares every recorded hash of every installed item with the
-// snapshot (RFC 7.7): content that differs marks its item modified, content
+// snapshot: content that differs marks its item modified, content
 // that is missing marks it broken. It is pure: snap must cover the paths the
 // lock records — see lock.RecordedPaths — and nothing is written.
 func Reconcile(lk *lock.Lock, snap *target.Snapshot) *Reconciliation {
@@ -79,7 +79,7 @@ func Reconcile(lk *lock.Lock, snap *target.Snapshot) *Reconciliation {
 // reconcileJSON checks the json locations of one item against the snapshot: a
 // value the file holds in another form marks the item modified, a lost one
 // marks it broken. Arrays are sets: an element stands while the array holds
-// an element with the recorded hash (RFC 7.4).
+// an element with the recorded hash.
 func reconcileJSON(key, file string, locs []lock.Location, snap *target.Snapshot, modified, broken map[string]bool) {
 	st := snap.SharedFile(file)
 	if !st.Exists || st.IsDir {

@@ -77,7 +77,7 @@ removing the item takes the block with it. Items may also contribute `json`
 fragments into shared configuration files and declare variables that are
 requested at installation and substituted into templated contributions. The
 complete format, with the update and removal rules, is specified in
-[docs/rfc-penates.md](docs/rfc-penates.md).
+[docs/concept.md](docs/concept.md).
 
 ## Ownership
 

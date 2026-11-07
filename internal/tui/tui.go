@@ -108,8 +108,8 @@ type row struct {
 	conflict         bool
 	conflictReason   string
 	warning          bool
-	// major marks an update across the major version: RFC 8 has the TUI
-	// mark major updates for review, so the marker takes the error style.
+	// major marks an update across the major version: major updates are
+	// behavior changes the user reviews, so the marker takes the error style.
 	major    bool
 	selected bool
 	reset    bool
@@ -117,9 +117,9 @@ type row struct {
 }
 
 // statusWord is the bracketed status the list renders for the row: the most
-// specific of the states it holds (RFC 10.2). The order is the precedence —
+// specific of the states it holds. The order is the precedence —
 // a planned conflict outranks reconciliation drift, drift outranks the
-// version table, and the frozen statuses of RFC 9.2 outrank selection.
+// version table, and the frozen statuses outrank selection.
 func (r row) statusWord() string {
 	switch {
 	case r.conflict:
@@ -147,7 +147,7 @@ func (r row) statusWord() string {
 }
 
 // matches reports whether the row survives a filter: a case-insensitive
-// substring over the id, the tags, and the description (RFC 10.2).
+// substring over the id, the tags, and the description.
 func (r row) matches(filter string) bool {
 	if filter == "" {
 		return true
@@ -167,7 +167,7 @@ func (r row) matches(filter string) bool {
 // group is one kit block of the list: the header line and the indices of its
 // rows. Kits are listed in registration order; the items of a kit that did
 // not load and the installed items of a kit that is not registered keep
-// their groups, so their frozen statuses stay visible (RFC 9.2).
+// their groups, so their frozen statuses stay visible.
 type group struct {
 	kitName string
 	kitDir  string
@@ -399,7 +399,7 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshPlanStatuses()
 		}
 	case "r":
-		// Reset to kit is only ever a user request (RFC 7.6): it toggles on
+		// Reset to kit is only ever a user request: it toggles on
 		// the row under the cursor, applies once, and clears. It changes
 		// what planning would decide, so the statuses follow.
 		if vis := m.visible(); len(vis) > 0 && m.rows[vis[m.cursor]].installed {
@@ -418,7 +418,7 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshPlanStatuses()
 		}
 	case "d":
-		// Removal is only ever a user request (RFC 9): it toggles on the
+		// Removal is only ever a user request: it toggles on the
 		// installed row under the cursor and applies once.
 		if vis := m.visible(); len(vis) > 0 && m.rows[vis[m.cursor]].installed {
 			idx := vis[m.cursor]
@@ -472,12 +472,12 @@ func (m *model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // enterList loads everything the item list shows: the kits registered for the
 // target, the target's lock, and the previous selection. The lock is
-// reconciled with the target before anything is shown or planned (RFC 7.7):
+// reconciled with the target before anything is shown or planned:
 // the staged files of an interrupted apply leave the target, and the items
 // whose recorded content the target holds modified or has lost take their
 // statuses. Rows are grouped under their kit's header; the items of a kit
 // that no longer loads and the installed items of a kit that is not
-// registered keep their groups and their frozen statuses (RFC 9.2). The
+// registered keep their groups and their frozen statuses. The
 // current selection is then planned against the snapshot, which turns the
 // conflict and warning outcomes of the planner into row statuses.
 func (m *model) enterList(dir string) {
@@ -588,8 +588,8 @@ func (m *model) enterList(dir string) {
 	}
 
 	// Installed items no loaded kit provides stay managed and frozen: the
-	// list shows them under their kit's name so the user can remove them
-	// (RFC 9.2). An installed item of a kit that failed to load is shown as
+	// list shows them under their kit's name so the user can remove them.
+	// An installed item of a kit that failed to load is shown as
 	// kit unavailable; one whose kit is not registered at all, or that a
 	// loaded kit no longer provides, is an orphan.
 	if lk != nil {
@@ -627,7 +627,7 @@ func (m *model) enterList(dir string) {
 			switch {
 			case failed[kitName] != "":
 				// The kit is registered but no longer loads: the item is
-				// frozen as kit unavailable (RFC 9.2).
+				// frozen as kit unavailable.
 				r.unavailable = true
 				r.description = "kit did not load"
 			case m.groups[gi].kitDir != "":
@@ -649,7 +649,7 @@ func (m *model) enterList(dir string) {
 
 // kitRow builds the list row of one item a loaded kit provides: the kit
 // facts, the lock record, and the reconciliation and version-table statuses
-// the lock and the kit version decide (RFC 8, 9.2).
+// the lock and the kit version decide.
 func (m *model) kitRow(k *kit.Kit, it *kit.Item, selected map[string]bool) row {
 	key := kit.ItemKey(k.Name, it.ID)
 	r := row{
@@ -684,7 +684,7 @@ func (m *model) kitRow(k *kit.Kit, it *kit.Item, selected map[string]bool) row {
 
 // refreshPlanStatuses plans the current selection against the snapshot the
 // way an apply would, without writing anything, and lifts the planner's
-// conflict and warning verdicts onto the rows (RFC 10.2). Rows whose
+// conflict and warning verdicts onto the rows. Rows whose
 // selection was toggled since the last refresh take their new statuses here.
 func (m *model) refreshPlanStatuses() {
 	m.planned = nil
@@ -739,9 +739,9 @@ func (m *model) refreshPlanStatuses() {
 }
 
 // beginApply collects what the list would apply and moves to the summary it
-// waits on (RFC 10.2). The required variables neither the lock nor this
+// waits on. The required variables neither the lock nor this
 // session's answers provide are asked for first: the summary must show the
-// templated content as substituted (RFC 6.4).
+// templated content as substituted.
 func (m *model) beginApply() {
 	p := m.collectApply()
 	m.pending = p
@@ -769,7 +769,7 @@ func (m *model) beginApply() {
 // collectApply gathers the selection and the removal marks of the list into
 // one pending apply. The paths cover the selected items' owned files, the
 // kits' shared files, and the removals' recorded files and shared files, so
-// the planning sees everything it may touch (RFC 9.2).
+// the planning sees everything it may touch.
 func (m *model) collectApply() *pendingApply {
 	var selection []string
 	var removals []string
@@ -789,7 +789,7 @@ func (m *model) collectApply() *pendingApply {
 		if r.remove && r.installed {
 			removals = append(removals, r.key)
 			// A removal wins over a held selection: the item does not join
-			// the installs of the same apply (RFC 9).
+			// the installs of the same apply.
 			continue
 		}
 		if !r.selected {
@@ -817,7 +817,7 @@ func (m *model) collectApply() *pendingApply {
 	sort.Strings(paths)
 
 	// A removal is planned from the lock: its files and shared files join the
-	// snapshot, for the items of kits that are gone as well (RFC 9.2).
+	// snapshot, for the items of kits that are gone as well.
 	for _, key := range removals {
 		rec := m.lk.Items[key]
 		if rec == nil {
@@ -850,7 +850,7 @@ func (m *model) collectApply() *pendingApply {
 // buildSummary plans the pending apply without writing anything and shows
 // what it would do: every change per item with the reason of each action,
 // the removals with the content they leave behind, the items kept, and every
-// excluded item with its reasons (RFC 10.2). The apply runs only after the
+// excluded item with its reasons. The apply runs only after the
 // screen's confirmation, and plans again from the target of that moment.
 func (m *model) buildSummary(p *pendingApply) {
 	m.pending = p
@@ -890,7 +890,7 @@ func (m *model) buildSummary(p *pendingApply) {
 	m.screen = screenSummary
 }
 
-// renderSummary lays out the plans of one pending apply (RFC 10.2): every
+// renderSummary lays out the plans of one pending apply: every
 // change per item with the reason of each action, the removals with the
 // content they leave behind, the items kept, and every excluded item with
 // its reasons. An install that writes no byte still takes ownership of its
@@ -975,7 +975,7 @@ func renderSummary(installs, removals []*plan.ItemPlan) string {
 // performApply runs the apply the summary confirmed: removals first, then
 // the installs. Both plan again from a fresh snapshot: the removals rewrite
 // and delete what the summary's snapshot observed, so a removed item's
-// content cannot rise again in a shared file (RFC 9).
+// content cannot rise again in a shared file.
 func (m *model) performApply(p *pendingApply) {
 	m.pending = nil
 	snap, err := target.Read(m.target, p.paths, p.sharedPaths)
@@ -1006,7 +1006,7 @@ func (m *model) performApply(p *pendingApply) {
 		}
 		// A removed row drops both of its marks: a form-resumed apply
 		// collects no removal for it again, and does not reinstall the item
-		// through its held selection (RFC 9).
+		// through its held selection.
 		for i := range m.rows {
 			if removed[m.rows[i].key] {
 				m.rows[i].remove = false
@@ -1036,7 +1036,7 @@ func (m *model) performApply(p *pendingApply) {
 		}
 		// The removals rewrote and deleted what the snapshot observed: the
 		// installs plan from the target as the removals leave it, so a
-		// removed item's content cannot rise again in a shared file (RFC 9).
+		// removed item's content cannot rise again in a shared file.
 		if len(p.selection) > 0 {
 			snap, err = target.Read(m.target, p.paths, p.sharedPaths)
 			if err != nil {
@@ -1100,7 +1100,7 @@ func (m *model) performApply(p *pendingApply) {
 
 	// The selection as applied — the removal rows dropped out of it —
 	// replaces the remembered one, so a removed item is not offered selected
-	// again (RFC 9).
+	// again.
 	if st, err := m.app.State.Load(); err == nil {
 		st.SetSelection(m.target, p.selection)
 		if err := m.app.State.Save(st); err != nil {
@@ -1197,7 +1197,7 @@ func (m *model) View() string {
 					mark = styleErr.Render(mark)
 				}
 				if r.major {
-					// A major update is a behavior change: RFC 8 marks it
+					// A major update is a behavior change; mark it
 					// for review.
 					mark = styleErr.Render(mark)
 				}
@@ -1355,7 +1355,7 @@ func (m *model) itemByKey(key string) *kit.Item {
 }
 
 // versionLabel renders the version column: installed and kit versions joined
-// by the direction of the change when they differ (RFC 8).
+// by the direction of the change when they differ.
 func (m *model) versionLabel(r row) string {
 	if !r.installed || r.installedVersion == r.version {
 		return r.version

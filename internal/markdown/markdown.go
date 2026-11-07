@@ -125,7 +125,7 @@ func Remove(s, id string) (string, bool) {
 
 // Strip deletes the marker lines of the managed block id and keeps the
 // content between them, for a block the user modified: the content stays as
-// ordinary text of the file (RFC 9.1). It reports whether the block was
+// ordinary text of the file. It reports whether the block was
 // found.
 func Strip(s, id string) (string, bool) {
 	lines := strings.Split(s, "\n")

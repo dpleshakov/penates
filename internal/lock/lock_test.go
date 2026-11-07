@@ -110,8 +110,8 @@ func TestOwnership(t *testing.T) {
 	}
 }
 
-// TestRecordedPaths lists what a client snapshots for the reconciliation
-// (RFC 7.7): every owned file, and every shared file holding an owned
+// TestRecordedPaths lists what a client snapshots for the reconciliation:
+// every owned file, and every shared file holding an owned
 // section or json location, sorted and deduplicated.
 func TestRecordedPaths(t *testing.T) {
 	l := &Lock{

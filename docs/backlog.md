@@ -9,6 +9,6 @@ Accepted work that has not started yet, in priority order.
 
 ### `release-pipeline`
 **Goal:** One-command releases: archives for every platform, checksums, and a release workflow that turns the unreleased changelog section into a draft release.
-**Context:** Blocked until the distribution channels are decided (RFC, open question 5); model the setup on a proven goreleaser and release-workflow pattern.
+**Context:** Blocked until the distribution channels are decided (concept.md, open questions); model the setup on a proven goreleaser and release-workflow pattern.
 **Blocked until:** the distribution decision
 **Added:** 2026-11-04, in the walking-skeleton plan

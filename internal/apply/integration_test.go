@@ -138,7 +138,7 @@ func TestInstallEndToEnd(t *testing.T) {
 // executor: the owned file is deleted with the directory penates created for
 // it, the created shared Markdown file is deleted when the removal leaves it
 // without content, the user's JSONC keeps its bytes without the item's value,
-// and the reloaded lock holds no trace of the item (RFC 9.1).
+// and the reloaded lock holds no trace of the item.
 func TestRemoveEndToEnd(t *testing.T) {
 	dataDir := t.TempDir()
 	targetDir := filepath.Join(t.TempDir(), "harness")
@@ -256,8 +256,8 @@ func TestRemoveEndToEnd(t *testing.T) {
 	}
 }
 
-// TestReconcileAfterInterruption walks RFC 7.7: an apply interrupted after
-// the renames and before the lock save leaves moved-but-unrecorded content
+// TestReconcileAfterInterruption walks reconciliation after interruption: an apply
+// interrupted after the renames and before the lock save leaves moved-but-unrecorded content
 // and staged temp files. The next run reconciles: the item comes back
 // modified and broken by what the target holds and lost, the staged files are
 // gone, the repair apply restores the lost file while the user's modification

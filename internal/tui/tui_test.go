@@ -78,7 +78,7 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	}
 
 	// The answer leads to the summary first: nothing is written until the
-	// summary is confirmed (RFC 10.2).
+	// summary is confirmed.
 	m = drive(t, m, "answered", "enter")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
@@ -194,8 +194,8 @@ func writeFixtureKit(t *testing.T, target string) string {
 	return dir
 }
 
-// TestUpdateAndResetFlow walks the version display of RFC 8 and the reset
-// request of 7.6: an update shows `1.0.0 > 1.1.0`, a downgrade shows
+// TestUpdateAndResetFlow walks the version display and the reset
+// request: an update shows `1.0.0 > 1.1.0`, a downgrade shows
 // `1.1.0 < 0.9.0`, a re-apply without a reset keeps the user's modification,
 // and with the reset requested the kit content replaces it.
 func TestUpdateAndResetFlow(t *testing.T) {
@@ -282,7 +282,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 // TestRemoveFlow removes an installed item through the list: the item is
 // marked for removal with d, the apply reports it removed, the target loses
 // the owned file and the directory penates created for it, the lock record
-// dies, and the list stops showing the item as installed (RFC 9.1).
+// dies, and the list stops showing the item as installed.
 func TestRemoveFlow(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")
@@ -344,7 +344,7 @@ func TestRemoveFlow(t *testing.T) {
 	}
 }
 
-// TestRemoveReportsKeptContent pins the report of RFC 9.1: removing an item
+// TestRemoveReportsKeptContent pins the removal report: removing an item
 // whose file the user modified keeps the file, names it in the results, and
 // still drops the lock record.
 func TestRemoveReportsKeptContent(t *testing.T) {
@@ -386,7 +386,7 @@ func TestRemoveReportsKeptContent(t *testing.T) {
 	}
 }
 
-// TestOrphanRemoval walks the frozen-orphan flow of RFC 9.2: an installed
+// TestOrphanRemoval walks the frozen-orphan flow: an installed
 // item no kit provides anymore stays in the list as an orphan and removes
 // from the lock and the target like any other item.
 func TestOrphanRemoval(t *testing.T) {
@@ -422,7 +422,7 @@ func TestOrphanRemoval(t *testing.T) {
 		t.Fatalf("orphan row = %+v", orphan)
 	}
 
-	// The orphan removes from the lock alone, without any kit (RFC 9.2).
+	// The orphan removes from the lock alone, without any kit.
 	m = drive(t, m, "down", "down", "d", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "removed  gone/old") {
@@ -466,7 +466,7 @@ func writeSectionKit(t *testing.T, target string) string {
 // TestRemoveThenInstallSameFile pins the order of one apply: the removals run
 // first and the installs plan from the target as the removals leave it, so
 // removing an item and installing another into the same shared file cannot
-// bring the removed content back (RFC 9).
+// bring the removed content back.
 func TestRemoveThenInstallSameFile(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")
@@ -517,7 +517,7 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 // variable: the form interrupts before anything is written, the summary
 // lists the removal and the install together, and the confirmed apply
 // neither re-reports the removed item as excluded nor reinstalls it through
-// its held selection (RFC 9, 10.2).
+// its held selection.
 func TestRemoveWithFormResume(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")
@@ -537,7 +537,7 @@ func TestRemoveWithFormResume(t *testing.T) {
 	}
 
 	// The form interrupts before anything is written: the removal of the
-	// marked item waits for the summary's confirmation (RFC 10.2).
+	// marked item waits for the summary's confirmation.
 	m = drive(t, m, "enter", "down", "down", "space", "up", "up", "d", "a")
 	fm := m.(*model)
 	if fm.screen != screenForm {
@@ -639,7 +639,7 @@ func writeFilterKit(t *testing.T, target string) string {
 	})
 }
 
-// TestListFilter drives the `/` filter of RFC 10.2: it narrows the list by
+// TestListFilter drives the `/` filter: it narrows the list by
 // id, tag, and description; esc clears it; enter keeps it applied; keys that
 // quit and apply in the list type into the open filter instead.
 func TestListFilter(t *testing.T) {
@@ -720,7 +720,7 @@ func TestListFilter(t *testing.T) {
 
 // TestItemDetails opens the details screen with i and checks that it shows
 // the description, the contributions, the changelog when the item carries
-// one, the source kit, and the recorded variable answers (RFC 10.2).
+// one, the source kit, and the recorded variable answers.
 func TestItemDetails(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")
@@ -779,7 +779,7 @@ func TestItemDetails(t *testing.T) {
 	}
 }
 
-// TestListStatuses walks every status of the RFC 10.2 list through one
+// TestListStatuses walks every status of the item list through one
 // target: not installed, selected, installed, update, downgrade, warning,
 // modified, broken, conflict, orphan, and kit unavailable each render their
 // own bracket marker, and the planner's conflict and warning verdicts reach
@@ -856,7 +856,7 @@ func TestListStatuses(t *testing.T) {
 		t.Errorf("no downgrade marker or arrow:\n%s", view)
 	}
 
-	// A major bump is marked for review (RFC 8): the row carries the major
+	// A major bump is marked for review: the row carries the major
 	// flag and the update marker takes the error style.
 	bumpStatusKit(t, kitDir, "2.0.0", "plain v2\n")
 	m = app.Initial(kitDir)
@@ -1029,7 +1029,7 @@ func writeTeamKit(t *testing.T, target string) string {
 	})
 }
 
-// TestKitGroups checks the kit group headers of RFC 10.2: the header line
+// TestKitGroups checks the kit group headers: the header line
 // names the registered kits, every group header carries the kit directory,
 // and a filter that hides a kit's items hides its header too.
 func TestKitGroups(t *testing.T) {
@@ -1087,7 +1087,7 @@ func TestKitGroups(t *testing.T) {
 	}
 }
 
-// TestReconciliationFlow reconciles the list with the target (RFC 7.7): a
+// TestReconciliationFlow reconciles the list with the target: a
 // staged temp file of an interrupted apply is removed on entering the list,
 // an item whose owned file is gone is shown broken and repaired by the next
 // apply, and a modified owned file is shown modified and kept.
@@ -1164,7 +1164,7 @@ func TestReconciliationFlow(t *testing.T) {
 	}
 }
 
-// TestApplySummary drives the RFC 10.2 summary: applying shows what would
+// TestApplySummary drives the apply summary: applying shows what would
 // change per item — and what a removal marked with d takes away — before
 // anything is written; the apply runs only after the summary is confirmed,
 // and esc cancels out of it without touching the target.
@@ -1253,7 +1253,7 @@ func TestApplySummary(t *testing.T) {
 // TestApplySummaryExcluded shows an excluded item with its reason on the
 // summary: a required variable answered with an empty string stays missing,
 // so the planner excludes the item and the summary says why before the
-// results repeat it (RFC 6.4, 10.2).
+// results repeat it.
 func TestApplySummaryExcluded(t *testing.T) {
 	dataDir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")

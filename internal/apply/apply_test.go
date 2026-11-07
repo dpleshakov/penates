@@ -241,7 +241,7 @@ func TestFailureOfOneItemDoesNotBlockTheNext(t *testing.T) {
 	}
 }
 
-// TestRemoveExecutesThePlan walks the RFC 9.1 rows apply carries out: files
+// TestRemoveExecutesThePlan walks the removal rows apply carries out: files
 // deleted, directories penates created for the item removed while empty and
 // kept while the user's files live in them, shared files rewritten, a created
 // shared file dropped from the lock with its deletion, and the item's record
@@ -435,7 +435,7 @@ func TestApplyInstallsJSON(t *testing.T) {
 // TestApplyRecordsCoOwnershipWithoutWrites pins the satisfied install: every
 // location of the item is already present and co-owned, so the plan carries no
 // action at all, the file is untouched, and the lock still records the item as
-// a co-owner (RFC 7.4).
+// a co-owner.
 func TestApplyRecordsCoOwnershipWithoutWrites(t *testing.T) {
 	root := t.TempDir()
 	before := "{ // kept\n  \"theme\": \"dark\"\n}\n"

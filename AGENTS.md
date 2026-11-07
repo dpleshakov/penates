@@ -19,9 +19,9 @@ before every commit.
 
 ## Documentation
 
-Product behaviour is specified in `docs/rfc-penates.md`; the stack, modules, and
-structure are recorded in `docs/architecture.md`. A change that alters documented
-behaviour updates the document in the same commit.
+Product behaviour is specified in `docs/concept.md` — a living document; the stack,
+modules, and structure are recorded in `docs/architecture.md`. A change that alters
+documented behaviour updates the document in the same commit.
 
 User-visible changes get an entry under `## [Unreleased]` in `CHANGELOG.md`, in the
 format that file defines.

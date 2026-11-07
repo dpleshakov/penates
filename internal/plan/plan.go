@@ -1,8 +1,9 @@
 // Package plan is the pure decision core: kits, lock, snapshot, and source
 // contents in; a plan out — self-contained actions with final content bytes,
 // reasons, errors per item, and the JSON locations each item owns. It
-// implements the three-state conflict model of the RFC and the per-location
-// table for json contributions (RFC 7.4), and performs no I/O.
+// implements the behaviour rules of the product concept (docs/concept.md) —
+// among them the three-state conflict model and the per-location table for
+// json contributions — and performs no I/O.
 package plan
 
 import (
@@ -33,7 +34,7 @@ const (
 	StatusNoAction ItemStatus = "no-action"
 	// StatusRemove means the item is removed from the target: its actions
 	// delete files and rewrite shared files without the item's content, and
-	// apply drops the item's lock record (RFC 9). Only BuildRemoval produces
+	// apply drops the item's lock record. Only BuildRemoval produces
 	// it.
 	StatusRemove ItemStatus = "remove"
 	// StatusError means the item is excluded from the plan; its reasons say why.
@@ -58,35 +59,35 @@ type ItemPlan struct {
 	// Actions are the planned writes, in declaration order, when Status is Install.
 	Actions []Action
 	// JSONLocations lists, per shared file, the JSON locations the item takes
-	// ownership of when installed (RFC 7.4): the values it writes, and equal
+	// ownership of when installed: the values it writes, and equal
 	// values owned by another item, which make the item a co-owner. Locations
 	// merely found satisfied are absent. An update also carries the locations
 	// of the earlier install that the new fragment stops declaring: ownership
-	// never ends but with the removal of the item (RFC 8). The lock records
+	// never ends but with the removal of the item. The lock records
 	// them; a plan may install an item whose locations are all satisfied,
 	// co-owned, or carried without writing any byte.
 	JSONLocations map[string][]Location
 	// Answers are the values the plan substituted into the item's templated
 	// contributions: the client's fresh answers over the recorded ones, for
-	// the declared variables only (RFC 6.4). Apply records them in the lock;
+	// the declared variables only. Apply records them in the lock;
 	// an item with no variables carries none.
 	Answers map[string]string
 	// Downgrade marks an item whose kit version is lower than the installed
-	// one (RFC 8). The plan is complete, but the client shows it as a
+	// one. The plan is complete, but the client shows it as a
 	// downgrade and never selects it by default.
 	Downgrade bool
 	// Conflict marks an excluded item whose reasons are conflicts: an
-	// encounter with user content or with another selected item's claim
-	// (RFC 7.5 and the conflict rows of 7.2–7.4). The client shows such an
+	// encounter with user content or with another selected item's claim,
+	// whichever contribution kind wrote it. The client shows such an
 	// item as conflicting, not merely excluded. Set only when Status is
 	// Error.
 	Conflict bool
-	// Warning marks a NoAction item the version table of RFC 8 warns about:
+	// Warning marks a NoAction item the version table warns about:
 	// the kit provides different content under the installed version, so
 	// applying would keep everything and update nothing. Set only when
 	// Status is NoAction.
 	Warning bool
-	// Reports are user-facing notes of a removal plan (RFC 9.1): content the
+	// Reports are user-facing notes of a removal plan: content the
 	// item does not take away — a file or a value the user modified, a block
 	// whose content is kept without its markers.
 	Reports []string
@@ -106,21 +107,21 @@ const (
 	// fragment's values inserted by RFC 6901 pointer.
 	ActionJSON ActionKind = "json"
 	// ActionRemove deletes the file at To: an owned file removed unchanged, or
-	// a shared file penates created that is left without content (RFC 9.1).
+	// a shared file penates created that is left without content.
 	ActionRemove ActionKind = "remove"
 	// ActionSectionRemove writes its content as the whole shared file with the
 	// item's block deleted, or with its markers stripped when the user
-	// modified the block (RFC 9.1). The item's section record dies with its
+	// modified the block. The item's section record dies with its
 	// lock record.
 	ActionSectionRemove ActionKind = "section-remove"
 	// ActionJSONRemove writes its content as the whole shared file with the
-	// values the item last-owned removed (RFC 9.1). Values another item
+	// values the item last-owned removed. Values another item
 	// co-owns or the user modified stay.
 	ActionJSONRemove ActionKind = "json-remove"
 )
 
-// Location is one JSON location an item owns inside a shared JSON file
-// (RFC 6.7, 7.4): an object member by the RFC 6901 pointer of the member, an
+// Location is one JSON location an item owns inside a shared JSON file:
+// an object member by the RFC 6901 pointer of the member, an
 // array element by the pointer of its array, because arrays are owned as
 // sets. Hash is "sha256:<hex>" over the minimal JSON of the value, so
 // comparisons of installation base, current target, and incoming kit content
@@ -198,21 +199,20 @@ type Input struct {
 	Sources map[string][]byte
 	// Answers holds the variable values the client collected in its forms,
 	// keyed by item key and variable id. They win over the answers recorded in
-	// the lock; a required variable neither knows about is a missing value
-	// (RFC 6.4).
+	// the lock; a required variable neither knows about is a missing value.
 	Answers map[string]map[string]string
 	// Reset names the installed items the user asked to reset to the kit
-	// content (RFC 7.6): their owned content is replaced with the incoming
+	// content: their owned content is replaced with the incoming
 	// content even where the user modified it. A reset is never part of a
 	// regular update plan.
 	Reset map[string]bool
-	// Remove names the installed items the user asked to remove (RFC 9). Only
+	// Remove names the installed items the user asked to remove. Only
 	// BuildRemoval reads it; the removal is planned from the lock and the
 	// snapshot alone, so orphans and items of unavailable kits remove like
-	// any other item (9.2).
+	// any other item.
 	Remove map[string]bool
 	// Reconciled carries the outcome of reconciling the lock with the target
-	// by recorded hashes (RFC 7.7), as the client produced it before
+	// by recorded hashes, as the client produced it before
 	// planning. A broken item plans again at its installed version: its lost
 	// content is installed. A modified one keeps its content, and the
 	// no-action reason names the modification. Nil when the client did not
@@ -223,7 +223,7 @@ type Input struct {
 // MissingVars returns the required variables of the selected items that
 // neither the lock nor fresh answers give a value, keyed by item key in
 // declaration order. Installed items take part: an update may introduce a
-// variable the installation never answered (RFC 6.4, 8). The client requests
+// variable the installation never answered. The client requests
 // them before planning and passes the answers back in Input.Answers.
 func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[string]map[string]string) map[string][]kit.Var {
 	index := map[string]*kit.Item{}
@@ -256,7 +256,7 @@ func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[s
 }
 
 // answerOf returns the value of one variable: a fresh answer the client
-// collected wins over the answer recorded in the lock (RFC 6.4). answered is
+// collected wins over the answer recorded in the lock. answered is
 // false when neither holds one.
 func answerOf(key, varID string, lk *lock.Lock, fresh map[string]map[string]string) (value string, answered bool) {
 	if a, ok := fresh[key][varID]; ok {
@@ -271,7 +271,7 @@ func answerOf(key, varID string, lk *lock.Lock, fresh map[string]map[string]stri
 
 // resolveVars merges fresh answers with the recorded ones for the item's
 // declared variables: an answer of a variable the item no longer declares is
-// discarded (RFC 6.4). It reports the required variables left without a
+// discarded. It reports the required variables left without a
 // value, sorted.
 func resolveVars(key string, it *kit.Item, lk *lock.Lock, fresh map[string]map[string]string) (map[string]string, []string) {
 	if len(it.Vars) == 0 {
@@ -296,8 +296,8 @@ func resolveVars(key string, it *kit.Item, lk *lock.Lock, fresh map[string]map[s
 var placeholder = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
 // substitute replaces every {{var_id}} with the answer of the declared
-// variable and returns the first placeholder no declared variable covers
-// (RFC 6.4). The content of an answer is never rescanned: a value that
+// variable and returns the first placeholder no declared variable covers.
+// The content of an answer is never rescanned: a value that
 // itself contains braces lands verbatim.
 func substitute(src []byte, answers map[string]string) (out []byte, unknown string) {
 	out = placeholder.ReplaceAllFunc(src, func(m []byte) []byte {
@@ -318,7 +318,7 @@ func substitute(src []byte, answers map[string]string) (out []byte, unknown stri
 }
 
 // Build plans the installation of the selected items. Items that fail validation are
-// excluded with their reasons; the others proceed (RFC 7.7).
+// excluded with their reasons; the others proceed.
 func Build(in Input) *Plan {
 	index := map[string]*kit.Item{}
 	for _, k := range in.Kits {
@@ -345,10 +345,10 @@ func Build(in Input) *Plan {
 	return p
 }
 
-// BuildRemoval plans the removal of the items named in Input.Remove (RFC 9).
+// BuildRemoval plans the removal of the items named in Input.Remove.
 // It reads the lock and the snapshot only: an item is removed by what the
 // lock records, so orphans and items of unavailable kits remove exactly like
-// the rest (9.2). Content the user modified stays in the target and reaches
+// the rest. Content the user modified stays in the target and reaches
 // the client as a report; unchanged owned content goes away, and a shared
 // file penates created that is left without content is deleted.
 func BuildRemoval(in Input) *Plan {
@@ -370,7 +370,7 @@ func BuildRemoval(in Input) *Plan {
 // planRemoval plans one item's removal from its lock record. Files, sections,
 // and json values that stand as installed are taken away; the ones the user
 // modified stay and are reported. A created shared file the removal leaves
-// without content is deleted with it (RFC 9.1).
+// without content is deleted with it.
 func planRemoval(key string, in Input) *ItemPlan {
 	ip := &ItemPlan{Key: key}
 	kitName, itemID, split := strings.Cut(key, "/")
@@ -495,8 +495,8 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 		if err != nil || !found {
 			continue // the value is gone already; the record dies with the item
 		}
-		// The lock records array elements under the pointer of their array
-		// (RFC 7.4): such a value stands while the array holds an element
+		// The lock records array elements under the pointer of their array:
+		// such a value stands while the array holds an element
 		// with the recorded hash. A member's value stands at the pointer
 		// itself and is compared by its hash.
 		present := hashOf(min) == loc.Hash
@@ -514,8 +514,7 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 		if !present {
 			// The location no longer holds the recorded value: whatever the
 			// user put there — another element, another value, a whole array
-			// in place of a scalar — it stays, and the removal says so
-			// (RFC 9.1).
+			// in place of a scalar — it stays, and the removal says so.
 			ip.Reports = append(ip.Reports, fmt.Sprintf("kept %s in %s: modified by the user", quoteLoc(loc.Pointer), file))
 			continue
 		}
@@ -596,7 +595,7 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // claimSet records which selected items write which target paths, so that
-// cross-item conflicts reach every claimant (RFC 7.5).
+// cross-item conflicts reach every claimant.
 type claimSet struct {
 	// files maps a target path to the items contributing a whole file to it.
 	files map[string]map[string]bool
@@ -609,7 +608,7 @@ type claimSet struct {
 	sections map[string]map[string]bool
 	jsons    map[string]map[string]bool
 	// jsonMembers records, per shared file and member pointer, the value hash
-	// each selected item claims there, to detect the conflicts of 7.5.
+	// each selected item claims there, to detect the conflicts between them.
 	jsonMembers map[string]map[string]map[string]string
 }
 
@@ -746,7 +745,7 @@ func (c *claimSet) sectionRivals(path, key string) []string {
 
 // jsonConflict reports the first member location, in pointer order, that
 // another selected item claims with a value different from the hash this
-// fragment claims there (RFC 7.5). Arrays are sets: their elements are not
+// fragment claims there. Arrays are sets: their elements are not
 // member locations and never conflict.
 func (c *claimSet) jsonConflict(file string, key string, leaves map[string]string) (string, []string) {
 	ptrs := make([]string, 0, len(leaves))
@@ -831,7 +830,7 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 	var errs []string
 
 	// A required variable without a value stops the item here: the content of
-	// its templated contributions is undefined without one (RFC 6.4).
+	// its templated contributions is undefined without one.
 	answers, missing := resolveVars(key, it, lk, in.Answers)
 	if len(missing) > 0 {
 		for _, id := range missing {
@@ -847,12 +846,12 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 
 	resolved, failed := substituteSources(it, answers, in, &errs)
 
-	// An installed item is re-decided by the version table of RFC 8: a higher
+	// An installed item is re-decided by the version table: a higher
 	// kit version updates, a lower one plans a downgrade the client never
 	// selects by default, an equal version needs nothing or warns, and an
 	// explicit reset bypasses the table entirely. A broken item bypasses it
 	// too: reconciliation found its recorded content missing from the target,
-	// and the next apply installs it again (RFC 7.7).
+	// and the next apply installs it again.
 	reset := false
 	if rec, installed := lk.Items[key]; installed {
 		reset = in.Reset[key]
@@ -883,7 +882,7 @@ func planItem(key string, index map[string]*kit.Item, in Input, claims *claimSet
 // substituteSources resolves the substituted content of the item's templated
 // contributions, keyed by source path. A source that holds an unknown
 // placeholder is not in the result: its reason is recorded and the
-// contribution is skipped (RFC 6.4).
+// contribution is skipped.
 func substituteSources(it *kit.Item, answers map[string]string, in Input, errs *[]string) (resolved map[string][]byte, failed map[string]bool) {
 	resolved = map[string][]byte{}
 	failed = map[string]bool{}
@@ -907,7 +906,7 @@ func substituteSources(it *kit.Item, answers map[string]string, in Input, errs *
 }
 
 // contentUnchanged reports whether every contribution of the installed item
-// would install exactly the content the lock recorded at installation (RFC 8):
+// would install exactly the content the lock recorded at installation:
 // the kit changed nothing under an unchanged version.
 func contentUnchanged(it *kit.Item, rec *lock.Item, in Input, resolved map[string][]byte) bool {
 	for _, c := range it.Contributes {
@@ -940,7 +939,7 @@ func contentUnchanged(it *kit.Item, rec *lock.Item, in Input, resolved map[strin
 // shared file: every location recorded in the lock comes back with its
 // recorded value, every location the fragment drops counts as a change, and
 // every unrecorded one is already satisfied by the target, so planning would
-// write nothing (RFC 8).
+// write nothing.
 func jsonUnchanged(c kit.Contribution, rec *lock.Item, in Input, src []byte) bool {
 	frag, err := jsonc.Parse(src)
 	if err != nil {
@@ -1021,8 +1020,8 @@ func jsonUnchanged(c kit.Contribution, rec *lock.Item, in Input, src []byte) boo
 }
 
 // conflictError marks an exclusion reason that names a conflict: an encounter
-// with user content or with another selected item's claim (RFC 7.5 and the
-// conflict rows of 7.2–7.4). planContributions lifts the mark onto the item,
+// with user content or with another selected item's claim, whichever
+// contribution kind wrote it. planContributions lifts the mark onto the item,
 // which the client shows as conflicting rather than merely excluded.
 type conflictError struct{ msg string }
 
@@ -1040,8 +1039,8 @@ func asConflict(err error) bool {
 }
 
 // planContributions evaluates every contribution of the item into ip: the
-// planned writes, the owned JSON locations, and the errors (RFC 7). reset
-// marks an explicit reset to kit (7.6), which overwrites the item's owned
+// planned writes, the owned JSON locations, and the errors. reset
+// marks an explicit reset to kit, which overwrites the item's owned
 // content even where the user modified it.
 func planContributions(key string, it *kit.Item, in Input, claims *claimSet, shared *sharedFiles, ip *ItemPlan, resolved map[string][]byte, failed map[string]bool, reset bool, errs []string) *ItemPlan {
 	lk := in.Lock
@@ -1094,7 +1093,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 				ip.Conflict = true
 				continue
 			}
-			// Owned by this item: the three-state rules of RFC 7.2 decide,
+			// Owned by this item: the three-state rules decide,
 			// and a reset overwrites whatever the user changed.
 			if reset {
 				ip.Actions = append(ip.Actions, Action{
@@ -1179,7 +1178,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 	}
 	// A json file the item no longer contributes to keeps its recorded
 	// locations: no fragment re-declares them, and apply replaces the whole
-	// lock record, so the plan carries them (RFC 8).
+	// lock record, so the plan carries them.
 	if old := lk.Items[key]; old != nil {
 		declared := map[string]bool{}
 		for _, c := range it.Contributes {
@@ -1210,13 +1209,13 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 	return ip
 }
 
-// planSection evaluates one section contribution under the rules of RFC 7.3. The
+// planSection evaluates one section contribution. The
 // managed block identifier is the item key: one item owns at most one block per
 // shared file, and the lock records the block under the item. resolved carries
 // the substituted content of the item's templated contributions. The action is
 // nil when the item's own block is up to date or the user's modification is
-// kept (RFC 7.2), and on an explicit reset the owned block is replaced
-// regardless (7.6).
+// kept, and on an explicit reset the owned block is replaced
+// regardless.
 func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, shared *sharedFiles, reset bool) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
@@ -1254,7 +1253,7 @@ func planSection(key string, c kit.Contribution, it *kit.Item, in Input, resolve
 	if present {
 		owner, installedBase, owned := in.Lock.SectionOwner(c.To, key)
 		if owned && owner == key {
-			// Owned by this item: the three-state rules of RFC 7.2 decide,
+			// Owned by this item: the three-state rules decide,
 			// and a reset overwrites whatever the user changed.
 			if !reset {
 				if write, conflict := ownedAction(installedBase, state.Blocks[key], hashOf(fragment)); conflict != "" {
@@ -1353,14 +1352,14 @@ func (r *jsonRecord) sorted() map[string][]Location {
 	return out
 }
 
-// planJSON evaluates one json contribution under the rules of RFC 7.4: the
+// planJSON evaluates one json contribution under the json location rules: the
 // fragment is decomposed into member leaves and array elements, every location
 // is decided against the file as the items planned earlier leave it, and the
 // action carries the composed file. The action is nil when every location is
 // satisfied or co-owned and no byte changes; the item still takes ownership of
 // the co-owned locations through rec. resolved carries the substituted
 // content of the item's templated contributions; reset marks an explicit
-// reset to kit (7.6).
+// reset to kit.
 func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved map[string][]byte, claims *claimSet, shared *sharedFiles, rec *jsonRecord, reset bool) (*Action, error) {
 	state := in.Snapshot.SharedFile(c.To)
 	if state.IsDir {
@@ -1378,8 +1377,8 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 		return nil, fmt.Errorf("source %s does not hold a JSON document: %w", c.Src, err)
 	}
 
-	// The member locations the fragment claims, for the conflicts of 7.5,
-	// and the element pairs it declares, for the carry of the earlier
+	// The member locations the fragment claims, for the conflicts between
+	// selected items, and the element pairs it declares, for the carry of the earlier
 	// install's locations below.
 	leaves := map[string]string{}
 	elements := map[string]map[string]bool{}
@@ -1403,7 +1402,7 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 
 	// Locations of the earlier install that this fragment no longer declares
 	// stay owned: apply replaces the item's whole lock record, so whatever
-	// the record must keep has to be in the plan (RFC 8). A member the
+	// the record must keep has to be in the plan. A member the
 	// fragment re-declares is superseded by the value the plan writes there;
 	// the elements of an array stand one by one, so an undeclared pair stays
 	// as recorded.
@@ -1465,7 +1464,7 @@ func planJSON(key string, c kit.Contribution, it *kit.Item, in Input, resolved m
 }
 
 // jsonPlanner places one json contribution into the working document of its
-// shared file, deciding every location by the table of RFC 7.4 and composing
+// shared file, deciding every location by the json location table and composing
 // the file bytes apply will write. reset marks an explicit reset to kit.
 type jsonPlanner struct {
 	key    string
@@ -1481,7 +1480,7 @@ type jsonPlanner struct {
 
 // place walks the fragment against the document: a location that is absent
 // inserts the missing subtree whole, a location that is present is decided by
-// the table of RFC 7.4.
+// the json location table.
 func (w *jsonPlanner) place(ptr string) error {
 	fmin, _, err := w.frag.Get(ptr)
 	if err != nil {
@@ -1525,12 +1524,12 @@ func (w *jsonPlanner) place(ptr string) error {
 	return nil
 }
 
-// placeLeaf decides one member location by the table of RFC 7.4.
+// placeLeaf decides one member location by the json location table.
 func (w *jsonPlanner) placeLeaf(ptr, fmin, tmin string) error {
 	incoming := hashOf([]byte(fmin))
 	current := hashOf([]byte(tmin))
 	if w.in.Lock.OwnsJSONPointer(w.key, w.file, ptr) {
-		// Owned by this item: the three-state rules of RFC 7.2 decide,
+		// Owned by this item: the three-state rules decide,
 		// and a reset overwrites whatever the user changed.
 		if w.reset {
 			return w.overwrite(ptr, incoming)
@@ -1670,7 +1669,7 @@ func (w *jsonPlanner) differentError(ptr string) error {
 }
 
 // ownedAction resolves the table row "owned by this item" by the three-state
-// rules of RFC 7.2: base is the hash recorded at installation, current the
+// rules: base is the hash recorded at installation, current the
 // hash in the target now, incoming the hash the kit provides. It reports
 // whether the incoming value is written, and names the conflict when the item
 // is in conflict. Every contribution kind runs its owned content through it.

@@ -259,7 +259,7 @@ func TestBuild(t *testing.T) {
 	}
 }
 
-// TestPlanSections walks the RFC 7.3 rules for section contributions on install:
+// TestPlanSections walks the section-contribution rules on install:
 // append into absent and existing shared files, unowned and foreign-owned blocks,
 // the duplicate-heading check, cross-kind claims, and sequential composition when
 // several items write one shared file.
@@ -489,9 +489,9 @@ func jsonItem(id, src, to string) *kit.Item {
 	}
 }
 
-// TestPlanJSON walks the RFC 7.4 table for json contributions: every row of
-// the per-location decision, arrays as sets, co-ownership, the conflicts of
-// 7.5, and the byte preservation of the untouched file parts.
+// TestPlanJSON walks the json location table: every row of
+// the per-location decision, arrays as sets, co-ownership, the conflicts
+// between selected items, and the byte preservation of the untouched file parts.
 func TestPlanJSON(t *testing.T) {
 	darkHash := hashOf([]byte(`"dark"`))
 	aHash := hashOf([]byte(`"a"`))
@@ -849,7 +849,7 @@ func TestPlanJSON(t *testing.T) {
 }
 
 // TestOwnedAction covers the table row "owned by this item", which the
-// three-state rules of RFC 7.2 decide. Every contribution kind runs its owned
+// three-state rules decide. Every contribution kind runs its owned
 // content through it.
 func TestOwnedAction(t *testing.T) {
 	base := hashOf([]byte(`"base"`))
@@ -892,7 +892,7 @@ func varItem(id string, template bool, vars ...kit.Var) *kit.Item {
 	}
 }
 
-// TestPlanVars walks the rules of RFC 6.4: substitution only where the
+// TestPlanVars walks the variable rules: substitution only where the
 // contribution opts in, unknown placeholders as errors, required and optional
 // variables without values, and the answers the plan records for the lock.
 func TestPlanVars(t *testing.T) {
@@ -1100,8 +1100,8 @@ func TestResolveVars(t *testing.T) {
 	}
 }
 
-// TestMissingVarsOnUpdate pins the update side of the variable flow (RFC
-// 6.4): a version that introduces a variable the installation never
+// TestMissingVarsOnUpdate pins the update side of the variable flow:
+// a version that introduces a variable the installation never
 // answered leaves the item missing until the client answers, and an
 // answered variable asks no more.
 func TestMissingVarsOnUpdate(t *testing.T) {
@@ -1127,7 +1127,7 @@ func TestMissingVarsOnUpdate(t *testing.T) {
 	}
 }
 
-// TestPlanUpdateVersions walks the version table of RFC 8 against the lock.
+// TestPlanUpdateVersions walks the version table against the lock.
 func TestPlanUpdateVersions(t *testing.T) {
 	const v1 = "installed body\n"
 	const v2 = "kit body\n"
@@ -1202,8 +1202,8 @@ func TestPlanUpdateVersions(t *testing.T) {
 	}
 }
 
-// TestPlanFileUpdates walks the update rows of the 7.2 table for an owned
-// file, plus the reset row of 7.6.
+// TestPlanFileUpdates walks the update rows of the three-state table for an owned
+// file, plus the reset row.
 func TestPlanFileUpdates(t *testing.T) {
 	const v1 = "installed content\n"
 	const v2 = "kit content\n"
@@ -1279,8 +1279,8 @@ func TestPlanFileUpdates(t *testing.T) {
 	}
 }
 
-// TestPlanSectionUpdates walks the update rows of the 7.2 table for an owned
-// block, plus the reset row of 7.6.
+// TestPlanSectionUpdates walks the update rows of the three-state table for an owned
+// block, plus the reset row.
 func TestPlanSectionUpdates(t *testing.T) {
 	const v1 = "installed fragment\n"
 	const v2 = "kit fragment\n"
@@ -1370,9 +1370,9 @@ func blockContent(file, id string) string {
 	return ""
 }
 
-// TestPlanJSONUpdates walks the update rows of the 7.2 table for an owned
-// json location, plus the reset row of 7.6 and the ownership of the
-// locations a thinner fragment stops declaring (RFC 8).
+// TestPlanJSONUpdates walks the update rows of the three-state table for an owned
+// json location, plus the reset row and the ownership of the
+// locations a thinner fragment stops declaring.
 func TestPlanJSONUpdates(t *testing.T) {
 	one := hashOf([]byte("1"))
 	two := hashOf([]byte("2"))
@@ -1456,7 +1456,7 @@ func TestPlanJSONUpdates(t *testing.T) {
 				}
 				// The thinner fragment keeps /b owned: its value stays in the
 				// composed file, and the record keeps it until the item is
-				// removed (RFC 8, 9.1).
+				// removed.
 				content := string(ip.Actions[0].Content)
 				if !strings.Contains(content, `"a": 3`) || !strings.Contains(content, `"b": [2]`) {
 					t.Errorf("content =\n%s", content)
@@ -1511,7 +1511,7 @@ func TestPlanJSONUpdates(t *testing.T) {
 
 // TestPlanJSONContributionDropped pins the carry for a json contribution the
 // update no longer declares: the locations of the earlier install stay owned
-// in the file the item stopped writing to (RFC 8).
+// in the file the item stopped writing to.
 func TestPlanJSONContributionDropped(t *testing.T) {
 	one := hashOf([]byte("1"))
 	it := &kit.Item{
@@ -1550,11 +1550,11 @@ func TestPlanJSONContributionDropped(t *testing.T) {
 	}
 }
 
-// TestBuildRemoval walks the RFC 9.1 removal table for every contribution
+// TestBuildRemoval walks the removal table for every contribution
 // kind: an owned file deleted unchanged and kept plus reported when modified,
 // an owned block deleted with its markers or kept without them, a json value
 // removed when its item is the last owner, the shared files penates created
-// that a removal leaves without content, and the orphan flow of 9.2 — an
+// that a removal leaves without content, and the orphan flow — an
 // item of a kit that is gone is planned from the lock and the snapshot alone.
 // The directory rows of the table belong to apply, which owns the deletions.
 func TestBuildRemoval(t *testing.T) {
@@ -1669,7 +1669,7 @@ func TestBuildRemoval(t *testing.T) {
 				}
 				a := ip.Actions[0]
 				// The file penates created keeps its other content, so it is
-				// rewritten rather than deleted (RFC 9.1).
+				// rewritten rather than deleted.
 				if a.Kind != ActionSectionRemove || a.To != "AGENTS.md" || a.Block != "k/one" {
 					t.Errorf("action = %+v", a)
 				}
@@ -1935,7 +1935,7 @@ func TestBuildRemoval(t *testing.T) {
 		},
 		"an orphan of a kit that is gone removes from the lock alone": {
 			// No kits at all: the item is planned by its lock record and the
-			// snapshot, exactly like an item whose kit is available (RFC 9.2).
+			// snapshot, exactly like an item whose kit is available.
 			lockItems: map[string]*lock.Item{"gone/old": {
 				Version: "0.9.0",
 				Files:   map[string]string{"skills/old/SKILL.md": fileHash},

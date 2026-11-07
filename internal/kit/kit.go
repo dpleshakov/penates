@@ -1,7 +1,7 @@
 // Package kit reads kit directories — kit.yaml, items, item.yaml, and contribution
-// declarations — and validates everything the RFC requires of kit data: id syntax,
-// version, source and target path rules, and shared-file targets. Validation errors
-// carry file positions.
+// declarations — and validates everything the product concept (docs/concept.md)
+// requires of kit data: id syntax, version, source and target path rules, and
+// shared-file targets. Validation errors carry file positions.
 package kit
 
 import (
@@ -18,7 +18,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// idSyntax is the identifier syntax the RFC prescribes for items; kit names follow
+// idSyntax is the identifier syntax prescribed for items; kit names follow
 // the same rule so that an item key is a pair of tokens.
 var idSyntax = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -369,7 +369,7 @@ func contributionSource(c contributionFile) (src string, kind ContributionKind, 
 
 // validVersion reports whether v is a full semantic version — major, minor, and
 // patch present, with optional prerelease and build metadata. The x/mod
-// implementation alone would accept shortened forms such as 1.2, which the RFC's
+// implementation alone would accept shortened forms such as 1.2, which the
 // version ordering needs in full.
 func validVersion(v string) bool {
 	x := "v" + v
@@ -377,16 +377,15 @@ func validVersion(v string) bool {
 }
 
 // CompareVersions orders two validated semantic versions: -1 when a is lower,
-// 0 when they are equal, 1 when a is higher. It is the ordering of RFC 8: the
-// version declared in item.yaml against the one recorded in the lock.
+// 0 when they are equal, 1 when a is higher. It compares the version declared
+// in item.yaml against the one recorded in the lock.
 func CompareVersions(a, b string) int {
 	return semver.Compare("v"+a, "v"+b)
 }
 
 // MajorVersion returns the major component of a validated semantic version
 // with the prefix semver.Major prints, for example "v2". Two versions with
-// different majors are what RFC 8 calls a behavior change, which the TUI
-// marks for review.
+// different majors mark a behavior change, which the TUI flags for review.
 func MajorVersion(v string) string {
 	return semver.Major("v" + v)
 }

@@ -165,7 +165,7 @@ func (l *Lock) SectionOwner(file, block string) (itemKey, hash string, ok bool) 
 
 // OwnsJSON reports whether an item owns one exact location of a shared JSON
 // file: pointer and value hash. Array elements are recorded under the pointer
-// of their array (RFC 7.4), so the pair identifies the element.
+// of their array, so the pair identifies the element.
 func (l *Lock) OwnsJSON(itemKey, file, pointer, hash string) bool {
 	item, ok := l.Items[itemKey]
 	if !ok {
@@ -225,8 +225,8 @@ func (l *Lock) CreatedDir(itemKey, dir string) bool {
 }
 
 // CreatedShared reports whether penates recorded the shared file as one it
-// created (RFC 6.7): such a file is deleted when a removal leaves it without
-// content (RFC 9.1).
+// created: such a file is deleted when a removal leaves it without
+// content.
 func (l *Lock) CreatedShared(path string) bool {
 	for _, el := range l.CreatedSharedFiles {
 		if el == path {
@@ -239,7 +239,7 @@ func (l *Lock) CreatedShared(path string) bool {
 // RecordedPaths lists the target-relative paths the lock records: every owned
 // file, and every shared file holding an owned section or json location, each
 // sorted and without duplicates. A client snapshots them to reconcile the
-// lock with the target (RFC 7.7).
+// lock with the target.
 func (l *Lock) RecordedPaths() (files, shared []string) {
 	fileSet := map[string]bool{}
 	sharedSet := map[string]bool{}

@@ -18,6 +18,13 @@ import (
 // deferred detach the apply completes or drops. The kits register through
 // the store — the tests exercise the detach flow, not the add-kit input.
 
+// has reports whether the phrase appears in the rendered lines regardless of
+// where wrapping broke them: preview panes wrap between words, so a
+// multi-word phrase can straddle two lines.
+func has(lines, phrase string) bool {
+	return strings.Contains(strings.Join(strings.Fields(lines), " "), phrase)
+}
+
 // registerKitAt registers the kit and its target the way adding a kit
 // does, through the store.
 func registerKitAt(t *testing.T, st *state.Store, name, dir, target string) {
@@ -369,11 +376,11 @@ func TestAddKitPreviewShowsTheKit(t *testing.T) {
 	m := openAddKit(t, app, kitDir)
 	lines := strings.Join(m.addPreviewLines(48), "\n")
 	for _, want := range []string{"New kit", "Path", "Name", "ex", "Items", "2"} {
-		if !strings.Contains(lines, want) {
+		if !has(lines, want) {
 			t.Errorf("the preview misses %q:\n%s", want, lines)
 		}
 	}
-	if strings.Contains(lines, "The kit proposes") {
+	if has(lines, "The kit proposes") {
 		t.Errorf("the preview warns without a current target:\n%s", lines)
 	}
 	if view := m.View(); !strings.Contains(view, "New kit") {
@@ -390,7 +397,7 @@ func TestAddKitPreviewShowsTheKit(t *testing.T) {
 	registerKitAt(t, st, "team", writeTeamKit(t, target), target)
 	m = openAddKit(t, app, elsewhere)
 	lines = strings.Join(m.addPreviewLines(48), "\n")
-	if !strings.Contains(lines, "The kit proposes") || !strings.Contains(lines, "current target is") {
+	if !has(lines, "The kit proposes") || !has(lines, "current target is") {
 		t.Errorf("the preview misses the hint warning:\n%s", lines)
 	}
 }
@@ -578,10 +585,10 @@ func TestAddKitFirstTarget(t *testing.T) {
 	// directory (6.4).
 	m := openAddKit(t, app, kitDir)
 	lines := strings.Join(m.addPreviewLines(60), "\n")
-	if !strings.Contains(lines, "No target is registered. Target directory:") || !strings.Contains(lines, hint) {
+	if !has(lines, "No target is registered. Target directory:") || !has(lines, hint) {
 		t.Errorf("the preview misses the target input:\n%s", lines)
 	}
-	if !strings.Contains(lines, "The directory does not exist") || !strings.Contains(lines, "created on the first") {
+	if !has(lines, "The directory does not exist") || !has(lines, "created on the first") {
 		t.Errorf("the preview misses the existence line:\n%s", lines)
 	}
 
@@ -602,7 +609,7 @@ func TestAddKitFirstTarget(t *testing.T) {
 	}
 	tickPreviewNow(t, m)
 	lines = strings.Join(m.addPreviewLines(60), "\n")
-	if !strings.Contains(lines, "The directory exists.") {
+	if !has(lines, "The directory exists.") {
 		t.Errorf("the preview misses the existing-directory line:\n%s", lines)
 	}
 	m = drive(t, m, "enter", "enter").(*model)
@@ -696,10 +703,10 @@ func TestEditKitRelocation(t *testing.T) {
 		t.Fatalf("input %v name %q; want the relocation input of ex", m.inputKind, m.editName)
 	}
 	lines := strings.Join(m.editPreviewLines(60), "\n")
-	if !strings.Contains(lines, "The kit directory cannot be read") || !strings.Contains(lines, "no such directory") {
+	if !has(lines, "The kit directory cannot be read") || !has(lines, "no such directory") {
 		t.Errorf("the pane misses the read error:\n%s", lines)
 	}
-	if !strings.Contains(lines, "Its 1 installed item is frozen") {
+	if !has(lines, "Its 1 installed item is frozen") {
 		t.Errorf("the pane misses the frozen note:\n%s", lines)
 	}
 
@@ -712,7 +719,7 @@ func TestEditKitRelocation(t *testing.T) {
 	m = m2.(*model)
 	tickPreviewNow(t, m)
 	lines = strings.Join(m.editPreviewLines(60), "\n")
-	if !strings.Contains(lines, "contains the kit other") || !strings.Contains(lines, "not ex") {
+	if !has(lines, "contains the kit other") || !has(lines, "not ex") {
 		t.Errorf("the pane misses the rejection:\n%s", lines)
 	}
 	m = drive(t, m, "enter").(*model)
@@ -732,7 +739,7 @@ func TestEditKitRelocation(t *testing.T) {
 	m = m2.(*model)
 	tickPreviewNow(t, m)
 	lines = strings.Join(m.editPreviewLines(60), "\n")
-	if !strings.Contains(lines, "Path") || !strings.Contains(lines, "ex") {
+	if !has(lines, "Path") || !has(lines, "ex") {
 		t.Errorf("the pane misses the new kit's preview:\n%s", lines)
 	}
 	m = drive(t, m, "enter").(*model)

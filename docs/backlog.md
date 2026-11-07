@@ -18,6 +18,11 @@ Accepted work that has not started yet, in priority order.
 **Context:** `removalJSON` decides co-ownership by the lock, which planning never mutates. Removing both co-owners in one run, each item's plan still sees the other as a remaining owner and keeps the value — after the run no owner remains recorded, and the value stays in the target with nobody owning it; two sequential runs take it away on the second. Found while composing shared-file removals across a run (the same single-run class); the fix is to make the ownership check see the removals the run has already planned.
 **Added:** 2026-11-07, during the removal-shared-file-loss fix
 
+### `kit-item-errors-on-rows`
+**Goal:** Item-level problems of a kit — an invalid item.yaml, duplicate ids — show on the affected item rows of the tree, as tui-screens 6.5 specifies.
+**Context:** kit.Read loads tolerantly and the add-kit preview lists the problems, but the tree loads kits with the strict kit.Load: an attached kit holding broken items renders unreadable as a whole instead of showing its healthy items with the problems on their rows. enterTarget needs to read through kit.Read and carry the per-item problems into the rows.
+**Added:** 2026-11-07, during the add-kit flow of the TUI rework
+
 ### `tui-tempdir-flake`
 **Goal:** Track the intermittent `internal/tui` test failure on this machine and fix it if it ever turns out to be ours.
 **Context:** The exact failure is `t.TempDir` RemoveAll cleanup: `unlinkat …\locks: The directory is not empty` — always after the test body passed, in old apply and tui tests alike. Not a busy handle (Windows would refuse with "being used by another process"): directory-entry deletion lags behind file deletion for the test process. The frequency swings by day — from about one run in twenty to nearly every second run — with no change on the code side; the mechanism (antivirus scanning fresh files, WSL interop overhead) is not pinned down. The temp directory itself is native NTFS. Nothing in the code holds handles across the cleanup. Expected to be unreachable on the CI runners native file systems; close after CI confirms, or if it ever shows there, treat as a real defect.

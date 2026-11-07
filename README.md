@@ -104,9 +104,11 @@ No releases yet — build from source and start with a kit path:
 go run ./cmd/penates /path/to/my-opencode-kit
 ```
 
-The first run attaches the kit at the `target_hint` it proposes; with no kit
-registered, the screen explains what a kit is and offers `+ add kit`. Without
-arguments, penates opens the target that was active when it last exited.
+The first run shows the kit's preview and proposes the `target_hint` it
+declares: confirm or edit the target directory, and the kit attaches there.
+With no kit registered, the screen explains what a kit is and offers
+`+ add kit` with directory completion and a live preview. Without arguments,
+penates opens the target that was active when it last exited.
 
 ## Development
 

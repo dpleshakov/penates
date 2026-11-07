@@ -129,7 +129,7 @@ logic.
 lists directories, the preview appears for a valid path and shows every
 error of 6.5, attach follows the three outcomes of 6.3, relocation
 rejects a renamed kit, both detach paths behave per 6.7.
-**Status:** In progress
+**Status:** Done
 
 ### TASK-08 `targets`
 **Description:** The target list of 8.1: fuzzy search over path and

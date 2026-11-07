@@ -15,6 +15,7 @@ import (
 // The kinds of dialog the screens open. The kind tells chooseDialog what
 // the chosen option does.
 const (
+	dialogAttach = "attach"
 	dialogDetach = "detach"
 )
 
@@ -58,6 +59,19 @@ func (m *model) updateDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) chooseDialog() tea.Cmd {
 	d := m.dialog
 	switch d.kind {
+	case dialogAttach:
+		offer := m.attach
+		switch d.chosen {
+		case 0:
+			// Register the proposed target and attach there (6.3): an
+			// already registered target only switches.
+			m.closeDialog()
+			return m.attachOfferAt(offer, offer.hint)
+		case 1:
+			// Attach to the current target anyway (6.3).
+			m.closeDialog()
+			return m.attachOfferAt(offer, m.target)
+		}
 	case dialogDetach:
 		name := m.detachName
 		switch d.chosen {
@@ -76,6 +90,7 @@ func (m *model) chooseDialog() tea.Cmd {
 // closeDialog tears the modal down and forgets what it acted on.
 func (m *model) closeDialog() {
 	m.dialog = nil
+	m.attach = nil
 	m.detachName = ""
 }
 

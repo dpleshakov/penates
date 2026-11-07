@@ -365,7 +365,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - `enter` shows the details of the row: description, status with the reason and the next step, the pending verb, tags, variables, contributions, changelog. On a wide terminal the same content sits in a pane beside the tree and follows the cursor.
 - Selecting an item with variables — or an update that introduces a new one — turns the details into a form: the fields are prefilled with the stored answers, `tab` moves between them, `enter` is accepted only when every required field holds a value, and `esc` clears the selection. The answers are remembered with the pending actions and reach the lock on apply; nothing is asked at apply time.
 - `/` filters the tree by id, tags and description; kit rows keep their groups and show the match counts.
-- With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is; entering a kit path attaches the kit at its `target_hint`.
+- With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is. The add-kit input completes directory names, the kit previews beside the input while the path names one, and the `target_hint` it proposes is confirmed — or edited — as the target before the kit attaches (10.1).
 - Startup opens the target that was active when penates last exited. On a later run, the previous selection is restored as the active selection; deselecting is one key.
 - Before applying, a summary lists every change per item and every excluded item with its reason; items marked for removal join the same summary. The apply runs only after the summary is confirmed.
 

@@ -341,3 +341,81 @@ func pruneEmptyDirs(t *testing.T, root, dir string) {
 		dir = filepath.Dir(dir)
 	}
 }
+
+// TestReadTolerant checks the tolerant read: a broken item is reported
+// beside the kit and does not fail it, while a kit.yaml problem stays
+// fatal. Load keeps the strict contract on top of it.
+func TestReadTolerant(t *testing.T) {
+	valid := map[string]string{
+		"kit.yaml":          "name: example\ntarget_hint: ~/t\n",
+		"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/a/f\n",
+		"items/a/f":         "content\n",
+	}
+
+	t.Run("broken item reported beside the kit", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{"items/b/item.yaml": "id: b\nversion: nope\n"})
+		k, problems, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if len(k.Items) != 1 || k.Items[0].ID != "a" {
+			t.Errorf("items = %v, want the one that loaded", k.Items)
+		}
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), `"nope" is not a semantic version`) {
+			t.Errorf("problems = %v, want the broken item's problem", problems)
+		}
+		_, err = Load(dir)
+		if err == nil || !strings.Contains(err.Error(), `"nope" is not a semantic version`) {
+			t.Errorf("Load error = %v, want the strict refusal", err)
+		}
+	})
+
+	t.Run("kit.yaml problems stay fatal", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{
+			"kit.yaml":          "name: Bad Name\n",
+			"items/b/item.yaml": "id: b\nversion: nope\n",
+		})
+		k, problems, err := Read(dir)
+		if err == nil || !strings.Contains(err.Error(), "name: must match") {
+			t.Fatalf("Read error = %v, want the kit.yaml problem", err)
+		}
+		if k != nil {
+			t.Errorf("Read returned a kit for a fatal problem: %+v", k)
+		}
+		if len(problems) != 1 {
+			t.Errorf("problems = %v, want the broken item beside the fatal error", problems)
+		}
+	})
+
+	t.Run("parse error carries the position", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{"kit.yaml": "name: example\nshared: oops\n"})
+		_, problems, err := Read(dir)
+		if err == nil || !strings.Contains(err.Error(), "kit.yaml:2") {
+			t.Fatalf("Read error = %v, want the parser position", err)
+		}
+		if len(problems) != 0 {
+			t.Errorf("problems = %v, want none: the parser stopped before the items", problems)
+		}
+	})
+
+	t.Run("item without item.yaml reported by its directory", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		if err := os.MkdirAll(filepath.Join(dir, "items", "empty"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, problems, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), "items/empty/item.yaml: cannot be read") {
+			t.Errorf("problems = %v, want the missing item.yaml", problems)
+		}
+	})
+}

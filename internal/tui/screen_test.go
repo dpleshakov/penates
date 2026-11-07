@@ -263,16 +263,17 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	// The kit argument opens the add-kit input with the path filled in.
 	m := resize(t, app.Initial(kitDir), 100, 30)
 	lm := m.(*model)
-	if !lm.adding || lm.addInput.Value() != kitDir {
-		t.Fatalf("adding %v, input %q; want the add-kit input prefilled", lm.adding, lm.addInput.Value())
+	if lm.inputKind != inputAddKit || lm.pathInput.Value() != kitDir {
+		t.Fatalf("input %v, path %q; want the add-kit input prefilled", lm.inputKind, lm.pathInput.Value())
 	}
 
-	// Enter attaches the kit at its target hint; the tree shows both items,
-	// none installed.
-	m = drive(t, m, "enter")
+	// Enter opens the first-target input of 6.4 — the kit proposes a
+	// target and none is registered — and the second registers it and
+	// attaches; the tree shows both items, none installed.
+	m = drive(t, m, "enter", "enter")
 	lm = m.(*model)
-	if lm.adding || lm.target != target {
-		t.Fatalf("target = %q, adding %v; want %q attached", lm.target, lm.adding, target)
+	if lm.inputKind != inputNone || lm.target != target {
+		t.Fatalf("target = %q, input %v; want %q attached", lm.target, lm.inputKind, target)
 	}
 	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "ex/good" || keys[1] != "ex/varitem" {
 		t.Fatalf("items = %v", keys)
@@ -376,7 +377,9 @@ func TestAddKitInputEditing(t *testing.T) {
 	m := resize(t, app.Initial(kitDir), 100, 30)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(otherKit)})
-	m = drive(t, m, "enter")
+	// The first enter opens the first-target input of 6.4 — the typed
+	// kit's hint prefills it — the second registers and attaches.
+	m = drive(t, m, "enter", "enter")
 
 	lm := m.(*model)
 	st, err := stateStore.LoadRegistry()
@@ -403,7 +406,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("first apply:\n%s", rm.lastResults)
@@ -488,7 +491,7 @@ func TestRemoveFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -551,7 +554,7 @@ func TestRemoveReportsKeptContent(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -602,7 +605,7 @@ func TestOrphanRemoval(t *testing.T) {
 	app := NewApp(stateStore, locks)
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter")
+	m = drive(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[2] != "gone/old" {
 		t.Fatalf("items = %v", keys)
@@ -640,7 +643,7 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -686,7 +689,7 @@ func TestRemoveWithFormResume(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/one 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -765,7 +768,7 @@ func TestListFilter(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter")
+	m = drive(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[0] != "ex/alpha" || keys[2] != "ex/gamma" {
 		t.Fatalf("items = %v", keys)
@@ -847,7 +850,7 @@ func TestItemDetailsView(t *testing.T) {
 	// asks at selection now, the apply goes straight through the summary.
 	// The drive ends on the results screen.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/varitem") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -907,7 +910,7 @@ func TestListStatuses(t *testing.T) {
 
 	// Nothing is installed: both rows show the available glyph.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter")
+	m = drive(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "ex/dup" || keys[1] != "ex/plain" {
 		t.Fatalf("items = %v", keys)
@@ -1086,8 +1089,8 @@ func TestListStatuses(t *testing.T) {
 	}
 	teamDir := writeTeamKit(t, targetDir)
 	m = resize(t, app.Initial(teamDir), 100, 30)
-	if !m.(*model).adding {
-		t.Fatalf("screen = %v, want the add-kit input for the new kit", m.(*model).screen)
+	if m.(*model).inputKind != inputAddKit {
+		t.Fatalf("input = %v, want the add-kit input for the new kit", m.(*model).inputKind)
 	}
 	m = drive(t, m, "enter")
 	lm = m.(*model)
@@ -1130,7 +1133,7 @@ func TestKitGroups(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(dirA), 100, 30)
-	m = drive(t, m, "enter")
+	m = drive(t, m, "enter", "enter")
 	lm := m.(*model)
 	if lm.rows[0].Kind != KindKit || lm.rows[0].Kit.Name != "aaa" || lm.rows[0].Kit.Path != dirA {
 		t.Fatalf("first group = %+v", lm.rows[0])
@@ -1172,7 +1175,7 @@ func TestReconciliationFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", rm.lastResults)
@@ -1239,7 +1242,7 @@ func TestApplySummary(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a")
+	m = drive(t, m, "enter", "enter", "down", "space", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after apply = %v, want summary", sm.screen)
@@ -1326,7 +1329,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	// The target must be registered before the pending actions seed: the
 	// kit attaches, then the selection without answers goes into the state.
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter")
+	m = drive(t, m, "enter", "enter")
 	if err := stateStore.Update(func(reg *state.Registry) error {
 		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
 			"ex/varitem": {Select: true},
@@ -1383,7 +1386,7 @@ func TestApplySummaryConflictRenders(t *testing.T) {
 	// The summary spells the conflict before anything is written; the test
 	// runs wide so the long conflict line renders uncut.
 	m := resize(t, app.Initial(kitDir), 200, 30)
-	m = drive(t, m, "enter", "down", "space", "a")
+	m = drive(t, m, "enter", "enter", "down", "space", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
 		t.Fatalf("screen after apply = %v, want summary", sm.screen)
@@ -1433,17 +1436,18 @@ func TestFirstRun(t *testing.T) {
 		}
 	}
 
-	// enter opens the input; the path attaches at the kit's target hint and
-	// the target becomes the last active one (11).
+	// enter opens the input; the path opens the first-target input of 6.4,
+	// the second enter registers and attaches, and the target becomes the
+	// last active one (11).
 	m = drive(t, m, "enter")
 	lm = m.(*model)
-	if !lm.adding || lm.addInput.Value() != "" {
-		t.Fatalf("adding %v, input %q; want the empty input open", lm.adding, lm.addInput.Value())
+	if lm.inputKind != inputAddKit || lm.pathInput.Value() != "" {
+		t.Fatalf("input %v, path %q; want the empty input open", lm.inputKind, lm.pathInput.Value())
 	}
-	m = drive(t, m, kitDir, "enter")
+	m = drive(t, m, kitDir, "enter", "enter")
 	lm = m.(*model)
-	if lm.adding || lm.target != target {
-		t.Fatalf("after attach: target %q, adding %v; want %q", lm.target, lm.adding, target)
+	if lm.inputKind != inputNone || lm.target != target {
+		t.Fatalf("after attach: target %q, input %v; want %q", lm.target, lm.inputKind, target)
 	}
 	st, err := stateStore.LoadRegistry()
 	if err != nil {
@@ -1475,7 +1479,7 @@ func TestMajorGate(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "space", "a", "enter")
+	m = drive(t, m, "enter", "enter", "down", "space", "a", "enter")
 	if !strings.Contains(m.(*model).lastResults, "applied  ex/good 1.0.0") {
 		t.Fatalf("install:\n%s", m.(*model).lastResults)
 	}
@@ -1552,7 +1556,7 @@ func TestBreakpoints(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 120, 32)
-	m = drive(t, m, "enter", "down")
+	m = drive(t, m, "enter", "enter", "down")
 	lm := m.(*model)
 
 	// Wide: the details pane of the row under the cursor sits beside the
@@ -1594,7 +1598,7 @@ func TestDetailsViewScroll(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 100, 30)
-	m = drive(t, m, "enter", "down", "enter")
+	m = drive(t, m, "enter", "enter", "down", "enter")
 	lm := m.(*model)
 	if !lm.view {
 		t.Fatal("enter did not open the view")
@@ -1638,7 +1642,7 @@ func TestHeaderFooter(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := resize(t, app.Initial(kitDir), 120, 30)
-	m = drive(t, m, "enter", "down", "space")
+	m = drive(t, m, "enter", "enter", "down", "space")
 	lm := m.(*model)
 
 	// The header names the target, the pending count, and the help hint

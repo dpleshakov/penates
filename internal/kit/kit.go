@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -111,12 +112,18 @@ type ValidationError struct {
 	// Field names the field, for example "contributes[0].to"; empty for file-level
 	// errors such as a missing file.
 	Field string
+	// Line is the line the YAML parser named for the problem, 0 when it
+	// named none.
+	Line int
 	// Msg says what is wrong.
 	Msg string
 }
 
 func (e *ValidationError) Error() string {
-	if e.Field == "" {
+	switch {
+	case e.Line > 0:
+		return fmt.Sprintf("%s:%d  %s", e.File, e.Line, e.Msg)
+	case e.Field == "":
 		return fmt.Sprintf("%s: %s", e.File, e.Msg)
 	}
 	return fmt.Sprintf("%s: %s: %s", e.File, e.Field, e.Msg)
@@ -156,9 +163,33 @@ type contributionFile struct {
 // Load reads and validates the kit in dir. It either returns a fully valid kit or an
 // error naming every problem it found.
 func Load(dir string) (*Kit, error) {
+	k, problems, err := Read(dir)
+	if err != nil {
+		if len(problems) == 0 {
+			return nil, err
+		}
+		errs := make([]error, 0, len(problems)+1)
+		errs = append(errs, err)
+		for _, p := range problems {
+			errs = append(errs, p)
+		}
+		return nil, errors.Join(errs...)
+	}
+	if len(problems) > 0 {
+		return nil, errors.Join(problems...)
+	}
+	return k, nil
+}
+
+// Read reads the kit in dir tolerantly: kit.yaml and the items directory
+// must read and validate — their problems are the returned error — while
+// a broken item is only reported beside the kit and does not fail it. The
+// returned kit holds the items that loaded; the interface shows the
+// problems on the affected item rows and still lets the kit attach.
+func Read(dir string) (*Kit, []error, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var errs []error
@@ -168,7 +199,7 @@ func Load(dir string) (*Kit, error) {
 
 	var kf kitFile
 	if err := decodeFile(filepath.Join(abs, "kit.yaml"), "kit.yaml", &kf); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if kf.Name == "" {
 		fail("kit.yaml", "name", "is required")
@@ -192,41 +223,51 @@ func Load(dir string) (*Kit, error) {
 	itemsDir := filepath.Join(abs, "items")
 	entries, err := os.ReadDir(itemsDir)
 	if err != nil {
-		return nil, fmt.Errorf("kit %s: reading items: %w", abs, err)
+		return nil, nil, fmt.Errorf("kit %s: reading items: %w", abs, err)
 	}
+	var problems []error
 	ids := map[string]bool{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		k.Items = append(k.Items, loadItem(filepath.Join(itemsDir, entry.Name()), entry.Name(), kf.Shared, ids, fail))
+		it, itemProblems := loadItem(filepath.Join(itemsDir, entry.Name()), entry.Name(), kf.Shared, ids)
+		if it != nil && len(itemProblems) == 0 {
+			k.Items = append(k.Items, it)
+		}
+		problems = append(problems, itemProblems...)
 	}
 	if len(k.Items) == 0 {
 		fail("kit.yaml", "", "no items found under items/")
 	}
 	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
+		return nil, problems, errors.Join(errs...)
 	}
 
 	sort.Slice(k.Items, func(i, j int) bool { return k.Items[i].ID < k.Items[j].ID })
-	return k, nil
+	return k, problems, nil
 }
 
-// loadItem reads and validates one item directory. Problems are reported through fail
-// and leave a partially filled item behind; the caller rejects the kit on any error.
-func loadItem(dir, dirName string, shared []string, ids map[string]bool, fail func(file, field, format string, args ...any)) *Item {
+// loadItem reads and validates one item directory. Problems are reported
+// through fail and leave a partially filled item behind; the caller
+// rejects the kit on any error.
+func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item, []error) {
 	file := filepath.ToSlash(filepath.Join("items", dirName, "item.yaml"))
 	it := &Item{Dir: dir}
+	var problems []error
+	fail := func(file, field, format string, args ...any) {
+		problems = append(problems, &ValidationError{File: file, Field: field, Msg: fmt.Sprintf(format, args...)})
+	}
 
 	var f itemFile
 	if err := decodeFile(filepath.Join(dir, "item.yaml"), file, &f); err != nil {
 		var ve *ValidationError
 		if errors.As(err, &ve) {
 			fail(ve.File, ve.Field, "%s", ve.Msg)
-			return it
+			return it, problems
 		}
 		fail(file, "", "%v", err)
-		return it
+		return it, problems
 	}
 
 	it.ID = f.ID
@@ -298,9 +339,10 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool, fail fu
 			continue
 		}
 		it.Contributes = append(it.Contributes, resolveSource(dir, kind, src, c.To, c.Template, field, file, fail)...)
+
 	}
 
-	return it
+	return it, problems
 }
 
 // resolveSource checks that a contribution's source exists and expands directory
@@ -460,7 +502,31 @@ func decodeFile(path, display string, out any) error {
 		return &ValidationError{File: display, Msg: fmt.Sprintf("cannot be read: %v", err)}
 	}
 	if err := yaml.Unmarshal(data, out); err != nil {
-		return &ValidationError{File: display, Msg: err.Error()}
+		line, msg := parserError(err)
+		return &ValidationError{File: display, Line: line, Msg: msg}
 	}
 	return nil
+}
+
+// parserError reduces a go-yaml parser error to its position and its first
+// message line: the errors open with "[line:column]" and repeat the source
+// snippet below, which the one-line interface errors leave out.
+func parserError(err error) (line int, msg string) {
+	text := err.Error()
+	if end := strings.IndexByte(text, '\n'); end >= 0 {
+		text = text[:end]
+	}
+	if !strings.HasPrefix(text, "[") {
+		return 0, text
+	}
+	end := strings.IndexByte(text, ']')
+	if end < 0 {
+		return 0, text
+	}
+	num, _, found := strings.Cut(text[1:end], ":")
+	n, cErr := strconv.Atoi(num)
+	if !found || cErr != nil {
+		return 0, text
+	}
+	return n, strings.TrimSpace(text[end+1:])
 }

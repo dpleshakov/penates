@@ -62,7 +62,7 @@ func bumpFormKit(t *testing.T, kitDir, version, extraVar string) {
 func openFormKit(t *testing.T, app *App, kitDir string, w, h int) *model {
 	t.Helper()
 	m := resize(t, app.Initial(kitDir), w, h)
-	m = drive(t, m, "enter", "down", "down")
+	m = drive(t, m, "enter", "enter", "down", "down")
 	return m.(*model)
 }
 
@@ -169,7 +169,7 @@ func TestSelectionFormView(t *testing.T) {
 
 	// The answers the apply wrote into the lock stay with the held selection
 	// after it settles; the update flow checks the form they prefill.
-	m = drive(t, m, "enter", "down", "down").(*model)
+	m = drive(t, m, "enter", "enter", "down", "down").(*model)
 	if answers := pendingAnswers(t, stateStore, target, "ex/varitem"); len(answers) != 2 || answers["p"] != "answered" {
 		t.Fatalf("settled pending answers = %v; want the answers kept", answers)
 	}

@@ -53,7 +53,8 @@ func (a *App) Initial(kitPath string) tea.Model {
 		changelogCache: map[string][]ChangelogEntry{},
 	}
 	m.filter = textinput.New()
-	m.addInput = textinput.New()
+	m.pathInput = textinput.New()
+	m.targetInput = textinput.New()
 	m.formInput = textinput.New()
 
 	reg, err := a.State.LoadRegistry()
@@ -129,15 +130,43 @@ type model struct {
 	reviewed map[string]bool
 
 	// The details view (5): open over any width, esc closes it, the
-	// arrows scroll the full lines through a ScrollWindow.
-	view       bool
-	viewKit    bool
-	viewKey    string
-	viewLines  []string
-	viewOffset int
+	// arrows scroll the full lines through a ScrollWindow. viewPreview
+	// marks the preview view the add-kit flow opens on the narrower
+	// terminals (6.2); its lines render live from the draft.
+	view        bool
+	viewKit     bool
+	viewKey     string
+	viewLines   []string
+	viewOffset  int
+	viewPreview bool
 
-	addInput textinput.Model
-	adding   bool
+	// The path input of 6.2 and 6.6: adding a kit on the add-kit row, or
+	// pointing a kit to a new directory. The input edits with directory
+	// completion; the debounced preview reads what the path names.
+	inputKind inputKind
+	pathInput textinput.Model
+	// editName is the kit being relocated (6.6); editReadable and editErr
+	// hold its state, read once when the input opened, for the pane to
+	// render while the input names no kit directory.
+	editName     string
+	editReadable bool
+	editErr      string
+	// The first-target step of 6.4: the target input the preview ends
+	// with when no target is registered, and the existence of the
+	// directory it names.
+	targetMode   bool
+	targetInput  textinput.Model
+	targetExists bool
+	// completions are the directory candidates of the path input;
+	// completion is the index the next tab completes.
+	completions []string
+	completion  int
+	// preview is the read the last debounce tick performed over the path
+	// input; previewSeq tags the pending tick, so a stale one drops.
+	preview    *kitPreview
+	previewSeq uint
+	// attach is the kit the attach dialog of 6.3 acts on.
+	attach *attachOffer
 
 	// The open modal dialog (6.3, 6.7) and the kit it acts on: the dialog
 	// takes the body while it is open, and the flows keep their context
@@ -184,7 +213,12 @@ func (m *model) showNotice(text string) tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	if m.adding || m.formOpen {
+	switch {
+	case m.inputKind != inputNone:
+		// The path input's initial preview read (6.2): an input that
+		// already names a kit — the prefilled one of 6.1 — shows it.
+		return tea.Batch(textinput.Blink, tickPreview(m.previewSeq))
+	case m.formOpen:
 		return textinput.Blink
 	}
 	return nil
@@ -199,6 +233,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice.Tick(time.Time(msg))
 		if m.notice.Visible() {
 			return m, tickNotice()
+		}
+		return m, nil
+	case previewTickMsg:
+		// A stale tick drops: the edit it was scheduled for is gone
+		// (6.2: the read happens after the last keystroke only).
+		if uint(msg) == m.previewSeq {
+			m.readPreview()
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -240,9 +281,10 @@ func (m *model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateList dispatches the keys of the main screen: the variable form
-// first, then the details view, the filter and the add-kit input, then the
-// tree.
+// updateList dispatches the keys of the main screen: the modal dialog
+// first, then the variable form, the path input of the kit flows, the
+// details view, the filter, and the tree. The input sits over the view:
+// the preview view of 6.2 keeps the flow's keys.
 func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.notice.Clear()
 	if m.dialog != nil {
@@ -251,14 +293,14 @@ func (m *model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.formOpen {
 		return m.updateForm(msg)
 	}
+	if m.inputKind != inputNone {
+		return m.updateInput(msg)
+	}
 	if m.view {
 		return m.updateView(msg)
 	}
 	if m.filtering {
 		return m.updateFilter(msg)
-	}
-	if m.adding {
-		return m.updateAddKit(msg)
 	}
 	return m.updateTree(msg)
 }
@@ -314,23 +356,6 @@ func (m *model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateAddKit feeds the add-kit input: a bare path input that attaches
-// the kit at its target_hint on enter (6.1; completion and preview are
-// task 07).
-func (m *model) updateAddKit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		return m, m.attachInput()
-	case "esc":
-		m.adding = false
-		m.addInput.Reset()
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.addInput, cmd = m.addInput.Update(msg)
-	return m, cmd
-}
-
 // updateTree moves the cursor and toggles the pending actions (12.1-12.4).
 func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	page := m.viewportHeight()
@@ -378,8 +403,16 @@ func (m *model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			n = len(m.reg.KitsFor(m.target))
 		}
 		return m, m.showNotice(fmt.Sprintf("Rescanned %d kits.", n))
+	case "e":
+		// 12.2: the relocation input of 6.6 opens on the kit row, a
+		// readable kit included.
+		if len(m.rows) > 0 && m.rows[m.cursor].Kind == KindKit && !m.rows[m.cursor].Kit.Orphans {
+			r := m.rows[m.cursor]
+			m.startEditKit(r.Kit.Name, r.Kit.Path)
+			return m, nil
+		}
 	case "enter":
-		m.openDetails()
+		cmd = m.openDetails()
 	case "/":
 		// The filter takes over the keyboard: while it is open, q and a
 		// type into it instead of quitting and applying.
@@ -550,9 +583,9 @@ func (m *model) editPending(key string, fn func(*state.ItemPending)) error {
 }
 
 // openDetails opens the details view for the row under the cursor (5).
-func (m *model) openDetails() {
+func (m *model) openDetails() tea.Cmd {
 	if len(m.rows) == 0 {
-		return
+		return nil
 	}
 	switch r := m.rows[m.cursor]; r.Kind {
 	case KindItem:
@@ -565,13 +598,13 @@ func (m *model) openDetails() {
 		m.viewKey = r.Kit.Name
 	case KindAddKit:
 		// 12.4: enter on the add-kit row opens the path input.
-		m.startAddKit("")
-		return
+		return m.startAddKit("")
 	default:
-		return
+		return nil
 	}
 	m.viewOffset = 0
 	m.openViewLines()
+	return nil
 }
 
 // openViewLines renders the view content of the row the view follows.
@@ -585,67 +618,8 @@ func (m *model) openViewLines() {
 	}
 }
 
-// startAddKit opens the add-kit input with the path filled in (6.1).
-func (m *model) startAddKit(path string) {
-	m.adding = true
-	m.addInput.SetValue(path)
-	m.addInput.Focus()
-	m.refresh()
-	m.cursor = len(m.rows) - 1
-}
-
-// attachInput loads the kit from the input's path and attaches it at its
-// target_hint, registering the target when it is new; a kit that is
-// registered already opens its target instead. The input stays editable
-// on an error, which the notice line reports.
-func (m *model) attachInput() tea.Cmd {
-	path := expandHome(strings.TrimSpace(m.addInput.Value()))
-	if path == "" {
-		return nil
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return m.showNotice(err.Error())
-	}
-	k, err := kit.Load(abs)
-	if err != nil {
-		return m.showNotice("the kit cannot be added: " + err.Error())
-	}
-	if m.reg != nil {
-		if kk, ok := m.reg.Kits[k.Name]; ok && kk.Dir != abs {
-			return m.showNotice(fmt.Sprintf("a kit named %s is already registered at %s", k.Name, kk.Dir))
-		}
-		if t, ok := attachmentTarget(m.reg, k.Name); ok {
-			m.enterTarget(t)
-			return nil
-		}
-	}
-	if k.TargetHint == "" {
-		return m.showNotice("the kit declares no target_hint")
-	}
-	t, err := filepath.Abs(expandHome(k.TargetHint))
-	if err != nil {
-		return m.showNotice(err.Error())
-	}
-	if err := m.app.State.Update(func(reg *state.Registry) error {
-		reg.Kits[k.Name] = state.Kit{Dir: abs}
-		if _, ok := reg.Targets[t]; !ok {
-			reg.Targets[t] = state.Target{}
-		}
-		if !attachedTo(reg, k.Name, t) {
-			reg.Attachments = append(reg.Attachments, state.Attachment{Kit: k.Name, Target: t})
-		}
-		reg.LastTarget = t
-		return nil
-	}); err != nil {
-		return m.showNotice(err.Error())
-	}
-	if err := m.reloadRegistry(); err != nil {
-		return m.showNotice(err.Error())
-	}
-	m.enterTarget(t)
-	return m.showNotice(fmt.Sprintf("attached %s at %s", k.Name, t))
-}
+// attachInput is gone: the add flow of 6.2-6.5 lives in kits.go, on the
+// state operations.
 
 // attachedTo reports whether the attachment of kit to target is recorded.
 func attachedTo(reg *state.Registry, kitName, target string) bool {
@@ -682,10 +656,20 @@ func (m *model) enterTarget(dir string) {
 	m.filtering = false
 	m.filter.Reset()
 	m.view = false
+	m.viewPreview = false
 	m.viewLines = nil
 	m.viewOffset = 0
-	m.adding = false
-	m.addInput.Reset()
+	m.inputKind = inputNone
+	m.editName = ""
+	m.editReadable = false
+	m.editErr = ""
+	m.targetMode = false
+	m.pathInput.Reset()
+	m.pathInput.Blur()
+	m.targetInput.Reset()
+	m.completions = nil
+	m.preview = nil
+	m.attach = nil
 	m.dialog = nil
 	m.detachName = ""
 	m.reviewed = map[string]bool{}
@@ -1045,8 +1029,21 @@ func (m *model) listFrame(l Layout) Frame {
 		return f
 	}
 	lines := RenderTree(m.rows, l, m.set)
-	if m.adding && len(lines) > 0 {
-		lines[len(lines)-1] = "  " + AddKitLabel + "  " + m.addInput.View()
+	// The path input takes its row over: the add-kit label or the kit's
+	// mark and name, then the input (6.2, 6.6 mockups).
+	switch m.inputKind {
+	case inputAddKit:
+		if len(lines) > 0 {
+			lines[len(lines)-1] = "  " + AddKitLabel + "  " + m.pathInput.View()
+		}
+	case inputEditKit:
+		if len(lines) > 0 && m.cursor < len(lines) {
+			mk := expandedMark
+			if m.rows[m.cursor].Kit.Collapsed {
+				mk = collapsedMark
+			}
+			lines[m.cursor] = "  " + mk.glyph(m.set) + " " + m.editName + "  " + m.pathInput.View()
+		}
 	}
 	if m.firstRun() {
 		lines = append(m.firstRunLines(l.Width), lines...)
@@ -1054,6 +1051,12 @@ func (m *model) listFrame(l Layout) Frame {
 	cursor := m.cursor
 	if m.firstRun() {
 		cursor += len(m.firstRunLines(l.Width))
+	}
+	// The completion dropdown sits under the input row (6.2 mockup).
+	if drop := m.completionLines(); len(drop) > 0 && cursor+1 <= len(lines) {
+		lines = append(lines, make([]string, len(drop))...)
+		copy(lines[cursor+1+len(drop):], lines[cursor+1:])
+		copy(lines[cursor+1:], drop)
 	}
 	for i := range lines {
 		if i == cursor {
@@ -1064,14 +1067,17 @@ func (m *model) listFrame(l Layout) Frame {
 	f.Cursor = cursor
 	// The form shows in the details view, and over any other width when no
 	// pane carries it: the lines render live from the draft, the window
-	// clips them (5, 7.3).
+	// clips them (5, 7.3). The preview view of 6.2 renders the same way.
 	if m.view || (m.formOpen && l.Mode != ModeWide) {
 		h := l.Height - headerLines - footerLines
 		if m.noticeLine() != "" {
 			h--
 		}
 		lines := m.viewLines
-		if m.formOpen {
+		switch {
+		case m.viewPreview:
+			lines = m.previewLines(m.width)
+		case m.formOpen:
 			lines = RenderItemForm(m.formDetails(), m.width, m.set)
 		}
 		f.Rows = ScrollWindow(lines, m.viewOffset, h)
@@ -1198,9 +1204,18 @@ func (m *model) footer(width int) string {
 	if m.formOpen {
 		return formFooter
 	}
+	if m.inputKind == inputAddKit {
+		if m.targetMode {
+			return targetKeys
+		}
+		return addKitKeys
+	}
+	if m.inputKind == inputEditKit {
+		return editKitKeys
+	}
 	if m.view {
 		keys := "esc close · ↑↓ scroll"
-		if !m.viewKit {
+		if !m.viewKit && !m.viewPreview {
 			if r, ok := m.itemRowByKey(m.viewKey); ok && r.Major {
 				keys += " · space select"
 			}
@@ -1209,9 +1224,6 @@ func (m *model) footer(width int) string {
 	}
 	if m.filtering {
 		return "enter keep filter · esc clear"
-	}
-	if m.adding {
-		return "enter attach · esc cancel"
 	}
 	return JoinSides(m.rowKeys(), "q quit", width)
 }
@@ -1229,6 +1241,9 @@ func (m *model) rowKeys() string {
 				keys = append(keys, "space collapse")
 			}
 			keys = append(keys, "enter details")
+			if !r.Kit.Orphans {
+				keys = append(keys, "e edit path")
+			}
 			if !r.Kit.Orphans && !r.Kit.Detaching {
 				keys = append(keys, "d detach")
 			}
@@ -1269,14 +1284,20 @@ func defaultVerb(p Pending, s Status) string {
 }
 
 // detailsPane is the details content of the row under the cursor on wide
-// terminals (2.2); the view leaves the pane out, and the open form takes
-// the pane's place (7.3).
+// terminals (2.2); the view leaves the pane out, and the open form or the
+// preview takes the pane's place (7.3, 6.2).
 func (m *model) detailsPane(l Layout) []string {
 	if l.Mode != ModeWide || m.view || len(m.rows) == 0 {
 		return nil
 	}
 	if m.formOpen {
 		return RenderItemForm(m.formDetails(), l.DetailsWidth, m.set)
+	}
+	switch m.inputKind {
+	case inputAddKit:
+		return m.addPreviewLines(l.DetailsWidth)
+	case inputEditKit:
+		return m.editPreviewLines(l.DetailsWidth)
 	}
 	switch r := m.rows[m.cursor]; r.Kind {
 	case KindItem:

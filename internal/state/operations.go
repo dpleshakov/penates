@@ -15,6 +15,25 @@ type LockDeleter interface {
 	Delete(target string) error
 }
 
+// RegisterKit records a new kit directory under its name. The name is the
+// kit's identity: a name that already points at another directory is
+// refused — adding the kit under it would silently take its attachments —
+// while registering the same directory again changes nothing. Attaching
+// the registered kit goes through AttachKit. The operation saves the
+// registry.
+func (s *Store) RegisterKit(kit, dir string) error {
+	return s.Update(func(reg *Registry) error {
+		if k, ok := reg.Kits[kit]; ok {
+			if k.Dir != dir {
+				return fmt.Errorf("kit %q is already registered at %s", kit, k.Dir)
+			}
+			return nil
+		}
+		reg.Kits[kit] = Kit{Dir: dir}
+		return nil
+	})
+}
+
 // AttachKit attaches the registered kit to target, registering the target
 // when it is new. Attaching a kit that is already attached is refused, so
 // the caller shows the condition instead of repeating the attachment

@@ -729,3 +729,32 @@ func TestCompleteDeferred(t *testing.T) {
 		}
 	})
 }
+
+func TestRegisterKit(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := store.RegisterKit("ex", "/kits/ex"); err != nil {
+		t.Fatalf("RegisterKit: %v", err)
+	}
+	reg := loadRegistry(t, store)
+	if k := reg.Kits["ex"]; k.Dir != "/kits/ex" {
+		t.Errorf("registered dir = %q, want /kits/ex", k.Dir)
+	}
+
+	// Registering the same directory again changes nothing.
+	if err := store.RegisterKit("ex", "/kits/ex"); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+
+	// The name is the identity: another directory under it is refused.
+	if err := store.RegisterKit("ex", "/kits/ex-new"); err == nil ||
+		!strings.Contains(err.Error(), `kit "ex" is already registered at /kits/ex`) {
+		t.Fatalf("re-register elsewhere = %v, want the refusal", err)
+	}
+	if k := loadRegistry(t, store).Kits["ex"]; k.Dir != "/kits/ex" {
+		t.Errorf("registered dir = %q, want the refused registration to change nothing", k.Dir)
+	}
+}

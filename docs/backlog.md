@@ -22,11 +22,6 @@ Accepted work that has not started yet, in priority order.
 **Context:** kit.Read loads tolerantly and the add-kit preview lists the problems, but the tree loads kits with the strict kit.Load: an attached kit holding broken items renders unreadable as a whole instead of showing its healthy items with the problems on their rows. enterTarget needs to read through kit.Read and carry the per-item problems into the rows.
 **Added:** 2026-11-07, during the add-kit flow of the TUI rework
 
-### `tui-tempdir-flake`
-**Goal:** Track the intermittent `internal/tui` test failure on this machine and fix it if it ever turns out to be ours.
-**Context:** The exact failure is `t.TempDir` RemoveAll cleanup: `unlinkat …\locks: The directory is not empty` — always after the test body passed, in old apply and tui tests alike. Not a busy handle (Windows would refuse with "being used by another process"): directory-entry deletion lags behind file deletion for the test process. The frequency swings by day — from about one run in twenty to nearly every second run — with no change on the code side; the mechanism (antivirus scanning fresh files, WSL interop overhead) is not pinned down. The temp directory itself is native NTFS. Nothing in the code holds handles across the cleanup. Expected to be unreachable on the CI runners native file systems; close after CI confirms, or if it ever shows there, treat as a real defect.
-**Added:** 2026-11-07, during the TUI core tasks
-
 ### `mouse-support`
 **Goal:** Additive mouse input for the TUI: a click moves the cursor, clicking the pending column toggles the default action, the wheel scrolls, and clicking the target in the header opens the target list (docs/tui-screens.md, 3.3).
 **Context:** Postponed from the v1 TUI rework: the keyboard covers every action, so the mouse adds convenience only; the design does not depend on it.

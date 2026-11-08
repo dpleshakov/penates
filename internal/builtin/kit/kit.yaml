@@ -1,0 +1,3 @@
+name: penates
+description: The documentation skills penates ships with itself (placeholder texts; the real ones arrive with the skill-texts task)
+target_hint: ~/.config/opencode

@@ -15,13 +15,22 @@ type LockDeleter interface {
 	Delete(target string) error
 }
 
+// BuiltinKitName is the name of the built-in kit penates ships inside the
+// binary and registers on every start while the name is free. The name is
+// reserved: the user-facing registration refuses it, and the built-in sync
+// is the only other writer.
+const BuiltinKitName = "penates"
+
 // RegisterKit records a new kit directory under its name. The name is the
 // kit's identity: a name that already points at another directory is
 // refused — adding the kit under it would silently take its attachments —
-// while registering the same directory again changes nothing. Attaching
-// the registered kit goes through AttachKit. The operation saves the
-// registry.
+// while registering the same directory again changes nothing. The name of
+// the built-in kit is refused with an error naming it. Attaching the
+// registered kit goes through AttachKit. The operation saves the registry.
 func (s *Store) RegisterKit(kit, dir string) error {
+	if kit == BuiltinKitName {
+		return fmt.Errorf("kit name %q is reserved for the built-in kit penates ships (register your kit under another name)", kit)
+	}
 	return s.Update(func(reg *Registry) error {
 		if k, ok := reg.Kits[kit]; ok {
 			if k.Dir != dir {
@@ -32,6 +41,27 @@ func (s *Store) RegisterKit(kit, dir string) error {
 		reg.Kits[kit] = Kit{Dir: dir}
 		return nil
 	})
+}
+
+// RegisterBuiltinKit records the built-in kit under its reserved name at
+// dir — the only writer of the name beside the refusal in RegisterKit. It
+// reports whether this call added the entry; recording the same directory
+// again changes nothing, and a different directory under the name is
+// refused. The operation saves the registry.
+func (s *Store) RegisterBuiltinKit(dir string) (bool, error) {
+	added := false
+	err := s.Update(func(reg *Registry) error {
+		if k, ok := reg.Kits[BuiltinKitName]; ok {
+			if k.Dir != dir {
+				return fmt.Errorf("built-in kit is already registered at %s", k.Dir)
+			}
+			return nil
+		}
+		reg.Kits[BuiltinKitName] = Kit{Dir: dir}
+		added = true
+		return nil
+	})
+	return added, err
 }
 
 // AttachKit attaches the registered kit to target, registering the target

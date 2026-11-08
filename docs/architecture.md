@@ -70,6 +70,7 @@ only client.
 |---|---|
 | `cmd/penates` | Process entry: the cobra command tree, wiring, running the TUI. No logic. |
 | `internal/licenses` | The license texts of the code linked into the binary: penates and the Go distribution embedded as values, the third-party modules of the release platform embedded per platform by the release build — a PLACEHOLDER keeps every platform directory in the other builds. `Text` assembles the output of `penates licenses`; the third-party set is optional, and its absence is stated. |
+| `internal/builtin` | The documentation kit penates ships inside the binary: the kit files embedded under `kit/`, and the startup sync that unpacks them into the data directory, keeps the copy in step with the embedded content by the three-state model (concept: the built-in kit), and registers the kit under its reserved name while it is free. The package knows no harness — the kit's own data carries the target hint and the install destinations. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. |
 | `internal/state` | Application state (concept: application state): the registry — kits, targets, the attachments between them, the last active target — and the per-target pending actions with their deferred operations and variable answers. The operations over the registry — attach, detach, edit kit path, forget target — keep its invariants, and every mutation saves; a state file of another format version is refused with the path to delete. The operations receive the lock facts they need — the item keys of a target's lock — as values and delete a lock through a one-method interface, so the package keeps no dependency on internal/lock. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. Until the TUI rewrite, the current TUI reads the registry through a compatibility view. |
 | `internal/lock` | The per-target lock (concept: application state): reading, writing, and deleting the lock, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
@@ -88,6 +89,8 @@ flowchart LR
     TUI --> ST["internal/state"]
     TUI --> PL["internal/plan"]
     TUI --> AP["internal/apply"]
+    TUI --> BI["internal/builtin"]
+    BI["internal/builtin"] --> ST
     PL -- types and values only --> KIT
     PL --> LK["internal/lock"]
     PL --> TG["internal/target"]
@@ -107,14 +110,17 @@ Rules:
 
 ### Data flow
 
-1. **Load.** The state names the registered kits; `internal/kit` reads them;
+1. **Startup sync.** Before any screen opens, `internal/builtin` brings the
+   unpacked built-in kit in step with the binary (concept: the built-in kit)
+   and registers it while the name is free; the report rides into the model.
+2. **Load.** The state names the registered kits; `internal/kit` reads them;
    `internal/target` reads the snapshot; `internal/lock` reads the lock.
-2. **Plan.** The lock is reconciled with the target by recorded hashes first
+3. **Plan.** The lock is reconciled with the target by recorded hashes first
    (concept: atomicity): the staged files of an interrupted apply are removed, and the
    modified and broken items are known. Then `internal/plan` turns selection
    plus inputs into per-item actions and errors; the TUI shows the summary
    (concept: user experience) and collects missing input.
-3. **Apply.** `internal/apply` processes items one at a time: validate the item's
+4. **Apply.** `internal/apply` processes items one at a time: validate the item's
    contributions against the target, write through temp files, record the item in the
    lock. Removals planned from the lock (concept: removal) run before the installs, and the
    installs plan from the target as the removals leave it. An interruption leaves the
@@ -139,7 +145,7 @@ Rules:
 ```
 penates/
 ├── cmd/penates/          # main package
-├── internal/             # one package per module: kit, state, lock, target, plan, apply, tui, licenses
+├── internal/             # one package per module: kit, state, lock, target, plan, apply, tui, licenses, builtin
 ├── docs/                 # the concept, this document, and the archive
 └── .github/workflows/    # CI
 ```

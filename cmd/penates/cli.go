@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/tui"
@@ -131,7 +132,14 @@ func runInterface(stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The built-in kit is brought in step with the binary before the
+	// interface opens; its report rides into the model for the screens.
+	report, err := builtin.Sync(dataDir, stateStore, builtin.Content)
+	if err != nil {
+		return err
+	}
 	app := tui.NewApp(stateStore, lock.NewStore(dataDir))
+	app.Startup = &report
 
 	final, err := tea.NewProgram(app.Initial(), tea.WithAltScreen()).Run()
 	if err != nil {

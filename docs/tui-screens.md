@@ -4,7 +4,7 @@
 |---|---|
 | Status | Draft |
 | Date | 2026-11-07 |
-| Refines | concept.md sections 6.6 (targets) and 10 (user experience) |
+| Refines | concept.md sections 6.7 (targets) and 10 (user experience) |
 
 This document defines the layout, visual language, screens and key bindings of the penates terminal user interface for v1.
 

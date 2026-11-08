@@ -1,0 +1,8 @@
+id: reference
+version: 0.1.0
+description: penates product reference (placeholder; the real text arrives with the skill-texts task)
+tags: [docs]
+vars: []
+contributes:
+  - file: SKILL.md
+    to: skills/penates/SKILL.md

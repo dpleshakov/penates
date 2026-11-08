@@ -47,7 +47,7 @@ with the peer review agent on 2026-11-08:
   `make check` validates that the embedded kit loads and its versions parse.
 - Documentation rides in the same commits as the behaviour it describes
   (repository rule): concept.md (a built-in kit subsection beside 6.1, the
-  6.7 data-dir contents, the 3.2 non-goal exception, 10.1/10.2 screens),
+  6.8 data-dir contents, the 3.2 non-goal exception, 10.1/10.2 screens),
   architecture.md (the new module), CHANGELOG under Unreleased, README with
   the shipped skills.
 
@@ -77,7 +77,7 @@ the only other writer of the name. `cmd/penates/cli.go` runs Sync after
 concept.md gains the built-in kit subsection — the sync model with the
 stamp, the replace, the three-state conflict, and the reset semantics
 (discard the local edits of the managed directory, take the embedded
-content) — the 6.7 data-dir contents (the kit directory and its stamp), and
+content) — the 6.8 data-dir contents (the kit directory and its stamp), and
 the 3.2 exception (obtaining
 kits is the owner's concern — the one kit penates delivers itself);
 architecture.md records `internal/builtin` and its rules (no harness
@@ -92,7 +92,7 @@ touched, nothing is unpacked or registered, and the report names the
 blocking path; a foreign kit named `penates` suppresses registration with a
 report; a repointed `penates` entry suppresses every write; registering a
 directory kit as `penates` fails; make check green.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-02 `builtin-kit-ux`
 **Description:** The interface half. The startup report reaches the model and

@@ -1,0 +1,8 @@
+id: kit-authoring
+version: 0.1.0
+description: Creating and maintaining a penates kit repository (placeholder; the real text arrives with the skill-texts task)
+tags: [docs]
+vars: []
+contributes:
+  - file: SKILL.md
+    to: skills/penates-kit-authoring/SKILL.md

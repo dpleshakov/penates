@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dpleshakov/penates/internal/apply"
+	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -30,10 +31,14 @@ import (
 // palette, the help screen, and the kit management dialogs overlay it.
 
 // App carries the wiring the screens work through: the state store and the
-// lock store of one penates data directory.
+// lock store of one penates data directory, and the report of the built-in
+// kit sync of this run.
 type App struct {
 	State *state.Store
 	Locks *lock.Store
+	// Startup is what the built-in kit sync found and did before the
+	// interface opened; nil when the sync did not run.
+	Startup *builtin.Report
 }
 
 // NewApp wires the stores.
@@ -62,6 +67,7 @@ func (a *App) Initial() tea.Model {
 		return m
 	}
 	m.reg = reg
+	m.startup = a.Startup
 
 	paths := reg.TargetPaths()
 	switch {
@@ -191,6 +197,10 @@ type model struct {
 	// errLine holds a load problem until the next successful reload; it
 	// shares the notice line (2.1) but does not age out.
 	errLine string
+
+	// startup is the built-in kit sync report of this run, shown on the
+	// notice line and on the kit row; nil when the sync did not run.
+	startup *builtin.Report
 
 	changelogCache map[string][]ChangelogEntry
 

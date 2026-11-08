@@ -56,7 +56,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 
 ### 3.2 Non-goals
 
-- Obtaining kits. penates performs no network access and no version-control operations. How a kit reaches the machine (clone, archive, copy) is the owner's concern.
+- Obtaining kits. penates performs no network access and no version-control operations. How a kit reaches the machine (clone, archive, copy) is the owner's concern — the one exception is the built-in kit (6.2), which penates delivers inside the binary itself.
 - Discovery of or distribution from public registries.
 - Translation of content between harnesses.
 - Detection of the operating system, installed harnesses or harness versions.
@@ -113,7 +113,25 @@ shared:                          # files that section and json contributions may
   - opencode.json
 ```
 
-### 6.2 Items
+### 6.2 The built-in kit
+
+penates ships its own documentation as a kit embedded in the binary. On the target it installs two skills — `reference`, the product reference, and `kit-authoring`, the guide to writing kit repositories — through the same machinery as any other kit. The kit's name is `penates`, a reserved name: registering a directory kit under it is refused, and the built-in kit is the only other writer of it.
+
+On every start penates unpacks the embedded kit into the data directory (`builtin-kit` under the penates data directory) and registers it while the name is free. No target is ever attached automatically — attaching is the user's action, like any kit's. A stamp file beside the directory records the embedded hash, written only after the directory is fully in place. The directory itself is governed by the three-state model of 7.2: the stamp is the base, the directory content the current state, the embedded content the incoming one.
+
+| Directory state | Action |
+|---|---|
+| Absent, with or without a stale stamp | Unpack, write the stamp, register while the name is free. |
+| Present with no stamp | Not owned: penates stands down — no unpack, no registration, no replacement — and reports the blocking path. |
+| Stamp equals embedded, directory equals both | In place; nothing to do. |
+| Stamp equals embedded, directory modified | Kept without notice, as an unmodified incoming side of the ownership table; the kit row shows the modification. |
+| Stamp differs from embedded, directory equals the embedded content | A crash between the rename and the stamp: write nothing but the stamp. |
+| Stamp differs from embedded, directory equals the stamp | Untouched by the user: replaced with the embedded content, restamped. |
+| Stamp differs from embedded, directory equals neither | Conflict: nothing is written, the kit row shows it, and an explicit reset discards the local edits and takes the embedded content. |
+
+The granularity is the whole directory: one local edit freezes every built-in update until reset. A user who wants to keep local modifications copies the directory and points the registered kit at the copy (Edit kit path): the entry then counts as a foreign kit holding the name, and the built-in stands down — the intended escape hatch, not an accident. A failed write is reported and retried on the next start; it is never fatal.
+
+### 6.3 Items
 
 ```yaml
 # items/git-via-gh/item.yaml
@@ -139,7 +157,7 @@ Rules:
 - Source paths are relative to the item directory. `to` paths are relative to the target root, use forward slashes, and must not be absolute or contain `..`.
 - An optional `CHANGELOG.md` in the item directory is displayed in the item details.
 
-### 6.3 Contribution kinds
+### 6.4 Contribution kinds
 
 | Kind | Source | Effect on the target |
 |---|---|---|
@@ -149,7 +167,7 @@ Rules:
 
 `section` and `json` contributions may target only files listed in `shared` of the item's kit.
 
-### 6.4 Variables
+### 6.5 Variables
 
 ```yaml
 vars:
@@ -165,21 +183,21 @@ vars:
 - Answers are stored in the lock and reused. On update, a newly introduced variable is requested; the answer for a removed variable is discarded.
 - Secrets are not supported as variables and are never stored. Secrets are supplied to the harness by its own means, such as environment variables.
 
-### 6.5 Tags and variants
+### 6.6 Tags and variants
 
 Tags have no semantics in penates, now or in future versions. They are displayed and can be used in the text filter. If automatic matching of items to machines is ever introduced, it will use a new field and will not reinterpret tags.
 
 Variants of one capability are separate items, for example `done-v1` and `done-v2`. Mutual exclusion is not declared; it follows from ownership. When item Y conflicts only with contributions owned by installed item X, replacing X with Y is the user's explicit action: mark X for removal and select Y in the same apply.
 
-### 6.6 Targets and attachments
+### 6.7 Targets and attachments
 
 penates supports global harness configuration directories only. A target is registered on first use of a kit: the user supplies the kit path, penates proposes `target_hint`, and the user confirms or edits it. The confirmed path is used as given — penates does not verify that it is a global configuration directory, because it knows nothing about harnesses (principle 3). A target exists independently of kits: it may be registered with no kit attached.
 
 A kit attaches to one or more targets, and the attachment is what ties a kit's items to a target: a target's item list shows only the kits attached to it. Detaching a kit removes the attachment alone and never touches the files in the target. A kit with installed items in the target is either detached after the apply that removes them — as a deferred operation — or detached at once with its installed items staying installed and owned, listed for removal. Forgetting a target removes it from the state and deletes its lock; the files in it are never touched and are no longer owned. The forget happens at once on request, or waits as a deferred operation for the apply that removes the target's installed items. A deferred operation completes when the apply removed everything it covers, and is dropped with a reason shown to the user otherwise.
 
-### 6.7 Application state
+### 6.8 Application state
 
-All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty). Nothing is written into a target other than the contributions themselves.
+All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty), together with the unpacked built-in kit and its stamp (6.2). Nothing is written into a target other than the contributions themselves.
 
 - **Configuration:** the registry — registered kits (name to directory), registered targets (path, with an optional display name), the attachments between them (a kit attaches to several targets; a target exists without kits), and the last active target.
 - **Pending actions:** per target, the actions chosen since its last apply — select, reset and remove per item — the deferred operations waiting for that apply (detach kit, forget target), and the variable answers given at selection time. The answers stay until the apply writes them into the lock, so a restored selection does not ask again. Pending actions are saved on every mutation; entries that no longer hold are dropped at load with a report the interface can show.

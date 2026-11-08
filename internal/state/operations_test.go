@@ -759,6 +759,42 @@ func TestRegisterKit(t *testing.T) {
 	}
 }
 
+func TestRegisterKitReservedName(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// The name of the built-in kit is refused on the user-facing path and
+	// nothing is written under it.
+	err = store.RegisterKit(BuiltinKitName, "/kits/mine")
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("RegisterKit under the reserved name = %v, want a reserved error", err)
+	}
+	if _, ok := loadRegistry(t, store).Kits[BuiltinKitName]; ok {
+		t.Error("the reserved name was written by the refused registration")
+	}
+
+	// RegisterBuiltinKit is the only other writer of the name: it adds the
+	// entry once, keeps it over the same directory, and refuses another
+	// directory under the name.
+	added, err := store.RegisterBuiltinKit("/data/builtin-kit")
+	if err != nil || !added {
+		t.Fatalf("RegisterBuiltinKit = %v, %v; want added, nil", added, err)
+	}
+	added, err = store.RegisterBuiltinKit("/data/builtin-kit")
+	if err != nil || added {
+		t.Fatalf("repeated RegisterBuiltinKit = %v, %v; want not added, nil", added, err)
+	}
+	_, err = store.RegisterBuiltinKit("/data/other")
+	if err == nil || !strings.Contains(err.Error(), "already registered at /data/builtin-kit") {
+		t.Fatalf("RegisterBuiltinKit elsewhere = %v, want the refusal", err)
+	}
+	if k := loadRegistry(t, store).Kits[BuiltinKitName]; k.Dir != "/data/builtin-kit" {
+		t.Errorf("registered dir = %q, want the refused registration to change nothing", k.Dir)
+	}
+}
+
 func TestRegisterTarget(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

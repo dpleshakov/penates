@@ -10,7 +10,7 @@ the modules.
 |---|---|---|
 | `make build` | `go vet`, `go test`, then builds the binary into the repository root | While working on the code |
 | `make lint` | `go mod tidy -diff`, which fails if `go.mod` or `go.sum` drifted from the imports, and `golangci-lint run` | Before committing |
-| `make test` | Measures coverage of `internal/...` and fails below 70% | While working on tests |
+| `make test` | Measures coverage of `internal/...` and fails below the threshold (see Code rules) | While working on tests |
 | `make licenses` | `go-licenses check` for each of the six release platforms (`tools/check-licenses.go`), which fails if a dependency linked into the binary is under a license other than MIT, BSD-3-Clause, or Apache-2.0 | Before committing a dependency change |
 | `make check` | `build`, `lint`, `test`, and `licenses` | Before pushing — CI runs exactly this |
 | `make clean` | Removes the binary, `coverage.out`, `dist/`, and the license sets a snapshot generates, through `git clean`, touching nothing else | Any time |
@@ -53,7 +53,7 @@ installs go-licenses with `go install` and runs it by name, so Go's install dire
   each. Suppress per site, with a reason: `//nolint:<linter> // <reason>`. Turning a
   linter off repository-wide is a change to `.golangci.yml` and needs its reason recorded
   there.
-- **Coverage.** `make test` measures `internal/...` and fails below 70%
+- **Coverage.** `make test` measures `internal/...` and fails below 85%
   (`tools/check-coverage.go`). `cmd/penates` stays out of the profile: the threshold
   guards the packages that carry the product behaviour, and the command tree is pinned by
   its own tests.

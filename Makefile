@@ -40,7 +40,7 @@ lint:
 test:
 	go test -coverprofile=coverage.out ./internal/...
 	go tool cover -func=coverage.out
-	go run tools/check-coverage.go 70
+	go run tools/check-coverage.go 85
 
 # Fail when a dependency linked into the binary on any release platform is
 # under a license outside the allowed list, which tools/check-licenses.go

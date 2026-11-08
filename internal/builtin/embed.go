@@ -11,6 +11,8 @@ import (
 )
 
 // embedded holds the kit under kit/.
+//
+//go:embed all:kit
 var embedded embed.FS
 
 // Content is the built-in kit as a filesystem rooted at the kit directory.

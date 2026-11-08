@@ -61,7 +61,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 - Translation of content between harnesses.
 - Detection of the operating system, installed harnesses or harness versions.
 - Project-scoped targets, such as a `.opencode/` directory inside a repository.
-- A command-line interface. The binary takes the `version` subcommand beside the TUI, with `licenses` planned next to it; a full CLI remains outside v1, and the core permits adding one later without changes to it.
+- A command-line interface. The binary takes the `version` and `licenses` subcommands beside the TUI; a full CLI remains outside v1, and the core permits adding one later without changes to it.
 
 ## 4. Principles
 

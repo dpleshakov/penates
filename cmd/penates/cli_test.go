@@ -78,6 +78,53 @@ func TestVersionDoesNotOpenTheTUI(t *testing.T) {
 	}
 }
 
+// A plain build carries no third-party set: the command lists the two fixed
+// components and says where the release builds put the rest.
+func TestLicensesPrintsTheComponents(t *testing.T) {
+	stdout, stderr, code := execute(t, testBuild, "licenses")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	frame := strings.Repeat("=", 80)
+	framed := func(name string) string {
+		return "\n" + frame + "\n" + name + "\n" + frame + "\n\n"
+	}
+	wantList := "The penates binary contains the following components:\n\n" +
+		"  penates\n" +
+		"  Go standard library and runtime\n"
+	if !strings.HasPrefix(stdout, wantList) {
+		t.Errorf("stdout does not start with the component list:\n%.200s", stdout)
+	}
+	for _, want := range []string{
+		"only in the release builds",
+		"https://github.com/dpleshakov/penates/releases",
+		framed("penates"),
+		framed("Go standard library and runtime"),
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%.400s", want, stdout)
+		}
+	}
+}
+
+func TestExtraArgumentsToLicensesAreAnError(t *testing.T) {
+	stdout, stderr, code := execute(t, testBuild, "licenses", "extra")
+
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if want := `Error: unknown command "extra" for "penates licenses" (run "penates licenses --help" for the available commands)` + "\n"; stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+}
+
 func TestVersionPrintsTheBuildStamp(t *testing.T) {
 	stdout, stderr, code := execute(t, testBuild, "version")
 

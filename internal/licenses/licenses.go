@@ -1,0 +1,132 @@
+package licenses
+
+import (
+	_ "embed" // for go:embed of the penates and Go licenses
+	"io/fs"
+	"path"
+	"sort"
+	"strings"
+)
+
+// ownLicense is the license of penates itself, a copy of LICENSE at the root
+// of the repository.
+//
+//go:embed penates.LICENSE
+var ownLicense string
+
+// goLicense is the license of the Go standard library and runtime, a copy of
+// LICENSE from the Go distribution.
+//
+//go:embed go.LICENSE
+var goLicense string
+
+// separator frames the name of each component above its license texts.
+var separator = strings.Repeat("=", 80)
+
+// Text returns the license information of this binary: the list of the
+// components it includes, followed by the license texts of each.
+func Text() string {
+	set, err := fs.Sub(platformFS, path.Join(platformDir, "third-party"))
+	if err != nil {
+		set = nil
+	}
+	return text(embedded(), set)
+}
+
+// embedded lists the components whose licenses every build carries, in the
+// order they are printed.
+func embedded() []license {
+	return []license{
+		{name: "penates", text: ownLicense},
+		{name: "Go standard library and runtime", text: goLicense},
+	}
+}
+
+// license is a component whose license text is embedded in every build.
+type license struct {
+	name string
+	text string
+}
+
+// component is one entry of the output: a name and its license files.
+type component struct {
+	name  string
+	files []string
+}
+
+// text assembles the output from fixed, the components every build carries,
+// and set, the third-party licenses saved by go-licenses: one directory per
+// package path, holding the license files of its module. A nil or empty set
+// means a build the release did not make.
+func text(fixed []license, set fs.FS) string {
+	third := thirdParty(set)
+
+	var b strings.Builder
+	b.WriteString("The penates binary contains the following components:\n\n")
+	for _, l := range fixed {
+		b.WriteString("  " + l.name + "\n")
+	}
+	for _, c := range third {
+		b.WriteString("  " + c.name + "\n")
+	}
+	if len(third) == 0 {
+		b.WriteString("\nThis build does not carry the licenses of the third-party modules it\n" +
+			"includes: they are embedded only in the release builds, available at\n" +
+			"https://github.com/dpleshakov/penates/releases.\n")
+	}
+
+	for _, l := range fixed {
+		writeComponent(&b, l.name, l.text)
+	}
+	for _, c := range third {
+		var texts []string
+		for _, f := range c.files {
+			data, err := fs.ReadFile(set, f)
+			if err != nil {
+				continue
+			}
+			texts = append(texts, string(data))
+		}
+		writeComponent(&b, c.name, strings.Join(texts, "\n"))
+	}
+	return b.String()
+}
+
+// thirdParty lists the components of set, sorted by name, with their files.
+// A set that cannot be read yields none.
+func thirdParty(set fs.FS) []component {
+	if set == nil {
+		return nil
+	}
+	byDir := map[string]*component{}
+	err := fs.WalkDir(set, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		dir := path.Dir(p)
+		if byDir[dir] == nil {
+			byDir[dir] = &component{name: dir}
+		}
+		byDir[dir].files = append(byDir[dir].files, p)
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+
+	list := make([]component, 0, len(byDir))
+	for _, c := range byDir {
+		list = append(list, *c)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].name < list[j].name })
+	return list
+}
+
+// writeComponent appends the framed name of a component and its license text.
+func writeComponent(b *strings.Builder, name, license string) {
+	b.WriteString("\n" + separator + "\n" + name + "\n" + separator + "\n\n")
+	b.WriteString(strings.TrimRight(license, "\n") + "\n")
+}

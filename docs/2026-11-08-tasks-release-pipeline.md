@@ -68,7 +68,7 @@ Added, in the same commit.
 **Definition of done:** `go run ./cmd/penates licenses` on a plain build
 lists penates and the Go standard library and runtime, then the notice with
 the penates releases URL; make check green.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `license-check`
 **Description:** Port tools/check-licenses.go with ./cmd/penates, the same

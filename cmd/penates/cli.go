@@ -38,8 +38,8 @@ func run(b build, args []string, stdout, stderr io.Writer) int {
 }
 
 // newRoot builds the command tree: penates with no arguments is the TUI,
-// `version` reports the build stamp, and cobra's own help and completion
-// fill the rest of the surface.
+// `version` and `licenses` report the build stamp and the carried licenses,
+// and cobra's own help and completion fill the rest of the surface.
 func newRoot(b build, stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "penates",
@@ -65,6 +65,7 @@ func newRoot(b build, stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 
 	root.AddCommand(newVersionCmd(b))
+	root.AddCommand(newLicensesCmd())
 	// Cobra adds help and completion only when it executes the tree;
 	// adding them here keeps the surface the same however the tree runs.
 	root.InitDefaultHelpCmd()

@@ -49,6 +49,7 @@ only client.
 | Package | Responsibility |
 |---|---|
 | `cmd/penates` | Process entry: the cobra command tree, wiring, running the TUI. No logic. |
+| `internal/licenses` | The license texts of the code linked into the binary: penates and the Go distribution embedded as values, the third-party modules of the release platform embedded per platform by the release build — a PLACEHOLDER keeps every platform directory in the other builds. `Text` assembles the output of `penates licenses`; the third-party set is optional, and its absence is stated. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. |
 | `internal/state` | Application state (concept: application state): the registry — kits, targets, the attachments between them, the last active target — and the per-target pending actions with their deferred operations and variable answers. The operations over the registry — attach, detach, edit kit path, forget target — keep its invariants, and every mutation saves; a state file of another format version is refused with the path to delete. The operations receive the lock facts they need — the item keys of a target's lock — as values and delete a lock through a one-method interface, so the package keeps no dependency on internal/lock. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. Until the TUI rewrite, the current TUI reads the registry through a compatibility view. |
 | `internal/lock` | The per-target lock (concept: application state): reading, writing, and deleting the lock, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
@@ -118,7 +119,7 @@ Rules:
 ```
 penates/
 ├── cmd/penates/          # main package
-├── internal/             # one package per module: kit, state, lock, target, plan, apply, tui
+├── internal/             # one package per module: kit, state, lock, target, plan, apply, tui, licenses
 ├── docs/                 # the concept, this document, and the archive
 └── .github/workflows/    # CI
 ```

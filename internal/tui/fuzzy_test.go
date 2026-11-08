@@ -65,7 +65,12 @@ func TestFuzzyMatchDeterministic(t *testing.T) {
 	for _, tt := range []struct{ pattern, s string }{
 		{"open", "~/.config/opencode"},
 		{"tgt", "targets"},
-		{"э", "данные"},
+		{"é", "préférences"}, // accented Latin
+		{"設", "設定ファイル"},      // CJK ideographs
+		{"д", "данные"},      // Cyrillic
+		{"ع", "إعدادات"},     // Arabic, right-to-left
+		{"स", "सेटिंग्स"},    // Devanagari, combining marks
+		{"🎉", "party 🎉"},     // a rune outside the BMP
 	} {
 		first, _ := FuzzyMatch(tt.pattern, tt.s)
 		second, _ := FuzzyMatch(tt.pattern, tt.s)

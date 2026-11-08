@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,32 @@ func targetIndex(t *testing.T, m *model, path string) int {
 	}
 	t.Fatalf("the list holds no row for %s", path)
 	return 0
+}
+
+// searchPattern grows start with random letters until it fuzzy-matches
+// none of the texts. The search assertions need a pattern no target
+// matches by accident: the OS fills the temp-path prefix with letters
+// the test does not choose, and on macOS they can line up as a
+// subsequence of the pattern, so the pattern is picked against the
+// actual paths instead of hardcoded. Each appended letter either ends
+// the match or moves the scan strictly forward, so the loop always
+// terminates.
+func searchPattern(t *testing.T, start string, texts ...string) string {
+	t.Helper()
+	pattern := start
+	for {
+		matched := false
+		for _, s := range texts {
+			if _, ok := FuzzyMatch(pattern, s); ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return pattern
+		}
+		pattern += string(rune('a' + rand.IntN(26)))
+	}
 }
 
 func TestTargetListShowsCountsAndMarker(t *testing.T) {
@@ -119,19 +146,21 @@ func TestTargetListSearch(t *testing.T) {
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
 	lm := drive(t, resize(t, app.Initial(""), 120, 30), "t").(*model)
-	// The second target carries the display name the search matches by.
+	// The second target carries the display name the search matches by:
+	// a pattern the path of the first target cannot match by accident.
+	pattern := searchPattern(t, "wsl", targetA)
 	lm.list.cursor = targetIndex(t, lm, targetB)
 	lm = ctrlKey(t, lm, tea.KeyCtrlR)
-	lm = drive(t, lm, "wsl", "enter").(*model)
-	if n := registryOf(t, st).Targets[targetB].Name; n != "wsl" {
-		t.Fatalf("rename = %q, want wsl", n)
+	lm = drive(t, lm, pattern, "enter").(*model)
+	if n := registryOf(t, st).Targets[targetB].Name; n != pattern {
+		t.Fatalf("rename = %q, want %q", n, pattern)
 	}
 
-	// Typing filters: the pattern matches the one target by its display
-	// name, the other by its path; the path match outranks.
-	lm = drive(t, lm, "wsl").(*model)
+	// Typing filters: only the target carrying the pattern as its display
+	// name stays in the list.
+	lm = drive(t, lm, pattern).(*model)
 	if len(lm.list.entries) != 1 || lm.list.entries[0].path != targetB {
-		t.Fatalf("entries after 'wsl' = %+v, want only the named target", lm.list.entries)
+		t.Fatalf("entries after %q = %+v, want only the named target", pattern, lm.list.entries)
 	}
 
 	m2, _ := lm.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -141,7 +170,8 @@ func TestTargetListSearch(t *testing.T) {
 	}
 
 	// Nothing matches: the add-target row stays under the cursor.
-	lm = drive(t, lm, "zzz").(*model)
+	nomatch := searchPattern(t, "zzz", targetA, pattern+" "+targetB)
+	lm = drive(t, lm, nomatch).(*model)
 	if len(lm.list.entries) != 0 || lm.list.cursor != 0 {
 		t.Fatalf("entries %d cursor %d, want none on the add-target row", len(lm.list.entries), lm.list.cursor)
 	}

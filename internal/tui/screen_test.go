@@ -116,6 +116,24 @@ func resize(t *testing.T, m tea.Model, w, h int) tea.Model {
 	return m
 }
 
+// startWithKit opens the add-kit input and types kitDir into it, leaving
+// the model on the filled input the way a start with a kit path used to:
+// the flows under test drive on from there. A startup restore offer is
+// accepted first — the flow under test drives the tree, not the dialog —
+// then the input opens straight from the explanation screen on the first
+// run, or from the add-kit row the cursor walks to.
+func startWithKit(t *testing.T, app *App, kitDir string, w, h int) tea.Model {
+	t.Helper()
+	m := acceptRestore(t, resize(t, app.Initial(), w, h))
+	if m.firstRun() {
+		m = drive(t, m, "enter").(*model)
+	} else {
+		m = drive(t, m, "end", "enter").(*model)
+	}
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(kitDir)})
+	return tm
+}
+
 // itemKeys lists the item keys of the built tree in row order.
 func itemKeys(m *model) []string {
 	var out []string
@@ -323,11 +341,12 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	// The kit argument opens the add-kit input with the path filled in.
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	// The first run explains kits and opens the add-kit input; the test
+	// types the kit path the way the user does.
+	m := startWithKit(t, app, kitDir, 100, 30)
 	lm := m.(*model)
 	if lm.inputKind != inputAddKit || lm.pathInput.Value() != kitDir {
-		t.Fatalf("input %v, path %q; want the add-kit input prefilled", lm.inputKind, lm.pathInput.Value())
+		t.Fatalf("input %v, path %q; want the add-kit input with the typed path", lm.inputKind, lm.pathInput.Value())
 	}
 
 	// Enter opens the first-target input of 6.4 — the kit proposes a
@@ -422,9 +441,9 @@ func TestRegisterListApplyFlow(t *testing.T) {
 	}
 }
 
-// TestAddKitInputEditing checks that the add-kit input accepts editing: clear
-// the prefilled path, type another kit's path, and confirm — the typed kit
-// attaches at its own target hint.
+// TestAddKitInputEditing checks that the add-kit input accepts editing: type
+// one kit's path, clear it, type another kit's path, and confirm — the typed
+// kit attaches at its own target hint.
 func TestAddKitInputEditing(t *testing.T) {
 	dataDir := t.TempDir()
 	kitDir := writeFixtureKit(t, filepath.Join(t.TempDir(), "hinted"))
@@ -437,7 +456,7 @@ func TestAddKitInputEditing(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(otherKit)})
 	// The first enter opens the first-target input of 6.4 — the typed
@@ -468,7 +487,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
@@ -477,7 +496,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 
 	// The kit publishes 1.1.0 with new content: the tree shows the update.
 	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	r := itemRow(lm, "ex/good")
 	if r.InstalledVersion != "1.0.0" || r.KitVersion != "1.1.0" || r.Status != StatusUpdate {
@@ -500,7 +519,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 
 	// The kit publishes 0.9.0: shown as a downgrade.
 	bumpKit(t, kitDir, "0.9.0", "good skill v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusDowngrade {
 		t.Fatalf("downgrade row = %+v", r)
@@ -515,7 +534,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified || r.Pending == nil {
 		t.Fatalf("modified row = %+v", r)
@@ -554,7 +573,7 @@ func TestRemoveFlow(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
@@ -617,7 +636,7 @@ func TestRemoveReportsKeptContent(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
@@ -668,7 +687,7 @@ func TestOrphanRemoval(t *testing.T) {
 	}
 	app := NewApp(stateStore, locks)
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[2] != "gone/old" {
@@ -706,7 +725,7 @@ func TestRemoveThenInstallSameFile(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  one 1.0.0") {
@@ -752,7 +771,7 @@ func TestRemoveWithFormResume(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  one 1.0.0") {
@@ -831,7 +850,7 @@ func TestListFilter(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[0] != "ex/alpha" || keys[2] != "ex/gamma" {
@@ -913,7 +932,7 @@ func TestItemDetailsView(t *testing.T) {
 	// Install both items so the answers of varitem are recorded: the form
 	// asks at selection now, the apply goes straight through the summary.
 	// The drive ends on the results screen.
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  varitem") {
@@ -973,7 +992,7 @@ func TestListStatuses(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	// Nothing is installed: both rows show the available glyph.
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "ex/dup" || keys[1] != "ex/plain" {
@@ -1014,7 +1033,7 @@ func TestListStatuses(t *testing.T) {
 	// A higher kit version is an update, with the arrow in the version
 	// column.
 	bumpStatusKit(t, kitDir, "1.1.0", "plain v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)
@@ -1025,7 +1044,7 @@ func TestListStatuses(t *testing.T) {
 
 	// A lower kit version is a downgrade.
 	bumpStatusKit(t, kitDir, "0.9.0", "plain v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusDowngrade {
 		t.Fatalf("downgrade row = %+v", r)
@@ -1037,7 +1056,7 @@ func TestListStatuses(t *testing.T) {
 	// A major bump is marked for review: the row carries the major flag
 	// (7.2).
 	bumpStatusKit(t, kitDir, "2.0.0", "plain v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusUpdate || !r.Major {
 		t.Fatalf("major row = %+v", r)
@@ -1049,7 +1068,7 @@ func TestListStatuses(t *testing.T) {
 	// The same version with changed content warns while the item is
 	// selected: applying would keep everything.
 	bumpStatusKit(t, kitDir, "1.0.0", "plain v2 changed\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusWarning {
 		t.Fatalf("warning row = %+v", r)
@@ -1064,7 +1083,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "skills", "plain", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusModified {
 		t.Fatalf("modified row = %+v", r)
@@ -1077,7 +1096,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.Remove(filepath.Join(targetDir, "skills", "plain", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/plain"); r.Status != StatusBroken {
 		t.Fatalf("broken row = %+v", r)
@@ -1107,7 +1126,7 @@ func TestListStatuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "AGENTS.md"), []byte("notes\n\n## Dup rules\n\nhand written\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	m = driveAll(t, m, "down", "space")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/dup"); r.Status != StatusConflict {
@@ -1134,7 +1153,7 @@ func TestListStatuses(t *testing.T) {
 	if err := locks.Save(lk); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if keys := itemKeys(lm); len(keys) != 3 || keys[2] != "gone/old" {
 		t.Fatalf("items = %v", keys)
@@ -1153,7 +1172,7 @@ func TestListStatuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	teamDir := writeTeamKit(t, targetDir)
-	m = acceptRestore(t, resize(t, app.Initial(teamDir), 100, 30))
+	m = acceptRestore(t, startWithKit(t, app, teamDir, 100, 30))
 	if m.(*model).inputKind != inputAddKit {
 		t.Fatalf("input = %v, want the add-kit input for the new kit", m.(*model).inputKind)
 	}
@@ -1197,7 +1216,7 @@ func TestKitGroups(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(dirA), 100, 30)
+	m := startWithKit(t, app, dirA, 100, 30)
 	m = driveAll(t, m, "enter", "enter")
 	lm := m.(*model)
 	if lm.rows[0].Kind != KindKit || lm.rows[0].Kit.Name != "aaa" || lm.rows[0].Kit.Path != dirA {
@@ -1239,7 +1258,7 @@ func TestReconciliationFlow(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
@@ -1255,7 +1274,7 @@ func TestReconciliationFlow(t *testing.T) {
 	if err := os.Remove(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusBroken {
 		t.Fatalf("row after reconciliation = %+v, want broken", r)
@@ -1280,7 +1299,7 @@ func TestReconciliationFlow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {
 		t.Fatalf("row after reconciliation = %+v, want modified", r)
@@ -1306,7 +1325,7 @@ func TestApplySummary(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
@@ -1393,7 +1412,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	// at apply time (7.3).
 	// The target must be registered before the pending actions seed: the
 	// kit attaches, then the selection without answers goes into the state.
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	driveAll(t, m, "enter", "enter")
 	if err := stateStore.Update(func(reg *state.Registry) error {
 		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
@@ -1403,7 +1422,7 @@ func TestApplySummaryExcluded(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	m = driveAll(t, m, "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
@@ -1456,7 +1475,7 @@ func TestApplySummaryConflictRenders(t *testing.T) {
 
 	// The summary spells the conflict before anything is written; the test
 	// runs wide so the long conflict line renders uncut.
-	m := resize(t, app.Initial(kitDir), 200, 30)
+	m := startWithKit(t, app, kitDir, 200, 30)
 	m = drive(t, m, "enter", "enter", "down", "space", "a")
 	sm := m.(*model)
 	if sm.screen != screenSummary {
@@ -1498,7 +1517,7 @@ func TestFirstRun(t *testing.T) {
 
 	// No target, no kit: the tree holds the add-kit row alone, the body
 	// explains what a kit is, the footer names enter (6.1).
-	m := resize(t, app.Initial(""), 100, 30)
+	m := resize(t, app.Initial(), 100, 30)
 	lm := m.(*model)
 	if len(lm.rows) != 1 || lm.rows[0].Kind != KindAddKit {
 		t.Fatalf("rows = %v, want the add-kit row alone", lm.rows)
@@ -1535,7 +1554,7 @@ func TestFirstRun(t *testing.T) {
 	}
 
 	// A restart opens the remembered target directly.
-	m = resize(t, app.Initial(""), 100, 30)
+	m = resize(t, app.Initial(), 100, 30)
 	if m.(*model).target != target {
 		t.Errorf("restart target = %q, want %q", m.(*model).target, target)
 	}
@@ -1552,7 +1571,7 @@ func TestMajorGate(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
 	if !strings.Contains(m.(*model).resultText(), "installed  good 1.0.0") {
 		t.Fatalf("install:\n%s", m.(*model).resultText())
@@ -1560,7 +1579,7 @@ func TestMajorGate(t *testing.T) {
 
 	// The kit publishes 2.0.0: a major update (7.2).
 	bumpKit(t, kitDir, "2.0.0", "good skill v2\n")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusUpdate || !r.Major {
 		t.Fatalf("major row = %+v", r)
@@ -1629,7 +1648,7 @@ func TestBreakpoints(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 120, 32)
+	m := startWithKit(t, app, kitDir, 120, 32)
 	m = driveAll(t, m, "enter", "enter", "down")
 	lm := m.(*model)
 
@@ -1671,7 +1690,7 @@ func TestDetailsViewScroll(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "enter")
 	lm := m.(*model)
 	if !lm.view {
@@ -1715,7 +1734,7 @@ func TestHeaderFooter(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 120, 30)
+	m := startWithKit(t, app, kitDir, 120, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space")
 	lm := m.(*model)
 
@@ -1749,7 +1768,7 @@ func TestHeaderFooter(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = acceptRestore(t, resize(t, app.Initial(""), 120, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 120, 30))
 	m = driveAll(t, m, "down")
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {

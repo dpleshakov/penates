@@ -61,7 +61,7 @@ func bumpFormKit(t *testing.T, kitDir, version, extraVar string) {
 // tree, the var item row under the cursor.
 func openFormKit(t *testing.T, app *App, kitDir string, w, h int) *model {
 	t.Helper()
-	m := resize(t, app.Initial(kitDir), w, h)
+	m := startWithKit(t, app, kitDir, w, h)
 	m = drive(t, m, "enter", "enter", "down", "down")
 	return m.(*model)
 }
@@ -295,7 +295,7 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 
 	// The kit publishes 1.1.0 introducing a third, required variable.
 	bumpFormKit(t, kitDir, "1.1.0", "q")
-	m = acceptRestore(t, resize(t, app.Initial(""), 100, 30))
+	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	if r := itemRow(m, "ex/varitem"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)
 	}

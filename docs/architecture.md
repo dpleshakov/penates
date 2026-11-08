@@ -16,6 +16,7 @@ holds no notable project named penates.
 |---|---|---|
 | Language and distribution | Go 1.27, single static binary | Fixed by the concept's goals. Cross-compiles to Windows, Linux, and macOS without runtime dependencies. |
 | TUI | [Bubble Tea](https://github.com/charmbracelet/bubbletea) with `bubbles` and `lipgloss` | The screens are forms and lists driven by application state (register target, select items, apply); the update/view loop models this directly. `tview` targets widget-heavy dashboards and pulls a larger dependency graph; `tcell` alone would mean hand-rolling lists and inputs. |
+| Command line | [cobra](https://github.com/spf13/cobra) | The binary takes subcommands — `version` today, `licenses` next — beside the argument-free TUI. Cobra owns the command tree, the help, and shell completion; what it lacks — the one-line `Error:` contract and the suggestion wording — penates implements on top of it. Hand-rolled parsing would carry all of that again per command. |
 | YAML | [goccy/go-yaml](https://github.com/goccy/go-yaml) | Actively maintained; decode errors carry positions, which validation messages shown to the kit author need. `gopkg.in/yaml.v3` is frozen upstream. |
 | JSONC | [hujson](https://github.com/tailscale/hujson) wrapped by `internal/jsonc` | Parses JSONC into a comment-preserving value tree and re-emits it, which partial edits of shared files require (concept: json contributions). The wrapper edits the tree in place, so parts no edit touched pack back byte for byte; hujson's own patch pipeline recommends reformatting the whole file and would not preserve the original bytes. |
 | Version ordering | `golang.org/x/mod/semver` | Canonical implementation; the concept needs version comparison only. |
@@ -47,7 +48,7 @@ only client.
 
 | Package | Responsibility |
 |---|---|
-| `cmd/penates` | Process entry: argument handling, wiring, running the TUI. No logic. |
+| `cmd/penates` | Process entry: the cobra command tree, wiring, running the TUI. No logic. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. |
 | `internal/state` | Application state (concept: application state): the registry — kits, targets, the attachments between them, the last active target — and the per-target pending actions with their deferred operations and variable answers. The operations over the registry — attach, detach, edit kit path, forget target — keep its invariants, and every mutation saves; a state file of another format version is refused with the path to delete. The operations receive the lock facts they need — the item keys of a target's lock — as values and delete a lock through a one-method interface, so the package keeps no dependency on internal/lock. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. Until the TUI rewrite, the current TUI reads the registry through a compatibility view. |
 | `internal/lock` | The per-target lock (concept: application state): reading, writing, and deleting the lock, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |

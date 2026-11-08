@@ -33,8 +33,10 @@ lint:
 	golangci-lint run
 
 # Measure statement coverage of the internal packages, print the per-function
-# breakdown, and fail below the threshold. cmd/penates is left out on purpose:
-# it is a handful of lines delegating to internal/tui.
+# breakdown, and fail below the threshold. cmd/penates stays out of the
+# profile: the threshold guards the packages that carry the product
+# behaviour, while the command tree is pinned by its own tests, which
+# `build` runs.
 test:
 	go test -coverprofile=coverage.out ./internal/...
 	go tool cover -func=coverage.out

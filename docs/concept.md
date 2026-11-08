@@ -61,7 +61,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 - Translation of content between harnesses.
 - Detection of the operating system, installed harnesses or harness versions.
 - Project-scoped targets, such as a `.opencode/` directory inside a repository.
-- A command-line interface. The core permits adding one later without changes to it.
+- A command-line interface. The binary takes the `version` subcommand beside the TUI, with `licenses` planned next to it; a full CLI remains outside v1, and the core permits adding one later without changes to it.
 
 ## 4. Principles
 
@@ -336,8 +336,8 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 
 ### 10.1 First run
 
-1. The user starts penates with a kit path.
-2. penates reads `kit.yaml` and proposes `target_hint` as the target.
+1. The user starts penates without arguments. With nothing registered, the screen explains what a kit is and offers `+ add kit`.
+2. The user enters the kit's directory; penates reads `kit.yaml` and proposes `target_hint` as the target.
 3. The user confirms or edits the target; the kit and target are registered.
 
 ### 10.2 Main screen

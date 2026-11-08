@@ -73,7 +73,7 @@ func TestDetachWithoutInstalledItems(t *testing.T) {
 	registerKitAt(t, st, "team", kitDir, target)
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(""), 120, 30)
+	m := resize(t, app.Initial(), 120, 30)
 	// d on the kit row detaches at once: no installed items to ask about.
 	m = drive(t, m, "d")
 	lm := m.(*model)
@@ -103,7 +103,7 @@ func TestDetachDialogAsksAboutInstalledItems(t *testing.T) {
 	registerKitAt(t, st, "team", kitDir, target)
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	m := installFirst(t, resize(t, app.Initial(""), 120, 30))
+	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 
 	// d on the kit row opens the dialog: it names the installed items and
 	// defaults to Cancel.
@@ -176,7 +176,7 @@ func TestDetachRemoveThenDetachWaitsForTheApply(t *testing.T) {
 	registerKitAt(t, st, "team", kitDir, target)
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	m := installFirst(t, resize(t, app.Initial(""), 120, 30))
+	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 
 	// The removals path: the item takes the removal mark, the detach is
 	// queued behind the apply, and the row shows "detaching".
@@ -237,7 +237,7 @@ func TestDetachDeferredDroppedByTheApply(t *testing.T) {
 	registerKitAt(t, st, "team", kitDir, target)
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	m := installFirst(t, resize(t, app.Initial(""), 120, 30))
+	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 
 	// A deferred detach whose removals the apply does not carry is dropped
 	// with its reason: the item stays installed, so the detach cannot.
@@ -290,7 +290,7 @@ func TestAddKitCompletionListsDirectories(t *testing.T) {
 	}
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	m := resize(t, app.Initial(""), 120, 30).(*model)
+	m := resize(t, app.Initial(), 120, 30).(*model)
 	m = drive(t, m, "enter").(*model)
 	if m.inputKind != inputAddKit {
 		t.Fatalf("input = %v, want the add-kit input", m.inputKind)
@@ -348,7 +348,7 @@ func TestAddKitCompletionListsDirectories(t *testing.T) {
 // the debounce tick is delivered, the preview is in.
 func openAddKit(t *testing.T, app *App, path string) *model {
 	t.Helper()
-	m := resize(t, app.Initial(""), 120, 30).(*model)
+	m := resize(t, app.Initial(), 120, 30).(*model)
 	m = drive(t, m, "end", "enter").(*model)
 	if m.inputKind != inputAddKit {
 		t.Fatalf("input = %v, want the add-kit input", m.inputKind)
@@ -647,7 +647,7 @@ func TestAddKitFirstTargetOnNarrowOpensTheView(t *testing.T) {
 
 	// On a medium terminal the preview opens as the details view after
 	// enter (6.2), with the target input inside (6.4).
-	m := resize(t, app.Initial(kitDir), 100, 30).(*model)
+	m := startWithKit(t, app, kitDir, 100, 30).(*model)
 	m = drive(t, m, "enter").(*model)
 	if !m.view || !m.viewPreview {
 		t.Fatalf("view %v preview %v; want the preview view", m.view, m.viewPreview)
@@ -694,7 +694,7 @@ func TestEditKitRelocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := resize(t, app.Initial(""), 120, 30).(*model)
+	m := resize(t, app.Initial(), 120, 30).(*model)
 	if r := m.rows[m.cursor]; r.Kind != KindKit || r.Kit.Name != "ex" || !r.Kit.Unreadable {
 		t.Fatalf("row under the cursor = %+v, want the unreadable ex", r)
 	}
@@ -771,7 +771,7 @@ func TestAddKitErrorKeepsTheInputEditable(t *testing.T) {
 	// path goes through (6.2, 6.5).
 	empty := t.TempDir()
 	kitDir := writeBareKit(t, filepath.Join(t.TempDir(), "kit"), "ex", target)
-	m := resize(t, app.Initial(""), 100, 30).(*model)
+	m := resize(t, app.Initial(), 100, 30).(*model)
 	m = drive(t, m, "end", "enter", empty, "enter").(*model)
 	if !m.view || !m.viewPreview {
 		t.Fatalf("view %v preview %v; want the error in the preview view", m.view, m.viewPreview)

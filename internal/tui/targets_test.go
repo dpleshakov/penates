@@ -93,7 +93,7 @@ func TestTargetListShowsCountsAndMarker(t *testing.T) {
 
 	// The screen runs wide enough for the box to hold the long test
 	// paths whole.
-	m := resize(t, app.Initial(""), 160, 30)
+	m := resize(t, app.Initial(), 160, 30)
 	lm := drive(t, m, "t").(*model)
 	if lm.list == nil {
 		t.Fatal("t opened no target list")
@@ -145,7 +145,7 @@ func TestTargetListSearch(t *testing.T) {
 	}
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "t").(*model)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "t").(*model)
 	// The second target carries the display name the search matches by:
 	// a pattern the path of the first target cannot match by accident.
 	pattern := searchPattern(t, "wsl", targetA)
@@ -196,7 +196,7 @@ func TestTargetListAddTarget(t *testing.T) {
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
 	// From the first run: no targets, the cursor on the add-target row.
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "t").(*model)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "t").(*model)
 	if len(lm.list.entries) != 0 {
 		t.Fatalf("entries = %+v, want none", lm.list.entries)
 	}
@@ -265,7 +265,7 @@ func TestTargetListRenameChangesHeader(t *testing.T) {
 	}
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "t").(*model)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "t").(*model)
 	lm.list.cursor = targetIndex(t, lm, targetA)
 
 	// ctrl+r opens the rename input over the row, prefilled with the
@@ -318,7 +318,7 @@ func TestTargetSwitchKeepsPendingAndOffersRestore(t *testing.T) {
 	app := NewApp(st, lock.NewStore(dataDir))
 
 	// B opens; its item takes a pending action, which saves with B.
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "down", "space").(*model)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "down", "space").(*model)
 	if lm.pendingCount() != 1 {
 		t.Fatalf("pending = %d, want the selection of B", lm.pendingCount())
 	}
@@ -411,9 +411,9 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	// selection turns into the update. Selecting the other kit's item
 	// adds the install: two pending actions. Both kits attach to the
 	// same target, so one dialog can offer both.
-	driveAll(t, resize(t, app.Initial(""), 120, 30), "down", "space", "a", "enter", "enter")
+	driveAll(t, resize(t, app.Initial(), 120, 30), "down", "space", "a", "enter", "enter")
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
-	lm := acceptRestore(t, resize(t, app.Initial(""), 120, 30))
+	lm := acceptRestore(t, resize(t, app.Initial(), 120, 30))
 	if lm.pendingCount() != 1 {
 		t.Fatalf("pending after the restart = %d, want the held selection", lm.pendingCount())
 	}
@@ -467,7 +467,7 @@ func TestTargetRemoveThenForget(t *testing.T) {
 	app := NewApp(st, locks)
 
 	// An installed item in the target being removed.
-	m := installFirst(t, resize(t, app.Initial(""), 120, 30))
+	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 	lm := m.(*model)
 	if lm.target != targetB {
 		t.Fatalf("target = %q, want B", lm.target)
@@ -563,7 +563,7 @@ func TestTargetForgetAlone(t *testing.T) {
 	app := NewApp(st, locks)
 
 	// An installed item with its file in the target being forgotten.
-	m := installFirst(t, resize(t, app.Initial(""), 120, 30))
+	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 
 	// esc cancels the dialog without forgetting.
 	lm := drive(t, m, "t").(*model)
@@ -612,7 +612,7 @@ func TestTargetForgettingTheOnlyTargetStartsTheFirstRun(t *testing.T) {
 
 	// The screen runs at the medium width: the first run's explanation
 	// renders whole (6.1).
-	m := installFirst(t, resize(t, app.Initial(""), 100, 30))
+	m := installFirst(t, resize(t, app.Initial(), 100, 30))
 	lm := drive(t, m, "t").(*model)
 	lm.list.cursor = targetIndex(t, lm, targetA)
 	lm = ctrlKey(t, lm, tea.KeyCtrlD)
@@ -647,7 +647,7 @@ func TestTargetRemoveWithNoItemsForgetsAtOnce(t *testing.T) {
 
 	// The first option over a target with no installed items: the summary
 	// would confirm an empty apply, so the forget goes at once.
-	lm := drive(t, resize(t, app.Initial(""), 120, 30), "t").(*model)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "t").(*model)
 	lm.list.cursor = targetIndex(t, lm, targetB)
 	lm = ctrlKey(t, lm, tea.KeyCtrlD)
 	joined := strings.Join(lm.dialog.lines(120, lm.set), "\n")

@@ -256,7 +256,7 @@ With no kit registered, the tree contains only `+ add kit`, and the body explain
  enter add kit · ctrl+p commands                                                            q quit
 ```
 
-Starting penates with a kit path as the argument opens 6.2 with the path filled in.
+The first run opens on this screen; `enter` on `+ add kit` leads into 6.2.
 
 ### 6.2 Adding a kit
 

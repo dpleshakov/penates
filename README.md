@@ -101,17 +101,21 @@ only the declared contributions.
 
 ## Running
 
-No releases yet — build from source and start with a kit path:
+No releases yet — build from source:
 
 ```
-go run ./cmd/penates /path/to/my-opencode-kit
+go run ./cmd/penates
 ```
 
-The first run shows the kit's preview and proposes the `target_hint` it
-declares: confirm or edit the target directory, and the kit attaches there.
-With no kit registered, the screen explains what a kit is and offers
-`+ add kit` with directory completion and a live preview. Without arguments,
-penates opens the target that was active when it last exited.
+With no arguments penates opens the terminal UI. The first run explains what
+a kit is and offers `+ add kit`: type the kit's directory — with completion
+and a live preview — confirm or edit the target directory the kit's
+`target_hint` proposes, and the kit attaches there. On later runs penates
+opens the target that was active when it last exited.
+
+`go run ./cmd/penates version` prints the version of the binary; a first
+argument that names no command is rejected with one `Error:` line naming
+what to run.
 
 ## Development
 

@@ -41,10 +41,9 @@ func NewApp(st *state.Store, locks *lock.Store) *App {
 	return &App{State: st, Locks: locks}
 }
 
-// Initial builds the first screen: the add-kit input prefilled when a kit
-// path is given, otherwise the last active target (11), or the first-run
-// state when nothing is registered.
-func (a *App) Initial(kitPath string) tea.Model {
+// Initial builds the first screen: the last active target (11), or the
+// first-run state — the add-kit row (6.1) — when nothing is registered.
+func (a *App) Initial() tea.Model {
 	m := &model{
 		app:            a,
 		set:            SetFromEnv(os.Getenv),
@@ -63,22 +62,6 @@ func (a *App) Initial(kitPath string) tea.Model {
 		return m
 	}
 	m.reg = reg
-
-	if kitPath != "" {
-		k, err := kit.Load(expandHome(kitPath))
-		if err != nil {
-			m.errLine = err.Error()
-			m.startAddKit(kitPath)
-			return m
-		}
-		if t, ok := attachmentTarget(reg, k.Name); ok {
-			m.enterTarget(t)
-			m.offerRestore()
-			return m
-		}
-		m.startAddKit(kitPath)
-		return m
-	}
 
 	paths := reg.TargetPaths()
 	switch {
@@ -924,16 +907,6 @@ func attachedTo(reg *state.Registry, kitName, target string) bool {
 		}
 	}
 	return false
-}
-
-// attachmentTarget returns the target of the kit's most recent attachment.
-func attachmentTarget(reg *state.Registry, kitName string) (string, bool) {
-	for i := len(reg.Attachments) - 1; i >= 0; i-- {
-		if a := reg.Attachments[i]; a.Kit == kitName {
-			return a.Target, true
-		}
-	}
-	return "", false
 }
 
 // enterTarget loads everything the tree of one target shows: the registry,

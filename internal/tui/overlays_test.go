@@ -76,7 +76,7 @@ func TestPaletteOpensAndFilters(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 	lm = drive(t, lm, "ctrl+p").(*model)
 	if lm.palette == nil {
 		t.Fatal("ctrl+p opened no palette")
@@ -132,7 +132,7 @@ func TestPaletteTargetCommands(t *testing.T) {
 	}
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 
 	// Switch target opens the list (8.1).
 	lm = runPalette(t, lm, 3).(*model)
@@ -181,7 +181,7 @@ func TestPaletteKitCommandsAndPicker(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 
 	// Edit kit path on the kit row opens the relocation input (6.6).
 	lm = runPalette(t, lm, 2).(*model)
@@ -241,7 +241,7 @@ func TestPaletteApplyClearHelpQuit(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 
 	// Select the first item, then Apply runs the summary (10.1).
 	lm = drive(t, lm, "down", "space").(*model)
@@ -292,7 +292,7 @@ func TestHelpScreen(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	lm := resize(t, app.Initial(""), 100, 30).(*model)
+	lm := resize(t, app.Initial(), 100, 30).(*model)
 	lm = drive(t, lm, "?").(*model)
 	if !lm.helpOpen {
 		t.Fatal("? opened no help")
@@ -336,7 +336,7 @@ func TestRescanNoticeDiff(t *testing.T) {
 
 	// Install both items, then unselect beta: the held selection of alpha
 	// stays, the rescan must not drop it.
-	lm := driveAll(t, resize(t, app.Initial(""), 100, 30),
+	lm := driveAll(t, resize(t, app.Initial(), 100, 30),
 		"down", "space", "a", "enter", "enter",
 		"down", "down", "space", "a", "enter", "enter",
 		"down", "down", "space").(*model)
@@ -393,7 +393,7 @@ func TestAttachUndoNotice(t *testing.T) {
 
 	// The attach of 6.2 through the palette's Add kit: the notice offers
 	// the undo (11.2).
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 	lm = runPalette(t, lm, 0).(*model)
 	lm.pathInput.SetValue(kitDir)
 	lm = drive(t, lm, "enter").(*model)
@@ -444,7 +444,7 @@ func TestDetachUndoNotice(t *testing.T) {
 
 	// The detach of a kit without installed items is immediate (6.7) and
 	// its notice offers the undo (11.2).
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 	lm = drive(t, lm, "d").(*model)
 	if got := lm.notice.Text(); got != "Detached ex." {
 		t.Fatalf("detach notice = %q", got)
@@ -492,7 +492,7 @@ func TestRestoreStartupDialog(t *testing.T) {
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
 	// The startup opens the same offer switching opens (11.1).
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 	if lm.dialog == nil || lm.dialog.kind != dialogRestore {
 		t.Fatal("the startup opened no restore dialog")
 	}
@@ -541,7 +541,7 @@ func TestRestoreEscDiscards(t *testing.T) {
 
 	// esc starts with none (11.1) and reports the discard on the notice
 	// line.
-	lm := resize(t, app.Initial(""), 120, 30).(*model)
+	lm := resize(t, app.Initial(), 120, 30).(*model)
 	lm = drive(t, lm, "esc").(*model)
 	if lm.dialog != nil {
 		t.Fatal("esc did not close the restore dialog")
@@ -575,7 +575,7 @@ func TestQuitDialog(t *testing.T) {
 
 	// The startup opens the restore offer with the pending actions; the
 	// test takes it before driving the tree.
-	lm := acceptRestore(t, resize(t, app.Initial(""), 120, 30))
+	lm := acceptRestore(t, resize(t, app.Initial(), 120, 30))
 
 	// q with pending item actions opens the dialog of 11.3, Quit chosen.
 	lm = drive(t, lm, "q").(*model)
@@ -625,7 +625,7 @@ func TestDoubleCtrlC(t *testing.T) {
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
 	// The startup opens the restore offer; the test takes it first.
-	lm := acceptRestore(t, resize(t, app.Initial(""), 120, 30))
+	lm := acceptRestore(t, resize(t, app.Initial(), 120, 30))
 
 	// The first ctrl+c arms the quit and shows the notice (12.1); it does
 	// not quit and opens no dialog.
@@ -669,7 +669,7 @@ func TestReconcileNotice(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	driveAll(t, resize(t, app.Initial(""), 100, 30), "down", "space", "a", "enter", "enter")
+	driveAll(t, resize(t, app.Initial(), 100, 30), "down", "space", "a", "enter", "enter")
 
 	// The interruption: the update of alpha moved the content in and left
 	// a staged temp file, the record still holds 1.0.0.
@@ -682,7 +682,7 @@ func TestReconcileNotice(t *testing.T) {
 	}
 
 	// The next start reconciles and reports what it found (11.2).
-	lm := resize(t, app.Initial(""), 100, 30).(*model)
+	lm := resize(t, app.Initial(), 100, 30).(*model)
 	want := "Reconciled after an interrupted apply: alpha recorded as 1.0.0."
 	if got := lm.notice.Text(); got != want {
 		t.Fatalf("reconcile notice =\n%q\nwant\n%q", got, want)

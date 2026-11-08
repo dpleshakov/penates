@@ -2,12 +2,6 @@
 
 Accepted work that has not started yet, in priority order.
 
-### `release-pipeline`
-**Goal:** One-command releases: archives for every platform, checksums, and a release workflow that turns the unreleased changelog section into a draft release.
-**Context:** Blocked until the distribution channels are decided (concept.md, open questions); model the setup on a proven goreleaser and release-workflow pattern.
-**Blocked until:** the distribution decision
-**Added:** 2026-11-04, in the walking-skeleton plan
-
 ### `ascii-detect`
 **Goal:** Decide whether penates detects a terminal that cannot render the Unicode glyph set — Windows console code page, Unix locale — and switches to the ASCII set without `PENATES_ASCII=1`.
 **Context:** v1 ships the variable alone (docs/tui-screens.md, 3.3). The sketched scheme, if detection is wanted: `PENATES_ASCII` overrides everything; on Windows, a console output code page other than 65001 selects the ASCII set; on Unix, an encoding other than UTF-8 in LC_ALL, LC_CTYPE, or LANG does. The open question is less feasibility than need: whether users run terminals that are both broken for Unicode and not known to them. Decide after the new TUI sees real use.

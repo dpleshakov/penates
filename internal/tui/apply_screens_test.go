@@ -244,7 +244,7 @@ func TestApplyProgressStepping(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a")
 	lm, cmd := confirmAll(t, m)
 
@@ -306,7 +306,7 @@ func TestApplyExcludesAtPerformTime(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "down", "down", "space", "answered", "enter", "a")
 	lm, cmd := confirmAll(t, m)
 
@@ -369,7 +369,7 @@ func TestApplyFailsBeforeTheSteps(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a")
 	lm, cmd := confirmAll(t, m)
 
@@ -435,7 +435,7 @@ func TestProgressKeys(t *testing.T) {
 	}
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a")
 	mm, _ := m.Update(key("enter"))
 	lm := mm.(*model)
@@ -486,7 +486,7 @@ func TestRecordOnExit(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	// Nothing applied yet: nothing prints.
-	m := resize(t, app.Initial(kitDir), 100, 30)
+	m := startWithKit(t, app, kitDir, 100, 30)
 	if rec := ExitRecord(m); rec != "" {
 		t.Fatalf("the empty session record = %q", rec)
 	}

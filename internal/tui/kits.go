@@ -331,8 +331,8 @@ func (m *model) proceedAdd() tea.Cmd {
 		return m.showPreviewView()
 	}
 	// The comparison of 6.2 is between two paths: the hint and the
-	// current target. A screen that opened no target yet — the kit-path
-	// argument of 6.1 — attaches at the hint and moves to it.
+	// current target. A screen that opened no target yet attaches at
+	// the hint and moves to it.
 	hint, ok := absPath(p.kit.TargetHint)
 	switch {
 	case ok && m.target == "":

@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
 ### Added
 - The binary now ships its own documentation as a built-in kit: on every start it is unpacked into the penates data directory, registered under the reserved name `penates`, and kept in step with the binary's content. Attaching and installing its items is the user's choice.
 - The built-in kit carries its content: a product reference installing into `skills/penates/` and a kit-authoring guide installing into `skills/penates-kit-authoring/`.

@@ -96,7 +96,7 @@ current [Unreleased] section of CHANGELOG.md; on a scratch copy of the
 changelog, release-section inserts `## [X.Y.Z] - YYYY-MM-DD` directly below
 [Unreleased] and refuses a duplicate version, an empty [Unreleased], and a
 missing [Unreleased] heading.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-05 `goreleaser-config`
 **Description:** Port .goreleaser.yaml: project_name penates; one build from
@@ -115,7 +115,7 @@ penates v{{ .Version }} with no footer.
 clean tree; each of the six dist binaries reports the snapshot version
 through `penates version` and the linux/amd64 one lists the third-party
 modules through `penates licenses`; `make clean` restores the tree.
-**Status:** Pending
+**Status:** In progress
 
 ### TASK-06 `release-workflow`
 **Description:** Port .github/workflows/release.yml: workflow_dispatch with a

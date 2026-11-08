@@ -1,6 +1,6 @@
 # 2026-11-08-tasks-release-pipeline.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -154,4 +154,4 @@ reads as user-facing.
 error doctrine, and the full releasing chapter; AGENTS.md references it;
 concept.md has no distribution open question; the document references agree
 with each other.
-**Status:** In progress
+**Status:** Done

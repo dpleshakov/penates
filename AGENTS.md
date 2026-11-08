@@ -1,4 +1,4 @@
-<!-- author: dpleshakov, version: 0.1 -->
+<!-- author: dpleshakov, version: 0.2 -->
 
 # Agent instructions
 
@@ -7,9 +7,9 @@ manually follow the same rules where they apply.
 
 ## Commands
 
-- Build: `go build ./...`
-- Test: `go test ./...`
-- Lint: `golangci-lint run`; format: `golangci-lint fmt`
+The build, check, and release handbook is `CONTRIBUTING.md`: the make targets, the
+setup, the code rules, and the release process. `make check` is the whole gate; CI runs
+exactly it.
 
 ## Public repository
 

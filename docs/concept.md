@@ -395,7 +395,8 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 
 1. **Shared file name variants.** A harness may accept several names for the same file, for example `opencode.json` and `opencode.jsonc`. The kit currently declares a single name.
 2. **Section duplicate check.** The heading comparison in 7.3 may require refinement after practical use.
-3. **Distribution channels.** Beyond building from source, how the binary reaches users is undecided.
+
+Closed: **distribution channels** — the binary reaches users through the GitHub Releases archives of the six release platforms; the release process is in `CONTRIBUTING.md`.
 
 ## Appendix. Name
 

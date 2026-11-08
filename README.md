@@ -101,11 +101,9 @@ only the declared contributions.
 
 ## Running
 
-No releases yet — build from source:
-
-```
-go run ./cmd/penates
-```
+Prebuilt binaries for Linux, Windows, and macOS — amd64 and arm64 — are on
+the [releases](https://github.com/dpleshakov/penates/releases) page; with Go
+installed, `go run ./cmd/penates` runs the same interface from source.
 
 With no arguments penates opens the terminal UI. The first run explains what
 a kit is and offers `+ add kit`: type the kit's directory — with completion
@@ -113,9 +111,13 @@ and a live preview — confirm or edit the target directory the kit's
 `target_hint` proposes, and the kit attaches there. On later runs penates
 opens the target that was active when it last exited.
 
-`go run ./cmd/penates version` prints the version of the binary; a first
-argument that names no command is rejected with one `Error:` line naming
-what to run.
+`penates version` prints the version and the commit the binary was built
+from — `penates dev (unknown)` on a plain `go build`. `penates licenses`
+prints the components included in the binary — penates, the Go standard
+library and runtime, and the third-party modules — with the license text of
+each; the third-party texts are embedded only in the release builds, and a
+build from source says so and points at the releases page. A first argument
+that names no command is rejected with one `Error:` line naming what to run.
 
 ## Development
 

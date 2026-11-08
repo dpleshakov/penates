@@ -1,0 +1,75 @@
+version: 2
+
+project_name: penates
+
+before:
+  hooks:
+    # go-licenses generates the third-party licenses each binary embeds (see
+    # the build pre-hook). It is installed for the platform goreleaser runs on:
+    # `go run` in the pre-hook would build it for the target's GOOS instead,
+    # and a binary for another platform cannot be executed. The pin is shared
+    # with tools/check-licenses.go, and the two change together.
+    - go install github.com/google/go-licenses/v2@v2.0.1
+
+builds:
+  - id: penates
+    main: ./cmd/penates
+    binary: penates
+    # The dependencies are pure Go and cross-compilation needs no C toolchain;
+    # pinning this keeps the build independent of the runner environment.
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -X main.version={{ .Version }} -X main.commit={{ .Commit }}
+    # The licenses of the third-party modules linked into this target, saved
+    # where internal/licenses embeds them for it. GOOS and GOARCH make
+    # go-licenses follow the target's dependencies, which differ by platform.
+    # The targets build in parallel, and each writes to a directory of its
+    # own; --force replaces what an earlier build left there. A hook runs
+    # without a shell, so nothing here may rely on one.
+    #
+    # The two --ignore flags make the same exceptions
+    # tools/check-licenses.go makes: the penates module itself and
+    # github.com/mattn/go-localereader, whose MIT license the module carries
+    # only as README text, so go-licenses finds no license file.
+    hooks:
+      pre:
+        - cmd: go-licenses save ./cmd/penates --save_path=internal/licenses/embed/{{ .Os }}-{{ .Arch }}/third-party --ignore github.com/dpleshakov/penates --ignore github.com/mattn/go-localereader --force
+          env:
+            - "GOOS={{ .Os }}"
+            - "GOARCH={{ .Arch }}"
+          output: true
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: penates
+    name_template: "penates-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # The archive unpacks into a directory named like it, rather than
+    # scattering its files into the directory it is unpacked in.
+    wrap_in_directory: true
+    # Only what a user needs beside the binary. The documentation lives on
+    # GitHub, and the release page carries the changelog section; the
+    # third-party licenses are embedded in the binary (penates licenses).
+    files:
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: dpleshakov
+    name: penates
+  name_template: "penates v{{ .Version }}"
+  # Every release is reviewed and published by hand.
+  draft: true

@@ -115,7 +115,7 @@ penates v{{ .Version }} with no footer.
 clean tree; each of the six dist binaries reports the snapshot version
 through `penates version` and the linux/amd64 one lists the third-party
 modules through `penates licenses`; `make clean` restores the tree.
-**Status:** In progress
+**Status:** Done
 
 ### TASK-06 `release-workflow`
 **Description:** Port .github/workflows/release.yml: workflow_dispatch with a
@@ -133,7 +133,7 @@ steps through the environment, never through ${{ }} inside a run body.
 order under penates names; the embedded-licenses step checks bubbletea; no
 run body interpolates the input directly; permissions, concurrency, and the
 main-only guard match the tfscli file.
-**Status:** Pending
+**Status:** In progress
 
 ### TASK-07 `contributing-docs`
 **Description:** Create CONTRIBUTING.md on the tfscli pattern with the

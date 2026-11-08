@@ -78,9 +78,13 @@ public-repository policy, the documentation duty, the architecture rules, and th
 style — and live in `AGENTS.md`, not here.
 
 **Dependencies.** The stack and its rationale are recorded in `docs/architecture.md`; a
-new dependency is a decision recorded there, not a `go get`. A dependency that lands
-must pass `make licenses` on all six platforms; a package whose license go-licenses
-cannot detect is a decision to raise, and the exception lives in
+new dependency is a decision recorded there, not a `go get`. The analysis behind the
+decision answers, for the module in question: what it does that the standard library or
+internal code cannot; what dropping it would cost later; who maintains it and how
+actively; and whether its license passes the gate. The result is a row of the dependency
+register in `docs/architecture.md`, added in the same commit as the dependency. A
+dependency that lands must pass `make licenses` on all six platforms; a package whose
+license go-licenses cannot detect is a decision to raise, and the exception lives in
 `tools/check-licenses.go` next to the allowed list.
 
 ## Project documents

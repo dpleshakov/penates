@@ -17,7 +17,7 @@ holds no notable project named penates.
 | Language and distribution | Go 1.27, single static binary | Fixed by the concept's goals. Cross-compiles to Windows, Linux, and macOS without runtime dependencies. |
 | TUI | [Bubble Tea](https://github.com/charmbracelet/bubbletea) with `bubbles` and `lipgloss` | The screens are forms and lists driven by application state (register target, select items, apply); the update/view loop models this directly. `tview` targets widget-heavy dashboards and pulls a larger dependency graph; `tcell` alone would mean hand-rolling lists and inputs. |
 | Command line | [cobra](https://github.com/spf13/cobra) | The binary takes subcommands — `version` today, `licenses` next — beside the argument-free TUI. Cobra owns the command tree, the help, and shell completion; what it lacks — the one-line `Error:` contract and the suggestion wording — penates implements on top of it. Hand-rolled parsing would carry all of that again per command. |
-| YAML | [goccy/go-yaml](https://github.com/goccy/go-yaml) | Actively maintained; decode errors carry positions, which validation messages shown to the kit author need. `gopkg.in/yaml.v3` is frozen upstream. |
+| YAML | [goccy/go-yaml](https://github.com/goccy/go-yaml) | Actively maintained; decode errors carry positions, which validation messages shown to the kit author need. The frozen `gopkg.in/yaml.v3` continues as `go.yaml.in/yaml/v3` under Go-team stewardship; a swap was reviewed on 2026-11-08 and not taken. |
 | JSONC | [hujson](https://github.com/tailscale/hujson) wrapped by `internal/jsonc` | Parses JSONC into a comment-preserving value tree and re-emits it, which partial edits of shared files require (concept: json contributions). The wrapper edits the tree in place, so parts no edit touched pack back byte for byte; hujson's own patch pipeline recommends reformatting the whole file and would not preserve the original bytes. |
 | Version ordering | `golang.org/x/mod/semver` | Canonical implementation; the concept needs version comparison only. |
 | Tests | standard `testing` + [`go-cmp`](https://github.com/google/go-cmp) | Table-driven tests; `go-cmp` for readable diffs of plans, locks, and snapshots. |
@@ -38,6 +38,26 @@ Known risks:
 - `to` paths are slash-separated data (concept: items). They are converted to platform paths
   only at the file-system boundary, in `internal/target` and `internal/apply`; the
   Windows leg of the CI matrix guards the conversion.
+
+### Dependency register
+
+Every direct dependency of `go.mod`, in the file's order, with the notes the review of
+2026-11-08 left on it. Indirect dependencies follow from these and are covered by the
+license gate. Adding or replacing a direct dependency follows the Dependencies rule in
+[CONTRIBUTING.md](../CONTRIBUTING.md) and updates this register in the same commit.
+
+| Module | Scope | License | Notes |
+|---|---|---|---|
+| `github.com/charmbracelet/bubbles` | production | MIT | Used for `textinput` only. v1.0.0 is the final feature release: the component set is frozen upstream — stable, not abandoned. |
+| `github.com/charmbracelet/bubbletea` | production | MIT | The TUI runtime the whole interface is built on; the de-facto standard Go TUI framework, backed by Charm. Replacing it means rewriting the interface. |
+| `github.com/charmbracelet/lipgloss` | production | MIT | Palette and color rendering of the visual language, including profile degradation and NO_COLOR; one production file (`internal/tui/visual.go`). |
+| `github.com/charmbracelet/x/ansi` | production | MIT | Display-width measurement, truncation, and wrapping. The v0.x line may still change its API between minor versions. |
+| `github.com/goccy/go-yaml` | production | MIT | Decodes kit manifests; the swap to `go.yaml.in/yaml/v3` was reviewed on 2026-11-08 and not taken. |
+| `github.com/google/go-cmp` | tests | BSD-3-Clause | Readable diffs of plans, locks, and snapshots; not linked into the release binary. |
+| `github.com/muesli/termenv` | tests | MIT | Direct only so tests can force color profiles; production code reaches it through lipgloss. Maintenance mode upstream; `charmbracelet/colorprofile` is its successor. |
+| `github.com/spf13/cobra` | production | Apache-2.0 | Command tree, help, suggestions, and shell completion. The surface is thin — three commands, no flags — kept for what cobra gives without it. |
+| `github.com/tailscale/hujson` | production | BSD-3-Clause | The JSONC parser behind `internal/jsonc`; the reference implementation of the JWCC format, from Tailscale. No tagged releases: the version is a pseudo-version pinned by `go.sum`. |
+| `golang.org/x/mod` | production | BSD-3-Clause | The `semver` package only: version ordering for kits. |
 
 ## Architecture
 

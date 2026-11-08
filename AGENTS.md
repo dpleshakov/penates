@@ -1,4 +1,4 @@
-<!-- author: dpleshakov, version: 0.2 -->
+<!-- author: dpleshakov, version: 0.3 -->
 
 # Agent instructions
 
@@ -31,6 +31,9 @@ format that file defines.
 - `internal/plan` performs no I/O: it receives kits, lock, and the target snapshot as
   values (see `docs/architecture.md`).
 - No package knows any harness; destination paths come from kit data only.
+- A new direct dependency is a decision recorded in the dependency register of
+  `docs/architecture.md`, not a `go get`; the analysis it needs is defined in
+  `CONTRIBUTING.md`.
 
 ## Commits
 

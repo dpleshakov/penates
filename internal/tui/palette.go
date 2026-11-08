@@ -29,13 +29,17 @@ type paletteCommand struct {
 	run      func(m *model, kit string) tea.Cmd
 }
 
-// paletteCommands is the fixed command set of 9, in the order the palette
+// paletteCommands is the fixed command set of 14, in the order the palette
 // lists them before a search narrows it.
 func paletteCommands() []paletteCommand {
 	return []paletteCommand{
 		{name: "Add kit", run: func(m *model, _ string) tea.Cmd {
 			m.closePalette()
 			return m.startAddKit("")
+		}},
+		{name: "Attach kit", run: func(m *model, _ string) tea.Cmd {
+			m.closePalette()
+			return m.startAttachKit()
 		}},
 		{name: "Detach kit", key: "d", needsKit: true, run: func(m *model, name string) tea.Cmd {
 			m.closePalette()
@@ -47,6 +51,10 @@ func paletteCommands() []paletteCommand {
 				m.startEditKit(name, kk.Dir)
 			}
 			return nil
+		}},
+		{name: "Reset builtin kit", run: func(m *model, _ string) tea.Cmd {
+			m.closePalette()
+			return m.resetBuiltinFlow()
 		}},
 		{name: "Switch target", key: "t", run: func(m *model, _ string) tea.Cmd {
 			m.closePalette()
@@ -240,9 +248,11 @@ func (m *model) kitUnderCursor() string {
 	}
 }
 
-// kitPick asks which kit of the current target a palette command acts on
-// (9: the kit commands ask for one outside a kit). The box lists the kit
-// names; enter runs the command on the chosen one, esc cancels.
+// kitPick asks which kit a palette command acts on (9: the kit commands
+// ask for one outside a kit). The box lists the kit names — the kits of
+// the current target for the kit commands, the registered kits not
+// attached to it for Attach kit; enter runs the command on the chosen
+// one, esc cancels.
 type kitPick struct {
 	run    func(m *model, kit string) tea.Cmd
 	kits   []string

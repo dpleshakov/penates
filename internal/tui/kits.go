@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/state"
 )
@@ -385,7 +386,9 @@ func (m *model) showPreviewView() tea.Cmd {
 
 // openAttachDialog opens the dialog of 6.3: the kit proposes another
 // target than the current one. The first option reads "Attach to X and
-// switch to it" when that target is already registered.
+// switch to it" when that target is already registered. With no target
+// open — the first-run offer of the built-in kit — the second option is
+// gone: there is nothing to attach to anyway.
 func (m *model) openAttachDialog(k *kit.Kit) tea.Cmd {
 	hint, ok := absPath(k.TargetHint)
 	if !ok {
@@ -397,15 +400,17 @@ func (m *model) openAttachDialog(k *kit.Kit) tea.Cmd {
 		title: "Attach " + k.Name,
 		body: []string{
 			fmt.Sprintf("The kit proposes %s.", k.TargetHint),
-			fmt.Sprintf("The current target is %s.", displayPath(m.target)),
-		},
-		options: []string{
-			fmt.Sprintf("Register %s as a target and attach there", k.TargetHint),
-			fmt.Sprintf("Attach to %s anyway", displayPath(m.target)),
-			"Cancel",
 		},
 		chosen: 0,
 	}
+	d.options = []string{
+		fmt.Sprintf("Register %s as a target and attach there", k.TargetHint),
+	}
+	if m.target != "" {
+		d.body = append(d.body, fmt.Sprintf("The current target is %s.", displayPath(m.target)))
+		d.options = append(d.options, fmt.Sprintf("Attach to %s anyway", displayPath(m.target)))
+	}
+	d.options = append(d.options, "Cancel")
 	if _, ok := m.reg.Targets[hint]; ok {
 		d.options[0] = fmt.Sprintf("Attach to %s and switch to it", k.TargetHint)
 	}
@@ -415,12 +420,15 @@ func (m *model) openAttachDialog(k *kit.Kit) tea.Cmd {
 
 // attachOfferAt registers the kit and attaches it to target — RegisterKit
 // and AttachKit do the work, and AttachKit registers a new target — then
-// moves to the target when it differs from the current one. The notice
-// confirms the change and offers the undo of 11.2: u detaches the kit
-// again while the notice lives.
+// moves to the target when it differs from the current one. A kit already
+// registered (the built-in kit) skips the registration: its reserved name
+// is not RegisterKit's to write. The notice confirms the change and offers
+// the undo of 11.2: u detaches the kit again while the notice lives.
 func (m *model) attachOfferAt(o *attachOffer, target string) tea.Cmd {
-	if err := m.app.State.RegisterKit(o.kit.Name, o.kit.Dir); err != nil {
-		return m.showNotice(err.Error())
+	if _, ok := m.reg.Kits[o.kit.Name]; !ok {
+		if err := m.app.State.RegisterKit(o.kit.Name, o.kit.Dir); err != nil {
+			return m.showNotice(err.Error())
+		}
 	}
 	if err := m.app.State.AttachKit(o.kit.Name, target); err != nil {
 		return m.showNotice(err.Error())
@@ -435,6 +443,98 @@ func (m *model) attachOfferAt(o *attachOffer, target string) tea.Cmd {
 	name := o.kit.Name
 	undo := func() tea.Cmd { return m.detachKit(name) }
 	return tea.Batch(entered, m.showUndoable(fmt.Sprintf("Attached %s at %s.", name, displayPath(target)), undo))
+}
+
+// startAttachBuiltin opens the target proposal of the built-in kit: the
+// offer row of 6.1 loads the kit the startup sync registered and hands it
+// to the attach dialog. A kit that does not load names the reason instead.
+func (m *model) startAttachBuiltin() tea.Cmd {
+	kk, ok := m.reg.Kits[state.BuiltinKitName]
+	if !ok {
+		return m.showNotice("The built-in kit is not registered.")
+	}
+	k, err := kit.Load(kk.Dir)
+	if err != nil {
+		return m.showNotice(fmt.Sprintf("The built-in kit did not load: %v", err))
+	}
+	return m.openAttachDialog(k)
+}
+
+// startAttachKit opens the kit picker over the registered kits that are
+// not attached to the current target (9): enter attaches the chosen one to
+// the current target.
+func (m *model) startAttachKit() tea.Cmd {
+	if m.target == "" {
+		return m.showNotice("No target is open (press t to open or add one).")
+	}
+	attached := map[string]bool{}
+	for _, name := range m.reg.KitsFor(m.target) {
+		attached[name] = true
+	}
+	var names []string
+	for name := range m.reg.Kits {
+		if !attached[name] {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return m.showNotice("Every registered kit is attached to this target.")
+	}
+	sort.Strings(names)
+	m.kitPick = &kitPick{run: func(m *model, name string) tea.Cmd {
+		return m.attachRegistered(name)
+	}, kits: names}
+	return nil
+}
+
+// attachRegistered attaches the registered kit to the current target and
+// reloads it: the undo of 11.2 offers the detach while the notice lives.
+func (m *model) attachRegistered(name string) tea.Cmd {
+	if err := m.app.State.AttachKit(name, m.target); err != nil {
+		return m.showNotice(err.Error())
+	}
+	if err := m.reloadRegistry(); err != nil {
+		return m.showNotice(err.Error())
+	}
+	entered := m.enterTarget(m.target)
+	undo := func() tea.Cmd { return m.detachKit(name) }
+	return tea.Batch(entered, m.showUndoable(fmt.Sprintf("Attached %s at %s.", name, displayPath(m.target)), undo))
+}
+
+// resetBuiltinFlow opens the confirmation of the built-in kit reset (9):
+// the dialog names exactly what it discards. The reset itself unpacks the
+// embedded content over the managed directory.
+func (m *model) resetBuiltinFlow() tea.Cmd {
+	if m.startup == nil || !m.startup.Modified {
+		return m.showNotice("The built-in kit is not modified.")
+	}
+	dir := displayPath(builtin.KitDir(m.app.State.Dir))
+	m.dialog = &dialog{
+		kind:  dialogResetBuiltin,
+		title: "Reset built-in kit",
+		body: []string{
+			"The local edits to " + dir + " are discarded,",
+			"and the documentation this penates ships is unpacked in their place.",
+		},
+		options: []string{"Reset, discarding the local edits", "Cancel"},
+		chosen:  0,
+	}
+	return nil
+}
+
+// resetBuiltin performs the confirmed reset: the managed directory takes
+// the embedded content, the startup report clears, and the target reloads
+// so the tree shows the items of the new content.
+func (m *model) resetBuiltin() tea.Cmd {
+	if m.app.BuiltinFS == nil {
+		return m.showNotice("The embedded kit content is unavailable.")
+	}
+	if err := builtin.Reset(m.app.State.Dir, m.app.BuiltinFS); err != nil {
+		return m.showNotice(err.Error())
+	}
+	m.startup = &builtin.Report{}
+	entered := m.enterTarget(m.target)
+	return tea.Batch(entered, m.showNotice("Built-in kit reset to the content of this penates."))
 }
 
 // applyEditKit points the kit to the directory the input names (6.6): the

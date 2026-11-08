@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,6 +40,9 @@ type App struct {
 	// Startup is what the built-in kit sync found and did before the
 	// interface opened; nil when the sync did not run.
 	Startup *builtin.Report
+	// BuiltinFS is the embedded kit content the reset command unpacks
+	// over a modified managed directory; nil when nothing can be reset.
+	BuiltinFS fs.FS
 }
 
 // NewApp wires the stores.
@@ -81,6 +85,12 @@ func (a *App) Initial() tea.Model {
 	// A target that opens with saved pending actions offers their
 	// restoration at startup, the way switching to it does (11.1).
 	m.offerRestore()
+	// What the built-in kit sync found shows on the notice line unless
+	// something more urgent already holds it — the reconciliation of an
+	// interrupted apply, for example.
+	if m.startup != nil && len(m.startup.Notices) > 0 && !m.notice.Visible() {
+		m.showNotice(strings.Join(m.startup.Notices, "  ·  "))
+	}
 	return m
 }
 
@@ -887,6 +897,10 @@ func (m *model) openDetails() tea.Cmd {
 	case KindAddKit:
 		// 12.4: enter on the add-kit row opens the path input.
 		return m.startAddKit("")
+	case KindAttachBuiltin:
+		// 6.1: enter on the offer row attaches the built-in kit through
+		// the target proposal of its target_hint.
+		return m.startAttachBuiltin()
 	default:
 		return nil
 	}
@@ -1130,6 +1144,7 @@ func (m *model) rebuildTree() {
 		Plans:     m.plans,
 		Collapsed: m.collapsed,
 		Filter:    m.filter.Value(),
+		Builtin:   m.startup,
 	})
 	m.clampCursor()
 }
@@ -1461,13 +1476,39 @@ func (m *model) listFrame(l Layout) Frame {
 }
 
 // firstRun reports the state of 6.1: the tree holds nothing but the
-// add-kit row, and the body explains what a kit is.
+// built-in kit offer, when the built-in kit is registered and no target
+// exists yet, and the add-kit row; the body explains what a kit is.
 func (m *model) firstRun() bool {
-	return len(m.rows) == 1 && m.rows[0].Kind == KindAddKit
+	if len(m.rows) == 0 || m.rows[len(m.rows)-1].Kind != KindAddKit {
+		return false
+	}
+	if len(m.rows) == 1 {
+		return true
+	}
+	return len(m.rows) == 2 && m.rows[0].Kind == KindAttachBuiltin
+}
+
+// builtinRegistered reports whether the built-in kit sits in the registry.
+func (m *model) builtinRegistered() bool {
+	_, ok := m.reg.Kits[state.BuiltinKitName]
+	return ok
 }
 
 // firstRunLines is the explanation the body shows on the first run (6.1).
+// With the built-in kit registered it names the offer row instead of
+// claiming that nothing is registered.
 func (m *model) firstRunLines(width int) []string {
+	if m.builtinRegistered() {
+		return []string{
+			"",
+			center("penates ships its own documentation as a kit, and it is registered.", width),
+			center("Enter on its row attaches it; add your own kits below.", width),
+			"",
+			center("A kit is a directory with kit.yaml. Add one to start managing", width),
+			center("items in a harness configuration directory.", width),
+			"",
+		}
+	}
 	return []string{
 		"",
 		center("No kits are registered yet.", width),
@@ -1648,6 +1689,8 @@ func (m *model) rowKeys() string {
 			keys = append(keys, "enter details")
 		case KindAddKit:
 			keys = append(keys, "enter add kit")
+		case KindAttachBuiltin:
+			keys = append(keys, "enter attach")
 		}
 	}
 	keys = append(keys, "/ filter", "a apply", "t targets")

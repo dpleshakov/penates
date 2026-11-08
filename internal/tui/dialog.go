@@ -21,6 +21,7 @@ const (
 	dialogForgetTarget = "forgetTarget"
 	dialogRestore      = "restore"
 	dialogQuit         = "quit"
+	dialogResetBuiltin = "resetBuiltin"
 )
 
 // dialog is one open modal: the question and the options, the cursor over
@@ -73,16 +74,19 @@ func (m *model) chooseDialog() tea.Cmd {
 	switch d.kind {
 	case dialogAttach:
 		offer := m.attach
-		switch d.chosen {
-		case 0:
+		switch {
+		case d.chosen == 0:
 			// Register the proposed target and attach there (6.3): an
 			// already registered target only switches.
 			m.closeDialog()
 			return m.attachOfferAt(offer, offer.hint)
-		case 1:
-			// Attach to the current target anyway (6.3).
+		case d.chosen == 1 && m.target != "":
+			// Attach to the current target anyway (6.3); with no target
+			// open the dialog holds no such option.
 			m.closeDialog()
 			return m.attachOfferAt(offer, m.target)
+		default:
+			m.closeDialog()
 		}
 	case dialogDetach:
 		name := m.detachName
@@ -94,6 +98,12 @@ func (m *model) chooseDialog() tea.Cmd {
 			m.closeDialog()
 			return m.detachKit(name)
 		}
+	case dialogResetBuiltin:
+		if d.chosen == 0 {
+			m.closeDialog()
+			return m.resetBuiltin()
+		}
+		m.closeDialog()
 	case dialogForgetTarget:
 		t, n := m.forgetTarget, m.forgetItems
 		switch d.chosen {

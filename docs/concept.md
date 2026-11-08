@@ -299,7 +299,7 @@ Two items that claim the same file, the same block identifier, or the same JSON 
 
 ### 7.6 Explicit reset
 
-For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update. The model keeps reset available for every installed item; the interface names the key where it applies — on modified, conflict and broken items (10.2).
+For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update. The model keeps reset available for every installed item; the interface names the key where it applies — on modified, conflict and broken items (10.2). Resetting the built-in kit's directory (6.2) is a different operation with the same word, reached from the command palette.
 
 ### 7.7 Atomicity
 
@@ -354,7 +354,7 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 
 ### 10.1 First run
 
-1. The user starts penates without arguments. With nothing registered, the screen explains what a kit is and offers `+ add kit`.
+1. The user starts penates without arguments. With nothing registered, the screen explains what a kit is and offers `+ add kit`; with the built-in kit registered and no target yet, the screen also offers attaching it — one `enter` opens the target proposal of its `target_hint`, and once a target exists the offer never returns.
 2. The user enters the kit's directory; penates reads `kit.yaml` and proposes `target_hint` as the target.
 3. The user confirms or edits the target; the kit and target are registered.
 
@@ -378,12 +378,12 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 ```
 
 - The header names the application, the current target, the number of pending actions, and the help hint; the footer names the keys the row under the cursor answers, then the global keys. On a terminal below the minimum size, the screen gives way to a message stating the minimum.
-- The tree groups items under their kit's row. Each item shows its state as a glyph — available, installed, update or downgrade available, modified, conflict, broken, warning, orphan, kit unavailable — and its pending action as a separate mark at the right edge. An unreadable kit is collapsed and marked; installed items no attached kit provides form an orphans group at the end.
+- The tree groups items under their kit's row. Each item shows its state as a glyph — available, installed, update or downgrade available, modified, conflict, broken, warning, orphan, kit unavailable — and its pending action as a separate mark at the right edge. An unreadable kit is collapsed and marked; the built-in kit whose managed directory the sync reported as modified carries a `modified locally` mark, with the update named as blocked while newer embedded content waits. Installed items no attached kit provides form an orphans group at the end.
 - `space` toggles the default action of the item's status — install, update, downgrade, or the reset of a broken item. A major update opens its details with the changelog first and is selected by the second press. `d` marks an installed item for removal; `r` requests reset where the interface names the key (7.6).
 - `enter` shows the details of the row: description, status with the reason and the next step, the pending verb, tags, variables, contributions, changelog. On a wide terminal the same content sits in a pane beside the tree and follows the cursor.
 - Selecting an item with variables — or an update that introduces a new one — turns the details into a form: the fields are prefilled with the stored answers, `tab` moves between them, `enter` is accepted only when every required field holds a value, and `esc` clears the selection. The answers are remembered with the pending actions and reach the lock on apply; nothing is asked at apply time.
 - `/` filters the tree by id, tags and description; kit rows keep their groups and show the match counts.
-- `ctrl+p` opens the command palette over the fixed command set with fuzzy search: a command that acts on a kit takes the kit under the cursor, or asks for one outside it, and a command that has a direct key shows it beside the name. `?` opens the full help — the keys grouped by context and the status and pending glyph legends.
+- `ctrl+p` opens the command palette over the fixed command set with fuzzy search: a command that acts on a kit takes the kit under the cursor, or asks for one outside it, and a command that has a direct key shows it beside the name. `Attach kit` lists the registered kits not attached to the current target. `Reset builtin kit` always sits in the set and is gated at run: a run without a modification reports that there is nothing to reset, and a run with one confirms first — the confirmation names the local edits it discards, and the reset unpacks the embedded content in their place. `?` opens the full help — the keys grouped by context and the status and pending glyph legends.
 - With no kit registered, the tree holds only `+ add kit` and the body explains what a kit is. The add-kit input completes directory names, the kit previews beside the input while the path names one, and the `target_hint` it proposes is confirmed — or edited — as the target before the kit attaches (10.1).
 - Startup opens the target that was active when penates last exited, offering the saved pending actions for restoration; restored actions that no longer name anything they can act on are dropped with a notice. On a later run, the previous selection is restored as the active selection; deselecting is one key.
 - The registered targets are managed from the list that `t` opens under the header: fuzzy search over the display name and the path, the current target marked beside the counts of its kits and installed items, `+ add target` with directory completion, `ctrl+r` renaming the display name the header shows, and `ctrl+d` removing the target — its installed items are removed through the summary and the target is forgotten when the apply completes, or the target is forgotten at once, its lock deleted and its files left unmanaged. Pending actions belong to their target: switching between targets saves them for the target being left and asks nothing, and switching to a target that holds saved pending actions offers them for restoration.

@@ -191,6 +191,31 @@ func sweepLeftovers(dataDir string) {
 	}
 }
 
+// Reset discards a modified managed directory and unpacks the embedded
+// content in its place: the explicit way out of a local modification or a
+// conflict (concept: the built-in kit). The directory must be owned — a
+// stamp must name it — so a reset can never overwrite content penates did
+// not write. On return the directory is owned and stamped at the embedded
+// hash.
+func Reset(dataDir string, src fs.FS) error {
+	kitDir := KitDir(dataDir)
+	stampPath := filepath.Join(dataDir, stampName)
+	if stampHash(stampPath) == "" {
+		return fmt.Errorf("built-in kit: %s carries no stamp; it is not owned and is not reset", kitDir)
+	}
+	if err := os.RemoveAll(kitDir); err != nil {
+		return err
+	}
+	if err := unpack(dataDir, kitDir, src); err != nil {
+		return err
+	}
+	incoming, err := hashTree(src)
+	if err != nil {
+		return fmt.Errorf("built-in kit: hashing embedded content: %w", err)
+	}
+	return writeStamp(stampPath, incoming)
+}
+
 // stampHash returns the hash the stamp file records, or "" when the stamp is
 // missing or unreadable — a stamp that proves nothing proves no ownership.
 func stampHash(path string) string {

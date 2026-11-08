@@ -108,16 +108,17 @@ startup conflict report, and a "Reset builtin kit" command whose confirmation
 names exactly what it discards: the local edits to the managed directory,
 replaced by the embedded content. In the same commit: concept.md 10.1 (the
 first-run screen with the built-in offer) and 10.2 (the kit-row status and
-the reset), and 7.6 gains a one-line pointer disambiguating the two resets
+the reset), 7.6 gains a one-line pointer disambiguating the two resets
 (it resets an installed item; the built-in kit subsection resets the kit
-directory), CHANGELOG under Unreleased.
+directory), tui-screens.md 6.1 (the offer row and its mockup), 3.4 (the
+kit-row status), and 9 (the palette commands), CHANGELOG under Unreleased.
 **Definition of done:** on a fresh data dir the first-run screen offers the
 built-in kit and attaching it confirms the target_hint; "Attach kit" lists
 the registered unattached kits and attaches to the current target; a
 conflicting managed directory shows on its kit row; reset, after its
 confirmation, restores the embedded content and re-stamps; startup notices
 render; make check green.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `skill-texts`
 **Description:** Replace the placeholder texts with the real skills.

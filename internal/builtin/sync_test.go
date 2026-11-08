@@ -346,6 +346,49 @@ func TestSyncSweepsLeftovers(t *testing.T) {
 	}
 }
 
+func TestResetTakesEmbeddedContent(t *testing.T) {
+	store, err := state.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	dataDir := t.TempDir()
+	sync(t, dataDir, store, kitA)
+
+	if err := os.WriteFile(
+		filepath.Join(KitDir(dataDir), "items/reference/SKILL.md"),
+		[]byte("my local edit\n"), 0o600); err != nil {
+		t.Fatalf("editing the kit directory: %v", err)
+	}
+
+	if err := Reset(dataDir, kitB); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	if got := readKitFile(t, dataDir, "items/reference/SKILL.md"); got != "reference B\n" {
+		t.Errorf("SKILL.md = %q, want the embedded content after the reset", got)
+	}
+	hash, _ := hashTree(kitB)
+	if got := stampHash(filepath.Join(dataDir, stampName)); got != hash {
+		t.Errorf("stamp = %q, want the embedded hash after the reset", got)
+	}
+}
+
+func TestResetRefusesUnownedDirectory(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(KitDir(dataDir), 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// No stamp: the directory is not owned, and a reset must not overwrite
+	// it.
+	if err := Reset(dataDir, kitA); err == nil {
+		t.Fatal("Reset over an unowned directory succeeded")
+	}
+	if _, err := os.Stat(KitDir(dataDir)); err != nil {
+		t.Errorf("the unowned directory: %v", err)
+	}
+}
+
 func TestRegisterKitRefusesReservedName(t *testing.T) {
 	store, err := state.Open(t.TempDir())
 	if err != nil {

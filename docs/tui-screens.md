@@ -89,7 +89,7 @@ The exact verb of a pending action is shown in the details pane and in the summa
 
 An item row contains: status glyph, item id, tags, version (installed version, or `installed → kit` when they differ), description, pending action. For an item in `conflict`, `broken` or `warning`, the description column shows the reason.
 
-A kit row contains: expansion mark (`▾` expanded, `▸` collapsed), kit name, a summary of item states by glyph (for example `●2 ↑1 ✗1`), and the kit path. An unreadable kit shows `⊘ unreadable` in place of the summary and is collapsed.
+A kit row contains: expansion mark (`▾` expanded, `▸` collapsed), kit name, a summary of item states by glyph (for example `●2 ↑1 ✗1`), and the kit path. An unreadable kit shows `⊘ unreadable` in place of the summary and is collapsed. The built-in kit whose managed directory the startup sync reported as modified shows `✎ modified locally` beside its summary, with `— update blocked` added while the newer content of the binary waits for a reset (concept 6.2).
 
 The last row of the tree is `+ add kit`.
 
@@ -235,7 +235,7 @@ Status    ~ modified
 
 ### 6.1 First run
 
-With no kit registered, the tree contains only `+ add kit`, and the body explains what a kit is.
+With no kit registered, the tree contains only `+ add kit`, and the body explains what a kit is. When the built-in kit is registered (the startup sync of concept 6.2) and no target exists, its offer row stands above `+ add kit`, and the body names it.
 
 ```
  penates  no target                                                                         ? help
@@ -243,20 +243,22 @@ With no kit registered, the tree contains only `+ add kit`, and the body explain
 
 
 
-                              No kits are registered yet.
+                              penates ships its own documentation as a kit, and it is registered.
+                              Enter on its row attaches it; add your own kits below.
 
               A kit is a directory with kit.yaml. Add one to start managing
               items in a harness configuration directory.
 
 
- ▌+ add kit
+ ▌+ attach the built-in kit penates
+  + add kit
 
 
 
- enter add kit · ctrl+p commands                                                            q quit
+ enter attach · ctrl+p commands                                                            q quit
 ```
 
-The first run opens on this screen; `enter` on `+ add kit` leads into 6.2.
+The first run opens on this screen; `enter` on the offer row opens the target proposal of the built-in kit's `target_hint` (6.3), and `enter` on `+ add kit` leads into 6.2. Once a target exists the offer row is gone — the `Attach kit` command of 9 covers every later case, and a deliberate detach is never nagged.
 
 ### 6.2 Adding a kit
 
@@ -545,7 +547,9 @@ Pending actions belong to one target, because each target has its own lock. Swit
                   ╰──────────────────────────────────────────────────╯
 ```
 
-Commands: Add kit, Detach kit, Edit kit path, Switch target, Add target, Rename target, Remove target, Rescan kits, Apply, Clear pending actions, Help, Quit.
+Commands: Add kit, Attach kit, Detach kit, Edit kit path, Reset builtin kit, Switch target, Add target, Rename target, Remove target, Rescan kits, Apply, Clear pending actions, Help, Quit.
+
+**Attach kit** lists the registered kits that are not attached to the current target; `enter` attaches the chosen one. **Reset builtin kit** always sits in the set and is gated at run: a run without a modification reports that there is nothing to reset, and a run with one confirms first — the confirmation names exactly what it discards, the local edits to the managed directory, replaced by the documentation this penates ships — and the reset leaves the directory owned and stamped at the embedded content (concept 6.2).
 
 ## 10. Apply
 

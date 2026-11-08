@@ -48,7 +48,7 @@ func rewritePlainKit(t *testing.T, dir string) {
 }
 
 // runPalette opens the palette and runs the command at the fixed index,
-// walking the cursor down to it: the fixed order of 9 keeps the walk
+// walking the cursor down to it: the fixed order of 14 keeps the walk
 // deterministic without typing a search.
 func runPalette(t *testing.T, m tea.Model, index int) tea.Model {
 	t.Helper()
@@ -83,7 +83,8 @@ func TestPaletteOpensAndFilters(t *testing.T) {
 	}
 	view := lm.View()
 	for _, want := range []string{
-		"› ", "Add kit", "Detach kit", "Edit kit path", "Switch target",
+		"› ", "Add kit", "Attach kit", "Detach kit", "Edit kit path",
+		"Reset builtin kit", "Switch target",
 		"Add target", "Rename target", "Remove target", "Rescan kits",
 		"Apply", "Clear pending actions", "Help", "Quit",
 	} {
@@ -135,14 +136,14 @@ func TestPaletteTargetCommands(t *testing.T) {
 	lm := resize(t, app.Initial(), 120, 30).(*model)
 
 	// Switch target opens the list (8.1).
-	lm = runPalette(t, lm, 3).(*model)
+	lm = runPalette(t, lm, 5).(*model)
 	if lm.list == nil {
 		t.Fatal("Switch target opened no list")
 	}
 	lm = drive(t, lm, "esc").(*model)
 
 	// Add target opens the list with the input of 8.1.
-	lm = runPalette(t, lm, 4).(*model)
+	lm = runPalette(t, lm, 6).(*model)
 	if lm.list == nil || !lm.list.adding {
 		t.Fatal("Add target opened no add-target input")
 	}
@@ -150,21 +151,21 @@ func TestPaletteTargetCommands(t *testing.T) {
 	lm = drive(t, lm, "esc", "esc").(*model)
 
 	// Rename target opens the list renaming the current one.
-	lm = runPalette(t, lm, 5).(*model)
+	lm = runPalette(t, lm, 7).(*model)
 	if lm.list == nil || lm.list.renaming != target {
 		t.Fatalf("Rename target renames %q", lm.list.renaming)
 	}
 	lm = drive(t, lm, "esc", "esc").(*model)
 
 	// Remove target opens the removal dialog of 8.3 over the current one.
-	lm = runPalette(t, lm, 6).(*model)
+	lm = runPalette(t, lm, 8).(*model)
 	if lm.dialog == nil || lm.dialog.kind != dialogForgetTarget {
 		t.Fatal("Remove target opened no removal dialog")
 	}
 	lm = drive(t, lm, "esc").(*model)
 
 	// Rescan kits reports the plain count (11.2).
-	lm = runPalette(t, lm, 7).(*model)
+	lm = runPalette(t, lm, 9).(*model)
 	if got := lm.notice.Text(); got != "Rescanned 1 kit." {
 		t.Errorf("rescan notice = %q", got)
 	}
@@ -184,7 +185,7 @@ func TestPaletteKitCommandsAndPicker(t *testing.T) {
 	lm := resize(t, app.Initial(), 120, 30).(*model)
 
 	// Edit kit path on the kit row opens the relocation input (6.6).
-	lm = runPalette(t, lm, 2).(*model)
+	lm = runPalette(t, lm, 3).(*model)
 	if lm.inputKind != inputEditKit || lm.editName != "ex" {
 		t.Fatalf("input %v, edit %q; want the relocation input of ex", lm.inputKind, lm.editName)
 	}
@@ -193,7 +194,7 @@ func TestPaletteKitCommandsAndPicker(t *testing.T) {
 	// Detach kit outside a kit — the cursor sits on the add-kit row —
 	// asks for one (9): the picker lists the kits of the target, and
 	// enter runs the command on the chosen one.
-	lm = drive(t, lm, "end", "ctrl+p", "down", "enter").(*model)
+	lm = drive(t, lm, "end", "ctrl+p", "down", "down", "enter").(*model)
 	if lm.kitPick == nil || len(lm.kitPick.kits) != 1 || lm.kitPick.kits[0] != "ex" {
 		t.Fatalf("picker = %+v, want the kit ex", lm.kitPick)
 	}
@@ -207,7 +208,7 @@ func TestPaletteKitCommandsAndPicker(t *testing.T) {
 
 	// With no kit attached the question answers itself: the notice says
 	// so, no picker opens.
-	lm = drive(t, lm, "ctrl+p", "down", "enter").(*model)
+	lm = drive(t, lm, "ctrl+p", "down", "down", "enter").(*model)
 	if lm.kitPick != nil {
 		t.Fatal("a target without kits opened a picker")
 	}
@@ -245,14 +246,14 @@ func TestPaletteApplyClearHelpQuit(t *testing.T) {
 
 	// Select the first item, then Apply runs the summary (10.1).
 	lm = drive(t, lm, "down", "space").(*model)
-	lm = runPalette(t, lm, 8).(*model)
+	lm = runPalette(t, lm, 10).(*model)
 	if lm.screen != screenSummary {
 		t.Fatalf("Apply landed on %v, want the summary", lm.screen)
 	}
 	lm = drive(t, lm, "esc").(*model)
 
 	// Clear pending actions drops the item actions with a notice.
-	lm = runPalette(t, lm, 9).(*model)
+	lm = runPalette(t, lm, 11).(*model)
 	if lm.pendingCount() != 0 {
 		t.Fatalf("pending after the clear = %d", lm.pendingCount())
 	}
@@ -261,7 +262,7 @@ func TestPaletteApplyClearHelpQuit(t *testing.T) {
 	}
 
 	// Help opens the full help of 12.5.
-	lm = runPalette(t, lm, 10).(*model)
+	lm = runPalette(t, lm, 12).(*model)
 	if !lm.helpOpen {
 		t.Fatal("Help opened no help")
 	}

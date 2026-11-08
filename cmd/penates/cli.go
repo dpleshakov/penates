@@ -140,6 +140,7 @@ func runInterface(stdout io.Writer) error {
 	}
 	app := tui.NewApp(stateStore, lock.NewStore(dataDir))
 	app.Startup = &report
+	app.BuiltinFS = builtin.Content
 
 	final, err := tea.NewProgram(app.Initial(), tea.WithAltScreen()).Run()
 	if err != nil {

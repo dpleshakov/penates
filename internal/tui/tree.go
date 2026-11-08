@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -43,6 +44,9 @@ const (
 	KindItem
 	// KindAddKit is the last row of the tree (3.4).
 	KindAddKit
+	// KindAttachBuiltin is the first-run offer of the built-in kit (6.1):
+	// it stands above the add-kit row while no target exists.
+	KindAttachBuiltin
 )
 
 // Row is one line of the tree. Kind says which payload holds.
@@ -75,6 +79,12 @@ type KitRow struct {
 	// Detaching reports a kit that detaches once the apply removes its
 	// installed items (6.7).
 	Detaching bool
+	// Modified reports the built-in kit whose managed directory differs
+	// from the content it was unpacked with: the row shows "modified
+	// locally" beside its summary. UpdateBlocked adds that the binary's
+	// newer content waits for a reset (6.2).
+	Modified      bool
+	UpdateBlocked bool
 	// Orphans marks the trailing group of the items whose kit is not
 	// attached to the target (6.7). It is not a kit.
 	Orphans bool
@@ -157,6 +167,9 @@ type TreeInput struct {
 	Collapsed map[string]bool
 	// Filter is the filter text of 7.5; empty shows everything.
 	Filter string
+	// Builtin is the startup report of the built-in kit sync; nil when the
+	// sync did not run. It marks the built-in kit's row as modified.
+	Builtin *builtin.Report
 }
 
 // BuildTree builds the rows of the body (3.4): one row per kit attached to
@@ -212,6 +225,10 @@ func BuildTree(in TreeInput) []Row {
 		if k == nil {
 			g.Unreadable = true
 		}
+		if name == state.BuiltinKitName && in.Builtin != nil && in.Builtin.Modified {
+			g.Modified = true
+			g.UpdateBlocked = in.Builtin.Conflict
+		}
 		g.Collapsed = collapseOf(in.Collapsed, name, g.Unreadable)
 
 		var items []ItemRow
@@ -262,6 +279,15 @@ func BuildTree(in TreeInput) []Row {
 		}
 	}
 
+	// The first-run offer of the built-in kit (6.1): the empty tree with
+	// no target registered names the kit the startup sync registered, so
+	// attaching it is one enter away. Once a target exists the offer is
+	// gone — the Attach kit command covers every later case.
+	if reg != nil && len(names) == 0 && len(reg.Targets) == 0 {
+		if _, ok := reg.Kits[state.BuiltinKitName]; ok {
+			rows = append(rows, Row{Kind: KindAttachBuiltin})
+		}
+	}
 	return append(rows, Row{Kind: KindAddKit})
 }
 

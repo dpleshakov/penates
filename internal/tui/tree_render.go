@@ -21,6 +21,10 @@ var (
 	collapsedMark = mark{unicode: "▸", ascii: ">", role: roleDim}
 )
 
+// AttachBuiltinLabel is the label of the first-run offer row of the
+// built-in kit (6.1).
+const AttachBuiltinLabel = "+ attach the built-in kit penates"
+
 // RenderTree renders the tree rows into body lines, one line per row,
 // clipped to the layout's tree width. The columns the layout drops stay
 // out (2.2); the version column shrinks to the kit version when the pair
@@ -35,6 +39,8 @@ func RenderTree(rows []Row, l Layout, set Set) []string {
 			line = renderKitRow(r.Kit, set)
 		case KindItem:
 			line = renderItemRow(r.Item, l, set)
+		case KindAttachBuiltin:
+			line = "  " + AttachBuiltinLabel
 		default:
 			line = "  " + AddKitLabel
 		}
@@ -59,6 +65,12 @@ func renderKitRow(g KitRow, set Set) string {
 		s += "  " + StatusUnavailable.Mark(set) + " unreadable"
 	case g.Detaching:
 		s += "  " + Dim("detaching")
+	case g.Modified:
+		if g.UpdateBlocked {
+			s += "  " + StatusModified.Mark(set) + " " + Dim("modified locally — update blocked")
+		} else {
+			s += "  " + StatusModified.Mark(set) + " " + Dim("modified locally")
+		}
 	case g.Filtering:
 		s += "  " + Dim(fmt.Sprintf("%d of %d", g.Matches, g.Total))
 	default:

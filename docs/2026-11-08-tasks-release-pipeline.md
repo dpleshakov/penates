@@ -133,7 +133,7 @@ steps through the environment, never through ${{ }} inside a run body.
 order under penates names; the embedded-licenses step checks bubbletea; no
 run body interpolates the input directly; permissions, concurrency, and the
 main-only guard match the tfscli file.
-**Status:** In progress
+**Status:** Done
 
 ### TASK-07 `contributing-docs`
 **Description:** Create CONTRIBUTING.md on the tfscli pattern with the
@@ -154,4 +154,4 @@ reads as user-facing.
 error doctrine, and the full releasing chapter; AGENTS.md references it;
 concept.md has no distribution open question; the document references agree
 with each other.
-**Status:** Pending
+**Status:** In progress

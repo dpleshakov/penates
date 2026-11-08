@@ -408,10 +408,10 @@ func contributionSource(c contributionFile) (src string, kind ContributionKind, 
 	return src, kind, n
 }
 
-// validVersion reports whether v is a full semantic version — major, minor, and
-// patch present, with optional prerelease and build metadata. The x/mod
-// implementation alone would accept shortened forms such as 1.2, which the
-// version ordering needs in full.
+// ValidVersion reports whether v is a full semantic version — major,
+// minor, and patch present, with optional prerelease and build metadata.
+// The x/mod implementation alone would accept shortened forms such as 1.2,
+// which the version ordering needs in full.
 func validVersion(v string) bool {
 	x := "v" + v
 	return semver.IsValid(x) && semver.Canonical(x) == x

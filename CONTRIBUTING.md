@@ -12,7 +12,8 @@ the modules.
 | `make lint` | `go mod tidy -diff`, which fails if `go.mod` or `go.sum` drifted from the imports, and `golangci-lint run` | Before committing |
 | `make test` | Measures coverage of `internal/...` and fails below the threshold (see Code rules) | While working on tests |
 | `make licenses` | `go-licenses check` for each of the six release platforms (`tools/check-licenses.go`), which fails if a dependency linked into the binary is under a license other than MIT, BSD-3-Clause, or Apache-2.0 | Before committing a dependency change |
-| `make check` | `build`, `lint`, `test`, and `licenses` | Before pushing — CI runs exactly this |
+| `make builtin-kit` | Loads `internal/builtin/kit` through the kit reader and fails on any problem it reports, an invalid item version among them (`tools/check-builtin-kit.go`) | Before committing a change to the embedded kit |
+| `make check` | `build`, `lint`, `test`, `licenses`, and `builtin-kit` | Before pushing — CI runs exactly this |
 | `make clean` | Removes the binary, `coverage.out`, `dist/`, and the license sets a snapshot generates, through `git clean`, touching nothing else | Any time |
 
 `make check` is the whole gate: `.github/workflows/ci.yml` installs the linter, runs

@@ -1,6 +1,6 @@
 id: reference
 version: 0.1.0
-description: penates product reference (placeholder; the real text arrives with the skill-texts task)
+description: penates product reference — the model, ownership, item states, errors, keys, and state
 tags: [docs]
 vars: []
 contributes:

@@ -7,7 +7,7 @@
 #
 # Prerequisites: Go, and — for `lint` — golangci-lint v2 on PATH.
 
-.PHONY: build lint test licenses check clean
+.PHONY: build lint test licenses builtin-kit check clean
 
 # ---------------------------------------------------------------------------
 # Build
@@ -50,8 +50,14 @@ test:
 licenses:
 	go run tools/check-licenses.go
 
+# Fail when the embedded kit directory does not load clean through the kit
+# reader — its problems include invalid item versions. The tool reads the
+# source directory, which go:embed ships unchanged.
+builtin-kit:
+	go run tools/check-builtin-kit.go
+
 # Everything the project verifies, in one target. This is what CI runs.
-check: build lint test licenses
+check: build lint test licenses builtin-kit
 
 # ---------------------------------------------------------------------------
 # Clean

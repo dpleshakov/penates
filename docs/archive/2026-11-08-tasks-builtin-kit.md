@@ -1,6 +1,6 @@
 # 2026-11-08-tasks-builtin-kit.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -144,4 +144,4 @@ documentation skills. CHANGELOG under Unreleased in the same commit.
 skills install as items into a scratch target and land in
 `skills/penates/` and `skills/penates-kit-authoring/`; `make check` runs the
 builtin-kit validation; README and CHANGELOG updated in the same commit.
-**Status:** Pending
+**Status:** Done

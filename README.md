@@ -111,6 +111,12 @@ and a live preview — confirm or edit the target directory the kit's
 `target_hint` proposes, and the kit attaches there. On later runs penates
 opens the target that was active when it last exited.
 
+The binary also ships its own documentation as a kit: on every start it is
+unpacked, registered under the reserved name `penates`, and kept in step
+with the binary's content. The first run offers attaching it; its two
+skills — a product reference and a kit-authoring guide — install like any
+other items, into `skills/penates/` and `skills/penates-kit-authoring/`.
+
 `penates version` prints the version and the commit the binary was built
 from — `penates dev (unknown)` on a plain `go build`. `penates licenses`
 prints the components included in the binary — penates, the Go standard

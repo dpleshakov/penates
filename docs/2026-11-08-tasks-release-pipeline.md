@@ -74,14 +74,18 @@ the penates releases URL; make check green.
 **Description:** Port tools/check-licenses.go with ./cmd/penates, the same
 six platforms, and the same allowed list (MIT, BSD-3-Clause, Apache-2.0); the
 pinned go-licenses version is shared with .goreleaser.yaml and the two change
-together. Makefile: a `licenses` target, `check: build lint test licenses`,
-and `clean` extended to dist/ and the generated license sets. .gitignore
-gains `/internal/licenses/embed/*/third-party/`.
+together. github.com/mattn/go-localereader (windows-only, indirect through
+bubbletea) is MIT by its README alone — the v0.0.1 module ships no LICENSE
+file, so go-licenses cannot detect it; the check passes it through --ignore
+with that justification recorded in the code. Makefile: a `licenses` target,
+`check: build lint test licenses`, and `clean` extended to dist/ and the
+generated license sets. .gitignore gains
+`/internal/licenses/embed/*/third-party/`.
 **Definition of done:** from a clean checkout `make check` runs the license
 check and passes on all six platforms; `make clean` after a goreleaser
 snapshot removes dist/ and the generated sets, leaving the committed
 PLACEHOLDERs.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `release-tools`
 **Description:** Copy tools/release-section.go and tools/release-notes.go from
@@ -99,7 +103,10 @@ missing [Unreleased] heading.
 ./cmd/penates with CGO_ENABLED=0 and the version and commit ldflags; a
 before-hook installing go-licenses (same pin as check-licenses); a per-build
 pre-hook saving the target's licenses into
-internal/licenses/embed/<os>-<arch>/third-party with GOOS and GOARCH set;
+internal/licenses/embed/<os>-<arch>/third-party with GOOS and GOARCH set —
+the hook ignores github.com/dpleshakov/penates itself and
+github.com/mattn/go-localereader (MIT by README, no LICENSE file in the
+module; see TASK-03);
 goos linux, windows, darwin × goarch amd64, arm64; archives named
 penates-{{ .Version }}-{{ .Os }}-{{ .Arch }}, tar.gz with zip for windows,
 wrap_in_directory, files: LICENSE alone; checksums.txt; a draft release named

@@ -7,7 +7,7 @@
 #
 # Prerequisites: Go, and — for `lint` — golangci-lint v2 on PATH.
 
-.PHONY: build lint test check clean
+.PHONY: build lint test licenses check clean
 
 # ---------------------------------------------------------------------------
 # Build
@@ -42,16 +42,26 @@ test:
 	go tool cover -func=coverage.out
 	go run tools/check-coverage.go 70
 
+# Fail when a dependency linked into the binary on any release platform is
+# under a license outside the allowed list, which tools/check-licenses.go
+# holds. It runs go-licenses once per platform, since the dependencies differ
+# by platform, and installs it in a temporary directory, so nothing is needed
+# beforehand and go.mod is left alone.
+licenses:
+	go run tools/check-licenses.go
+
 # Everything the project verifies, in one target. This is what CI runs.
-check: build lint test
+check: build lint test licenses
 
 # ---------------------------------------------------------------------------
 # Clean
 # ---------------------------------------------------------------------------
 
-# Remove every build artifact — the binary and the coverage profile — leaving
-# the working tree as git sees it. -X limits git clean to ignored files, -d
-# lets it remove directories, and the paths restrict it to exactly these
-# artifacts, so untracked work is never touched.
+# Remove every build artifact — the binary, the coverage profile, and the dist/
+# and the third-party licenses a local goreleaser snapshot leaves — leaving
+# the working tree as git sees it. -X limits git clean to ignored files, so
+# the committed placeholders under internal/licenses/embed stay; -d lets it
+# remove directories; and the paths restrict it to exactly these artifacts,
+# so untracked work is never touched.
 clean:
-	git clean -fdX -- penates penates.exe coverage.out
+	git clean -fdX -- penates penates.exe coverage.out dist internal/licenses/embed

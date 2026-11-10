@@ -336,7 +336,7 @@ func TestRescanNoticeDiff(t *testing.T) {
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
 	// Install both items, then unselect beta: the held selection of alpha
-	// stays, the rescan must not drop it.
+	// alone remains, made against 1.0.0.
 	lm := driveAll(t, resize(t, app.Initial(), 100, 30),
 		"down", "space", "a", "enter", "enter",
 		"down", "down", "space", "a", "enter", "enter",
@@ -363,19 +363,18 @@ func TestRescanNoticeDiff(t *testing.T) {
 	}
 
 	// The rescan: alpha publishes 2.0.0, beta leaves the kit — the
-	// installed one turns into an orphan — and gamma joins it.
+	// installed one turns into an orphan — and gamma joins it. The held
+	// selection was made against 1.0.0, so the rescan drops it together
+	// with the one the kit stopped providing (11.2).
 	rewritePlainKit(t, kitDir)
 	lm = drive(t, lm, "R").(*model)
-	want := "Rescanned 1 kit: 1 new item, 1 update, 1 orphan, 1 pending action dropped."
+	want := "Rescanned 1 kit: 1 new item, 1 update, 1 orphan, 2 pending actions dropped."
 	if got := lm.notice.Text(); got != want {
 		t.Fatalf("rescan notice =\n%q\nwant\n%q", got, want)
 	}
 	pending := registryOf(t, st).Pending[target]
-	if _, ok := pending.Items["ex/gone"]; ok {
-		t.Error("the stale selection survived the rescan")
-	}
-	if _, ok := pending.Items["ex/alpha"]; !ok {
-		t.Error("the held selection of alpha did not survive the rescan")
+	if pending != nil && len(pending.Items) > 0 {
+		t.Errorf("pending after the rescan = %v, want none", pending.Items)
 	}
 }
 

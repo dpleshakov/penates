@@ -408,16 +408,21 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	app := NewApp(st, lock.NewStore(dataDir))
 
 	// Install the first item, then let the kit publish 1.1.0: the held
-	// selection turns into the update. Selecting the other kit's item
-	// adds the install: two pending actions. Both kits attach to the
-	// same target, so one dialog can offer both.
+	// selection was made against 1.0.0, so the restart drops it with the
+	// report of 11.1, and the update is selected against the new version.
+	// Selecting the other kit's item adds the install: two pending
+	// actions. Both kits attach to the same target, so one dialog can
+	// offer both.
 	driveAll(t, resize(t, app.Initial(), 120, 30), "down", "space", "a", "enter", "enter")
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
 	lm := acceptRestore(t, resize(t, app.Initial(), 120, 30))
-	if lm.pendingCount() != 1 {
-		t.Fatalf("pending after the restart = %d, want the held selection", lm.pendingCount())
+	if got := lm.notice.Text(); got != "Dropped 1 invalid pending action." {
+		t.Fatalf("restore notice = %q, want the stale selection dropped", got)
 	}
-	lm = drive(t, lm, "down", "down", "down", "down", "space").(*model)
+	if lm.pendingCount() != 0 {
+		t.Fatalf("pending after the restart = %d, want none: the stale selection went", lm.pendingCount())
+	}
+	lm = drive(t, lm, "down", "space", "down", "down", "down", "space").(*model)
 	if lm.pendingCount() != 2 {
 		t.Fatalf("pending = %d, want the update and the install", lm.pendingCount())
 	}
@@ -447,6 +452,111 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("the body misses %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestTargetRestoreChecksItemVersion(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kitDir := writeKitFiles(t, t.TempDir(), map[string]string{
+		"kit.yaml":               "name: ex\ntarget_hint: " + target + "\n",
+		"items/sel/item.yaml":    "id: sel\nversion: 1.0.0\ndescription: Selected\ncontributes:\n  - file: s.md\n    to: skills/sel/s.md\n",
+		"items/sel/s.md":         "sel v1\n",
+		"items/keep/item.yaml":   "id: keep\nversion: 1.0.0\ndescription: Keeping\ncontributes:\n  - file: k.md\n    to: skills/keep/k.md\n",
+		"items/keep/k.md":        "keep v1\n",
+		"items/legacy/item.yaml": "id: legacy\nversion: 1.0.0\ndescription: Legacy\ncontributes:\n  - file: l.md\n    to: skills/legacy/l.md\n",
+		"items/legacy/l.md":      "legacy v1\n",
+		"items/rs/item.yaml":     "id: rs\nversion: 1.0.0\ndescription: Reset\ncontributes:\n  - file: r.md\n    to: skills/rs/r.md\n",
+		"items/rs/r.md":          "rs v1\n",
+		"items/rm/item.yaml":     "id: rm\nversion: 1.0.0\ndescription: Remove\ncontributes:\n  - file: m.md\n    to: skills/rm/m.md\n",
+		"items/rm/m.md":          "rm v1\n",
+	})
+
+	st, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerKitAt(t, st, "ex", kitDir, target)
+
+	// Two installed items with their files on disk: the reset and the
+	// removal have something to act on.
+	locks := lock.NewStore(dataDir)
+	lk, err := locks.Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk.SetItem("ex/rs", &lock.Item{Version: "1.0.0", Files: map[string]string{"skills/rs/r.md": sha("rs v1\n")}})
+	lk.SetItem("ex/rm", &lock.Item{Version: "1.0.0", Files: map[string]string{"skills/rm/m.md": sha("rm v1\n")}})
+	if err := locks.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+	for id, content := range map[string]string{"rs": "rs v1\n", "rm": "rm v1\n"} {
+		dir := filepath.Join(target, "skills", id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id+".md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The pending actions a session saved against 1.0.0: the selection of
+	// sel and the reset of rs carry the version they were made against,
+	// the selection of keep matches the kit as it is, the selection of
+	// legacy and the removal of rm predate the version field.
+	if err := st.Update(func(reg *state.Registry) error {
+		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
+			"ex/sel":    {Select: true, Version: "1.0.0"},
+			"ex/keep":   {Select: true, Version: "1.0.0"},
+			"ex/legacy": {Select: true},
+			"ex/rs":     {Reset: true, Version: "1.0.0"},
+			"ex/rm":     {Remove: true},
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The kit moves on: sel, legacy and rs publish 2.0.0.
+	for id, src := range map[string]string{"sel": "s.md", "legacy": "l.md", "rs": "r.md"} {
+		itemYaml := "id: " + id + "\nversion: 2.0.0\ndescription: Bumped item\ncontributes:\n  - file: " + src + "\n    to: skills/" + id + "/" + id + ".md\n"
+		if err := os.WriteFile(filepath.Join(kitDir, "items", id, "item.yaml"), []byte(itemYaml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The start offers the restore and takes it: the two actions against
+	// 2.0.0 go with the report of 11.1, the ones that still match, the one
+	// saved without a version, and the removal stay.
+	app := NewApp(st, locks)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "enter").(*model)
+	if got := lm.notice.Text(); got != "Dropped 2 invalid pending actions." {
+		t.Fatalf("restore notice = %q, want the two stale actions dropped", got)
+	}
+	p := registryOf(t, st).Pending[target]
+	if p == nil {
+		t.Fatal("the restore dropped every pending action")
+	}
+	if _, ok := p.Items["ex/sel"]; ok {
+		t.Error("the selection made against 1.0.0 survived the restore")
+	}
+	if _, ok := p.Items["ex/rs"]; ok {
+		t.Error("the reset made against 1.0.0 survived the restore")
+	}
+	if it := p.Items["ex/keep"]; it == nil || !it.Select || it.Version != "1.0.0" {
+		t.Errorf("the selection of the unchanged item = %+v, want it kept with its version", it)
+	}
+	if it := p.Items["ex/legacy"]; it == nil || !it.Select {
+		t.Errorf("the selection saved without a version = %+v, want it accepted silently", it)
+	}
+	if it := p.Items["ex/rm"]; it == nil || !it.Remove {
+		t.Errorf("the removal = %+v, want it kept over the version change", it)
+	}
+	if lm.pendingCount() != 3 {
+		t.Errorf("pending on the screen = %d, want the three kept actions", lm.pendingCount())
 	}
 }
 

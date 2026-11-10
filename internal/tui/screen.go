@@ -670,19 +670,40 @@ func rowStatuses(rows []Row) map[string]Status {
 }
 
 // dropInvalidPending drops the saved item actions that no longer name
-// anything they can act on (11.1, 11.2) and returns how many went.
+// anything they can act on (11.1, 11.2) and returns how many went: an item
+// whose actions all go leaves the pending actions, one that keeps a
+// removal keeps its entry with the rest of the marks cleared.
 func (m *model) dropInvalidPending() (int, error) {
 	p := m.pendingActions()
 	if p == nil || len(p.Items) == 0 {
 		return 0, nil
 	}
 	var gone []string
+	kept := map[string]*state.ItemPending{}
 	for key, item := range p.Items {
-		if !m.validPendingAction(key, item) {
+		sel, reset, remove := m.validPendingAction(key, item)
+		if sel == item.Select && reset == item.Reset && remove == item.Remove {
+			continue
+		}
+		out := &state.ItemPending{Version: item.Version}
+		if sel {
+			out.Select = true
+			out.Answers = item.Answers
+		}
+		if reset {
+			out.Reset = true
+		}
+		if remove {
+			out.Remove = true
+		}
+		if !out.Select && !out.Reset && !out.Remove && len(out.Answers) == 0 {
 			gone = append(gone, key)
+		} else {
+			kept[key] = out
 		}
 	}
-	if len(gone) == 0 {
+	dropped := len(gone) + len(kept)
+	if dropped == 0 {
 		return 0, nil
 	}
 	sort.Strings(gone)
@@ -693,6 +714,9 @@ func (m *model) dropInvalidPending() (int, error) {
 		}
 		for _, key := range gone {
 			delete(p.Items, key)
+		}
+		for key, out := range kept {
+			p.Items[key] = out
 		}
 		if len(p.Items) == 0 && len(p.Deferred) == 0 {
 			delete(reg.Pending, m.target)
@@ -705,25 +729,27 @@ func (m *model) dropInvalidPending() (int, error) {
 		return 0, err
 	}
 	if err := m.reloadRegistry(); err != nil {
-		return len(gone), err
+		return dropped, err
 	}
 	m.refresh()
-	return len(gone), nil
+	return dropped, nil
 }
 
-// validPendingAction reports whether one saved action still names
-// something it can act on (11.1): a removal and a reset need the
-// installed record, a selection needs its kit item — a kit that stopped
-// providing the item, or one that no longer reads, leaves the selection
-// nothing to plan for. Whether the item still holds the version it held
-// when the action was saved the state does not record, so a version
-// change alone keeps the action.
-func (m *model) validPendingAction(key string, item *state.ItemPending) bool {
+// validPendingAction reports which saved actions of one item still name
+// something they can act on (11.1): the selection needs its kit item, the
+// reset and the removal the installed record, and the selection and the
+// reset the version they were saved against — an item that moved to
+// another version since leaves the action nothing to act on as it was
+// chosen. The removal is planned from the lock alone (9.2) and survives
+// every version change. Actions saved before the version was recorded
+// hold none and are accepted as they are.
+func (m *model) validPendingAction(key string, item *state.ItemPending) (sel, reset, remove bool) {
+	kitIt := m.kitItem(key)
+	stale := kitIt != nil && item.Version != "" && item.Version != kitIt.Version
 	installed := m.lk != nil && m.lk.Items[key] != nil
-	if (item.Remove || item.Reset) && installed {
-		return true
-	}
-	return item.Select && m.kitItem(key) != nil
+	return item.Select && kitIt != nil && !stale,
+		item.Reset && installed && !stale,
+		item.Remove && installed
 }
 
 // toKitRow moves the cursor to the kit row above the cursor (12.3).
@@ -783,6 +809,7 @@ func (m *model) spaceOnItem(item ItemRow) tea.Cmd {
 		} else {
 			it.Select = true
 		}
+		it.Version = item.KitVersion
 	})
 	if def != PendingReset {
 		if c := m.openForm(item.Key); c != nil {
@@ -816,7 +843,12 @@ func (m *model) toggleReset() tea.Cmd {
 	if r.Kind != KindItem || !Resettable(r.Item) {
 		return nil
 	}
-	return m.setPending(r.Item.Key, func(it *state.ItemPending) { it.Reset = !it.Reset })
+	return m.setPending(r.Item.Key, func(it *state.ItemPending) {
+		it.Reset = !it.Reset
+		if it.Reset {
+			it.Version = r.Item.KitVersion
+		}
+	})
 }
 
 // collapseKit sets one group's collapse state and rebuilds the tree.

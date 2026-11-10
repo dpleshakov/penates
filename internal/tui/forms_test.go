@@ -299,14 +299,14 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 	if r := itemRow(m, "ex/varitem"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)
 	}
-
-	// The held selection unselects first; selecting the update opens the
-	// form with the stored answers and the new field empty.
-	m = drive(t, m, "down", "down", "space").(*model)
-	if m.formOpen {
-		t.Fatal("space unselected instead")
+	// The held selection was made against 1.0.0: the restore drops it and
+	// reports it (11.1). Selecting the update opens the form prefilled
+	// with the answers the apply recorded in the lock, the new field
+	// empty.
+	if got := m.notice.Text(); got != "Dropped 1 invalid pending action." {
+		t.Fatalf("restore notice = %q, want the stale selection dropped", got)
 	}
-	m = drive(t, m, "space").(*model)
+	m = drive(t, m, "down", "down", "space").(*model)
 	if !m.formOpen || len(m.formFields) != 3 || m.formFields[2].varID != "q" || !m.formFields[2].required {
 		t.Fatalf("form fields = %+v", m.formFields)
 	}

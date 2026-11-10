@@ -13,6 +13,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The first-run screen offers attaching the built-in kit, and the command palette gains `Attach kit` for registered kits that are not attached to the current target.
 - A locally modified built-in kit shows on its kit row, and `Reset builtin kit` discards the local edits after a confirmation naming what it loses.
 
+### Fixed
+- Removing all co-owners of a shared json value in one removal run now takes the value away with the first item's plan. The run saw each item's record still pointing at the other as a living owner, so the value stayed in the file with no owner left recorded and only a second run removed it.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

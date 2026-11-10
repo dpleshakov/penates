@@ -37,7 +37,8 @@ type Kit struct {
 	Shared []string
 	// Dir is the absolute path of the kit directory.
 	Dir string
-	// Items are the kit's items, sorted by id.
+	// Items are the kit's items: the healthy ones first, sorted by id,
+	// then the ones with problems, sorted by RowID.
 	Items []*Item
 }
 
@@ -45,8 +46,20 @@ type Kit struct {
 type Item struct {
 	// Dir is the absolute path of the item directory.
 	Dir string
-	// ID is the item slug, unique within the kit.
+	// ID is the item slug from item.yaml. An item with problems may carry
+	// an empty, invalid, or duplicated id; RowID is the identity to key
+	// such an item by.
 	ID string
+	// RowID is the identity token an interface row keys the item by: the
+	// id when the loader accepted it, otherwise the item directory's name,
+	// made unique among the kit's rows with trailing tildes. RowIDs are
+	// unique within the kit.
+	RowID string
+	// Problems are the validation errors of the item's declaration; nil
+	// marks a healthy item. An item with problems stays in the kit's
+	// Items: the interface shows the problems on its row, and the item
+	// takes no part in planning.
+	Problems []error
 	// Version is the semantic version declared in item.yaml.
 	Version string
 	// Description is the free-form summary from item.yaml.
@@ -183,9 +196,11 @@ func Load(dir string) (*Kit, error) {
 
 // Read reads the kit in dir tolerantly: kit.yaml and the items directory
 // must read and validate — their problems are the returned error — while
-// a broken item is only reported beside the kit and does not fail it. The
-// returned kit holds the items that loaded; the interface shows the
-// problems on the affected item rows and still lets the kit attach.
+// a broken item is reported beside the kit and does not fail it. The
+// returned kit keeps the broken item among its Items with the problems
+// attached; the interface shows the problems on the affected item rows and
+// still lets the kit attach, and planning skips the affected items. A kit
+// whose items all carry problems reads as one without items.
 func Read(dir string) (*Kit, []error, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -232,25 +247,70 @@ func Read(dir string) (*Kit, []error, error) {
 			continue
 		}
 		it, itemProblems := loadItem(filepath.Join(itemsDir, entry.Name()), entry.Name(), kf.Shared, ids)
-		if it != nil && len(itemProblems) == 0 {
-			k.Items = append(k.Items, it)
-		}
+		it.Problems = itemProblems
+		k.Items = append(k.Items, it)
 		problems = append(problems, itemProblems...)
 	}
-	if len(k.Items) == 0 {
+	healthy := 0
+	for _, it := range k.Items {
+		if len(it.Problems) == 0 {
+			healthy++
+		}
+	}
+	if healthy == 0 {
 		fail("kit.yaml", "", "no items found under items/")
 	}
 	if len(errs) > 0 {
 		return nil, problems, errors.Join(errs...)
 	}
 
-	sort.Slice(k.Items, func(i, j int) bool { return k.Items[i].ID < k.Items[j].ID })
+	// Row identity: a usable id belongs to its first claimant in directory
+	// order, the order loadItem flags duplicates in; the items whose id is
+	// empty, invalid, or already claimed key by their directory's name,
+	// made unique among the kit's rows.
+	claimed := map[string]bool{}
+	for _, it := range k.Items {
+		if it.ID != "" && idSyntax.MatchString(it.ID) && !claimed[it.ID] {
+			it.RowID = it.ID
+			claimed[it.ID] = true
+		}
+	}
+	used := claimed
+	for _, it := range k.Items {
+		if it.RowID != "" {
+			continue
+		}
+		token := filepath.Base(it.Dir)
+		for used[token] {
+			token += "~"
+		}
+		it.RowID = token
+		used[token] = true
+	}
+
+	// Healthy items first, sorted by id; the ones with problems follow,
+	// sorted by their row identity. The order is deterministic, and the
+	// tree shows a kit's problems grouped at the end of its item rows.
+	rank := func(it *Item) (int, string) {
+		if len(it.Problems) > 0 {
+			return 1, it.RowID
+		}
+		return 0, it.ID
+	}
+	sort.Slice(k.Items, func(i, j int) bool {
+		ra, ka := rank(k.Items[i])
+		rb, kb := rank(k.Items[j])
+		if ra != rb {
+			return ra < rb
+		}
+		return ka < kb
+	})
 	return k, problems, nil
 }
 
-// loadItem reads and validates one item directory. Problems are reported
-// through fail and leave a partially filled item behind; the caller
-// rejects the kit on any error.
+// loadItem reads and validates one item directory. Problems are collected
+// into the returned item, which stays in the kit beside them (Read); Load
+// rejects the kit on any problem.
 func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item, []error) {
 	file := filepath.ToSlash(filepath.Join("items", dirName, "item.yaml"))
 	it := &Item{Dir: dir}
@@ -450,11 +510,15 @@ func fileExists(path string) bool {
 // ReadSources reads the source file of every contribution of the selected items,
 // keyed by the path SourcePath produces. The planner receives this map instead of
 // reading kit files itself, and apply writes action content only, so the content is
-// validated once, before the first write.
+// validated once, before the first write. Items with problems stay out of the
+// index: they are never planned, and their keys must not shadow healthy ones.
 func ReadSources(kits []*Kit, selection []string) (map[string][]byte, error) {
 	index := map[string]*Item{}
 	for _, k := range kits {
 		for _, it := range k.Items {
+			if len(it.Problems) > 0 {
+				continue
+			}
 			index[ItemKey(k.Name, it.ID)] = it
 		}
 	}

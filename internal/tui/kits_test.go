@@ -459,6 +459,19 @@ func TestAddKitPreviewShowsEveryError(t *testing.T) {
 	if !strings.Contains(got, "items/bad/item.yaml") || !strings.Contains(got, "semantic version") {
 		t.Errorf("the preview misses the item-level problem:\n%s", got)
 	}
+	// The count names the healthy items only; the problem is reported
+	// once, not once per broken item on top of it.
+	for _, line := range m.addPreviewLines(48) {
+		if !strings.HasPrefix(line, "Items") {
+			continue
+		}
+		if strings.Contains(line, "2") {
+			t.Errorf("the preview counts the broken item as healthy: %q", line)
+		}
+		if !strings.Contains(line, "1") {
+			t.Errorf("the preview misses the healthy count: %q", line)
+		}
+	}
 	drive(t, m, "enter")
 	reg, err := st.LoadRegistry()
 	if err != nil {
@@ -466,6 +479,51 @@ func TestAddKitPreviewShowsEveryError(t *testing.T) {
 	}
 	if k := reg.Kits["mixed"]; k.Dir != mixed {
 		t.Errorf("the kit with item problems did not attach: %+v", reg.Kits)
+	}
+}
+
+// TestTreeShowsItemProblems pins 6.5 on the screen: a kit with a broken
+// item attaches, and the tree shows its healthy item beside the problem
+// row — the kit is not unreadable (6.6).
+func TestTreeShowsItemProblems(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeKitFiles(t, t.TempDir(), map[string]string{
+		"kit.yaml":             "name: mixed\ntarget_hint: " + target + "\n",
+		"items/good/item.yaml": "id: good\nversion: 1.0.0\ndescription: Fine\ncontributes:\n  - file: f.md\n    to: skills/good/f.md\n",
+		"items/good/f.md":      "good\n",
+		"items/bad/item.yaml":  "id: bad\nversion: nope\n",
+	})
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := startWithKit(t, app, kitDir, 100, 30)
+	m = driveAll(t, m, "enter", "enter")
+	lm := m.(*model)
+	if keys := itemKeys(lm); len(keys) != 2 || keys[0] != "mixed/good" || keys[1] != "mixed/bad" {
+		t.Fatalf("items = %v, want the healthy one and the broken one", keys)
+	}
+	if good := itemRow(lm, "mixed/good"); good.Status != StatusAvailable {
+		t.Errorf("good: status = %v, want available", good.Status)
+	}
+	bad := itemRow(lm, "mixed/bad")
+	if bad.Status != StatusWarning || !strings.Contains(bad.Reason, `"nope" is not a semantic version`) {
+		t.Errorf("bad: status = %v, reason = %q, want the problem on the row", bad.Status, bad.Reason)
+	}
+	if _, ok := DefaultAction(bad.Status); ok {
+		t.Error("the problem row offers a default action")
+	}
+	if Resettable(bad) {
+		t.Error("the problem row offers a reset")
+	}
+	for _, r := range lm.rows {
+		if r.Kind == KindKit && r.Kit.Name == "mixed" && r.Kit.Unreadable {
+			t.Error("the kit with a broken item shows as unreadable")
+		}
 	}
 }
 

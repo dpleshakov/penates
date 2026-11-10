@@ -313,6 +313,9 @@ func MissingVars(kits []*kit.Kit, selection []string, lk *lock.Lock, fresh map[s
 	index := map[string]*kit.Item{}
 	for _, k := range kits {
 		for _, it := range k.Items {
+			if len(it.Problems) > 0 {
+				continue // a broken item is never selected, and must not shadow a healthy one
+			}
 			index[kit.ItemKey(k.Name, it.ID)] = it
 		}
 	}
@@ -402,11 +405,16 @@ func substitute(src []byte, answers map[string]string) (out []byte, unknown stri
 }
 
 // Build plans the installation of the selected items. Items that fail validation are
-// excluded with their reasons; the others proceed.
+// excluded with their reasons; the others proceed. Items whose kit declaration has
+// problems stay out of the index: the interface never selects them, and their keys
+// must not shadow healthy ones — a selection naming one plans as unknown.
 func Build(in Input) *Plan {
 	index := map[string]*kit.Item{}
 	for _, k := range in.Kits {
 		for _, it := range k.Items {
+			if len(it.Problems) > 0 {
+				continue
+			}
 			index[kit.ItemKey(k.Name, it.ID)] = it
 		}
 	}

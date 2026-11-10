@@ -997,15 +997,16 @@ func (m *model) enterTarget(dir string) tea.Cmd {
 		m.errLine = "lock: " + err.Error()
 	}
 
-	// The kits attached to the target, loaded where they still load; a kit
-	// that fails stays out and the tree shows its group as unreadable
-	// (6.6).
+	// The kits attached to the target, read tolerantly (6.5): a kit whose
+	// kit.yaml or items directory fails stays out and the tree shows its
+	// group as unreadable (6.6), while a kit with broken items loads and
+	// the tree shows the problems on the affected item rows.
 	for _, name := range reg.KitsFor(dir) {
 		kk, ok := reg.Kits[name]
 		if !ok {
 			continue
 		}
-		k, err := kit.Load(kk.Dir)
+		k, _, err := kit.Read(kk.Dir)
 		if err != nil {
 			continue
 		}
@@ -1105,6 +1106,9 @@ func (m *model) snapshotPaths() (files, shared []string) {
 	}
 	for _, k := range m.kits {
 		for _, it := range k.Items {
+			if len(it.Problems) > 0 {
+				continue // a broken item contributes nothing, and its targets are not validated
+			}
 			for _, c := range it.Contributes {
 				if c.Kind != kit.KindFile {
 					if !seenShared[c.To] {
@@ -1264,7 +1268,7 @@ func (m *model) kitItem(key string) *kit.Item {
 			continue
 		}
 		for _, it := range k.Items {
-			if it.ID == itemID {
+			if rowToken(it) == itemID {
 				return it
 			}
 		}

@@ -12,11 +12,6 @@ Accepted work that has not started yet, in priority order.
 **Context:** The pending object does not record the kit version the selection was made against, so restore validates structurally only — the item still exists in its kit; an update saved against 1.3.0 restores silently when the kit already holds 1.4.0 and applies at the new version. Fixing this needs the kit version stored in ItemPending at selection time and compared on restore.
 **Added:** 2026-11-07, during the overlays and startup task of the TUI rework
 
-### `kit-item-errors-on-rows`
-**Goal:** Item-level problems of a kit — an invalid item.yaml, duplicate ids — show on the affected item rows of the tree, as tui-screens 6.5 specifies.
-**Context:** kit.Read loads tolerantly and the add-kit preview lists the problems, but the tree loads kits with the strict kit.Load: an attached kit holding broken items renders unreadable as a whole instead of showing its healthy items with the problems on their rows. enterTarget needs to read through kit.Read and carry the per-item problems into the rows.
-**Added:** 2026-11-07, during the add-kit flow of the TUI rework
-
 ### `mouse-support`
 **Goal:** Additive mouse input for the TUI: a click moves the cursor, clicking the pending column toggles the default action, the wheel scrolls, and clicking the target in the header opens the target list (docs/tui-screens.md, 3.3).
 **Context:** Postponed from the v1 TUI rework: the keyboard covers every action, so the mouse adds convenience only; the design does not depend on it.

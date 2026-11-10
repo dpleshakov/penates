@@ -307,6 +307,50 @@ func TestReadSources(t *testing.T) {
 	}
 }
 
+// TestReadSourcesSkipsBrokenItems pins the source index's half of the same
+// protection: an item with problems never enters the index, so it is never
+// read and cannot shadow a healthy item under a duplicated id.
+func TestReadSourcesSkipsBrokenItems(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"kit.yaml":             "name: example\n",
+		"items/a/item.yaml":    "id: a\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/a/f\n",
+		"items/a/f":            "healthy\n",
+		"items/twin/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - file: g\n    to: skills/twin/g\n",
+		"items/twin/g":         "broken\n",
+	})
+	k, _, err := Read(dir)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	var healthy *Item
+	for _, it := range k.Items {
+		if len(it.Problems) == 0 {
+			healthy = it
+		}
+	}
+	if healthy == nil {
+		t.Fatal("no healthy item in the kit")
+	}
+
+	sources, err := ReadSources([]*Kit{k}, []string{ItemKey(k.Name, healthy.ID)})
+	if err != nil {
+		t.Fatalf("ReadSources: %v", err)
+	}
+	key := healthy.SourcePath(healthy.Contributes[0])
+	if string(sources[key]) != "healthy\n" {
+		t.Errorf("sources[%s] = %q, want the healthy item's content", key, sources[key])
+	}
+
+	sources, err = ReadSources([]*Kit{k}, []string{"example/twin"})
+	if err != nil {
+		t.Fatalf("ReadSources: %v", err)
+	}
+	if len(sources) != 0 {
+		t.Errorf("sources = %v, want nothing for a broken item's row key", sources)
+	}
+}
+
 // writeFiles writes a map of slash-separated relative paths to file contents into
 // dir; an empty content deletes the file, and directories left empty by a deletion
 // are removed as well. Parent directories are created as needed.
@@ -360,8 +404,15 @@ func TestReadTolerant(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		if len(k.Items) != 1 || k.Items[0].ID != "a" {
-			t.Errorf("items = %v, want the one that loaded", k.Items)
+		if len(k.Items) != 2 {
+			t.Fatalf("items = %d, want the healthy one and the broken one", len(k.Items))
+		}
+		a, b := k.Items[0], k.Items[1]
+		if a.ID != "a" || len(a.Problems) != 0 {
+			t.Errorf("a: id = %q, problems = %v, want healthy and first", a.ID, a.Problems)
+		}
+		if b.ID != "b" || b.RowID != "b" || len(b.Problems) != 1 || !strings.Contains(b.Problems[0].Error(), `"nope" is not a semantic version`) {
+			t.Errorf("b: id = %q, row id = %q, problems = %v", b.ID, b.RowID, b.Problems)
 		}
 		if len(problems) != 1 || !strings.Contains(problems[0].Error(), `"nope" is not a semantic version`) {
 			t.Errorf("problems = %v, want the broken item's problem", problems)
@@ -416,6 +467,113 @@ func TestReadTolerant(t *testing.T) {
 		}
 		if len(problems) != 1 || !strings.Contains(problems[0].Error(), "items/empty/item.yaml: cannot be read") {
 			t.Errorf("problems = %v, want the missing item.yaml", problems)
+		}
+	})
+
+	t.Run("healthy items keep the id sort, broken ones follow", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{
+			"items/zeta/item.yaml":   "id: zeta\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/zeta/f\n",
+			"items/zeta/f":           "content\n",
+			"items/broken/item.yaml": "id: broken\nversion: nope\n",
+		})
+		k, _, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		var got []string
+		for _, it := range k.Items {
+			got = append(got, it.RowID)
+		}
+		if diff := cmp.Diff([]string{"a", "zeta", "broken"}, got); diff != "" {
+			t.Errorf("row ids (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("an item whose id is unusable keys by its directory", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{
+			"items/no-id/item.yaml":  "version: 1.0.0\n",
+			"items/bad-id/item.yaml": "id: No!\nversion: 1.0.0\n",
+		})
+		k, problems, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if len(problems) != 2 {
+			t.Fatalf("problems = %v, want one per broken item", problems)
+		}
+		rowIDs := map[string]bool{}
+		for _, it := range k.Items {
+			if len(it.Problems) == 0 {
+				continue
+			}
+			rowIDs[it.RowID] = true
+		}
+		if !rowIDs["no-id"] || !rowIDs["bad-id"] {
+			t.Errorf("row ids of the broken items = %v, want the directory names", rowIDs)
+		}
+	})
+
+	t.Run("a duplicated id keys the second item by its directory", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{"items/twin/item.yaml": "id: a\nversion: 1.0.0\n"})
+		k, problems, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), `"a" is already used`) {
+			t.Errorf("problems = %v, want the duplicate id", problems)
+		}
+		if k.Items[0].ID != "a" || k.Items[0].RowID != "a" || len(k.Items[0].Problems) != 0 {
+			t.Errorf("first: id = %q, row id = %q, problems = %v, want healthy owner of the id", k.Items[0].ID, k.Items[0].RowID, k.Items[0].Problems)
+		}
+		if k.Items[1].RowID != "twin" || len(k.Items[1].Problems) != 1 {
+			t.Errorf("second: row id = %q, problems = %v, want keyed by its directory", k.Items[1].RowID, k.Items[1].Problems)
+		}
+	})
+
+	t.Run("a directory name that collides with a row token is made unique", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{
+			"items/x/item.yaml":    "version: 1.0.0\n",
+			"items/xdir/item.yaml": "id: x\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/x/f\n",
+			"items/xdir/f":         "content\n",
+		})
+		k, _, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		var got []string
+		for _, it := range k.Items {
+			got = append(got, it.RowID)
+		}
+		if diff := cmp.Diff([]string{"a", "x", "x~"}, got); diff != "" {
+			t.Errorf("row ids (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("a kit whose items are all broken reads as one without items", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, valid)
+		writeFiles(t, dir, map[string]string{
+			"items/a/item.yaml": "",
+			"items/a/f":         "",
+			"items/b/item.yaml": "id: b\nversion: nope\n",
+		})
+		k, problems, err := Read(dir)
+		if err == nil || !strings.Contains(err.Error(), "no items found") {
+			t.Fatalf("Read error = %v, want the no-items refusal", err)
+		}
+		if k != nil {
+			t.Errorf("Read returned a kit: %+v", k)
+		}
+		if len(problems) != 1 {
+			t.Errorf("problems = %v, want the broken item beside the refusal", problems)
 		}
 	})
 }

@@ -234,7 +234,7 @@ func BuildTree(in TreeInput) []Row {
 		var items []ItemRow
 		if k != nil {
 			for _, it := range k.Items {
-				key := kit.ItemKey(name, it.ID)
+				key := kit.ItemKey(name, rowToken(it))
 				covered[key] = true
 				items = append(items, kitItemRow(name, it, key, in, rec, pending))
 			}
@@ -336,6 +336,16 @@ func heldRows(name string, in TreeInput, rec *plan.Reconciliation, pending *stat
 	return rows
 }
 
+// rowToken is the identity an item row keys and labels by: the token the
+// loader assigned — the item id, or the directory name of an item whose id
+// is unusable — or the bare id for items built without the loader.
+func rowToken(it *kit.Item) string {
+	if it.RowID != "" {
+		return it.RowID
+	}
+	return it.ID
+}
+
 // kitItemRow builds the row of one item a loaded kit provides: the kit's
 // facts, the lock record, and the reconciliation statuses decide the state
 // (docs/concept.md 8), the planner's verdict adds conflict and warning
@@ -344,11 +354,27 @@ func kitItemRow(kitName string, it *kit.Item, key string, in TreeInput, rec *pla
 	r := ItemRow{
 		Key:         key,
 		KitName:     kitName,
-		ID:          it.ID,
+		ID:          rowToken(it),
 		Status:      StatusAvailable,
 		Tags:        it.Tags,
 		KitVersion:  it.Version,
 		Description: it.Description,
+	}
+	if len(it.Problems) > 0 {
+		// An item whose declaration is broken (6.5): the row warns with the
+		// first problem and offers no action. An installed one stays
+		// managed and frozen — removal only, no updates, no reset (9.2) —
+		// shown like the frozen rows: from the lock record alone.
+		r.Status = StatusWarning
+		r.Reason = it.Problems[0].Error()
+		r.KitVersion = ""
+		if in.Lock != nil {
+			if item := in.Lock.Items[key]; item != nil {
+				r.Installed = true
+				r.InstalledVersion = item.Version
+			}
+		}
+		return r
 	}
 	var item *lock.Item
 	if in.Lock != nil {

@@ -7,11 +7,6 @@ Accepted work that has not started yet, in priority order.
 **Context:** v1 ships the variable alone (docs/tui-screens.md, 3.3). The sketched scheme, if detection is wanted: `PENATES_ASCII` overrides everything; on Windows, a console output code page other than 65001 selects the ASCII set; on Unix, an encoding other than UTF-8 in LC_ALL, LC_CTYPE, or LANG does. The open question is less feasibility than need: whether users run terminals that are both broken for Unicode and not known to them. Decide after the new TUI sees real use.
 **Added:** 2026-11-07, in the TUI rework discussion
 
-### `coowner-single-run-removal`
-**Goal:** A co-owned json value leaves when one removal run takes both of its owners away.
-**Context:** `removalJSON` decides co-ownership by the lock, which planning never mutates. Removing both co-owners in one run, each item's plan still sees the other as a remaining owner and keeps the value — after the run no owner remains recorded, and the value stays in the target with nobody owning it; two sequential runs take it away on the second. Found while composing shared-file removals across a run (the same single-run class); the fix is to make the ownership check see the removals the run has already planned.
-**Added:** 2026-11-07, during the removal-shared-file-loss fix
-
 ### `restore-stale-selection`
 **Goal:** Restoring a saved selection tells the user when the kit moved on: a selection whose item version changed since it was saved is dropped and reported, as tui-screens 11.1 specifies.
 **Context:** The pending object does not record the kit version the selection was made against, so restore validates structurally only — the item still exists in its kit; an update saved against 1.3.0 restores silently when the kit already holds 1.4.0 and applies at the new version. Fixing this needs the kit version stored in ItemPending at selection time and compared on restore.

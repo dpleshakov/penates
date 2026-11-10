@@ -1896,6 +1896,60 @@ func TestBuildRemoval(t *testing.T) {
 				}
 			},
 		},
+		"a value both co-owners remove in one run goes with the first item": {
+			// Co-ownership is decided from the lock, which planning never
+			// mutates: left alone, each item would keep the value for the
+			// other's record and the value would outlive the run. The run's
+			// own keys are subtracted, the first item carries the removal,
+			// and the second finds the value already gone.
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+				"k/two": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+			},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "dark", "editor": "vim"}`}},
+			remove: []string{"k/one", "k/two"},
+			want: func(t *testing.T, p *Plan) {
+				first, second := p.Items[0], p.Items[1]
+				if len(first.Actions) != 1 || first.Actions[0].Kind != ActionJSONRemove {
+					t.Fatalf("first item actions = %v", first.Actions)
+				}
+				got := string(first.Actions[0].Content)
+				if strings.Contains(got, "theme") || !strings.Contains(got, `"editor": "vim"`) {
+					t.Errorf("first action content =\n%s\nwant the value gone and the rest kept", got)
+				}
+				if len(second.Actions) != 0 || len(second.Kept) != 0 {
+					t.Errorf("second item = %+v, want it silent: the record dies with the item", second)
+				}
+			},
+		},
+		"a modified value of two co-owners removed in one run is reported to both": {
+			lockItems: map[string]*lock.Item{
+				"k/one": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+				"k/two": {
+					Version: "1.0.0",
+					JSON:    map[string][]lock.Location{"config.jsonc": {{Pointer: "/theme", Hash: darkHash}}},
+				},
+			},
+			shared: map[string]target.SharedFileState{"config.jsonc": {Exists: true, Content: `{"theme": "light"}`}},
+			remove: []string{"k/one", "k/two"},
+			want: func(t *testing.T, p *Plan) {
+				for _, ip := range p.Items {
+					if len(ip.Actions) != 0 {
+						t.Errorf("%s actions = %v, want none", ip.Key, ip.Actions)
+					}
+					wantKept(t, ip, "config.jsonc", "/theme", "modified by the user")
+				}
+			},
+		},
 		"a modified json value is kept and reported": {
 			lockItems: map[string]*lock.Item{"k/one": {
 				Version: "1.0.0",

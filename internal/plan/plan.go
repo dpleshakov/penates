@@ -438,12 +438,15 @@ func Build(in Input) *Plan {
 // compose their shared files across the run: every removal action rewrites
 // a whole shared file, so a later item decides and removes its content in
 // what the earlier items' removals leave, as the install planner builds its
-// items on theirs.
+// items on theirs. A value co-owned only by items of this run goes with
+// the first item that plans it.
 func BuildRemoval(in Input) *Plan {
 	keys := make([]string, 0, len(in.Remove))
+	run := make(map[string]bool, len(in.Remove))
 	for key, remove := range in.Remove {
 		if remove {
 			keys = append(keys, key)
+			run[key] = true
 		}
 	}
 	sort.Strings(keys)
@@ -455,7 +458,7 @@ func BuildRemoval(in Input) *Plan {
 	// content back.
 	pending := map[string]string{}
 	for _, key := range keys {
-		p.Items = append(p.Items, planRemoval(key, in, pending))
+		p.Items = append(p.Items, planRemoval(key, in, run, pending))
 	}
 	return p
 }
@@ -465,8 +468,9 @@ func BuildRemoval(in Input) *Plan {
 // modified stay and are reported. A created shared file the removal leaves
 // without content is deleted with it. pending carries the shared-file
 // contents the items planned earlier leave behind; the compositions of this
-// item are recorded there for the ones planned after it.
-func planRemoval(key string, in Input, pending map[string]string) *ItemPlan {
+// item are recorded there for the ones planned after it. run holds the keys
+// this BuildRemoval call removes.
+func planRemoval(key string, in Input, run map[string]bool, pending map[string]string) *ItemPlan {
 	ip := &ItemPlan{Key: key}
 	kitName, itemID, split := strings.Cut(key, "/")
 	if split {
@@ -509,7 +513,7 @@ func planRemoval(key string, in Input, pending map[string]string) *ItemPlan {
 	}
 
 	for _, file := range sortedKeys(rec.JSON) {
-		removalJSON(ip, key, file, rec.JSON[file], in, pending)
+		removalJSON(ip, key, file, rec.JSON[file], in, run, pending)
 	}
 
 	return ip
@@ -567,11 +571,11 @@ func removalSection(ip *ItemPlan, file string, sec lock.Section, in Input, pendi
 }
 
 // removalJSON composes the shared file without the values the item
-// last-owns: a value another item co-owns stays, a modified one stays and is
-// reported. The document is read from the file as the removal actions
-// planned earlier leave it, and the item's composition is recorded for the
-// items planned after it.
-func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input, pending map[string]string) {
+// last-owns: a value an item outside the run co-owns stays, a modified one
+// stays and is reported. The document is read from the file as the removal
+// actions planned earlier leave it, and the item's composition is recorded
+// for the items planned after it.
+func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input, run map[string]bool, pending map[string]string) {
 	st := in.Snapshot.SharedFile(file)
 	if !st.Exists || st.IsDir {
 		return
@@ -617,8 +621,18 @@ func removalJSON(ip *ItemPlan, key, file string, locs []lock.Location, in Input,
 			ip.Kept = append(ip.Kept, KeptNote{Path: file, Pointer: loc.Pointer, Reason: "modified by the user"})
 			continue
 		}
-		if owners := in.Lock.JSONOwners(file, loc.Pointer, loc.Hash); len(owners) > 1 {
-			continue // another item still owns the value; the record dies alone
+		// A co-owner that stays installed keeps the value; a co-owner of
+		// this run does not — its own record plans the same value, and the
+		// first item in key order carries the removal.
+		stays := false
+		for _, owner := range in.Lock.JSONOwners(file, loc.Pointer, loc.Hash) {
+			if !run[owner] {
+				stays = true
+				break
+			}
+		}
+		if stays {
+			continue // an item outside this run still owns the value
 		}
 		if err := removeJSONValue(doc, loc); err != nil {
 			ip.Kept = append(ip.Kept, KeptNote{Path: file, Pointer: loc.Pointer, Reason: err.Error()})

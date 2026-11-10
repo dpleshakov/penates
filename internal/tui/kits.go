@@ -89,6 +89,19 @@ type kitPreview struct {
 	err error
 }
 
+// healthyItems counts the kit's items the read found no problems in: the
+// Items count the previews show (6.5). An item with problems is not a
+// healthy one, and its problem is reported once, from the read's report.
+func healthyItems(k *kit.Kit) int {
+	n := 0
+	for _, it := range k.Items {
+		if len(it.Problems) == 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // attachOffer is the kit the attach dialog of 6.3 acts on, with the target
 // its hint proposes.
 type attachOffer struct {
@@ -752,7 +765,7 @@ func (m *model) addPreviewLines(width int) []string {
 	if k.Description != "" {
 		fields = append(fields, detailField{label: "Description", values: WrapProse(k.Description, width)})
 	}
-	fields = append(fields, detailField{label: "Items", values: []string{strconv.Itoa(len(k.Items))}})
+	fields = append(fields, detailField{label: "Items", values: []string{strconv.Itoa(healthyItems(k))}})
 	if len(k.Shared) > 0 {
 		fields = append(fields, detailField{label: "Shared files", values: []string{strings.Join(k.Shared, ", ")}})
 	}
@@ -762,7 +775,8 @@ func (m *model) addPreviewLines(width int) []string {
 	lines = append(lines, renderFields(fields)...)
 
 	// The item-level problems do not stop the attach; their rows show
-	// them (6.5).
+	// them (6.5). They are reported once, from the read's report — the
+	// items carry the same problems, and are not listed again here.
 	for _, pr := range p.problems {
 		lines = append(lines, "")
 		lines = append(lines, errorLines(width, m.set, pr.Error())...)
@@ -813,7 +827,7 @@ func (m *model) editPreviewLines(width int) []string {
 		if k.Description != "" {
 			fields = append(fields, detailField{label: "Description", values: WrapProse(k.Description, width)})
 		}
-		fields = append(fields, detailField{label: "Items", values: []string{strconv.Itoa(len(k.Items))}})
+		fields = append(fields, detailField{label: "Items", values: []string{strconv.Itoa(healthyItems(k))}})
 		if len(k.Shared) > 0 {
 			fields = append(fields, detailField{label: "Shared files", values: []string{strings.Join(k.Shared, ", ")}})
 		}

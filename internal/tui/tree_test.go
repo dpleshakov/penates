@@ -166,6 +166,121 @@ func findKit(t *testing.T, rows []Row, name string) KitRow {
 	return KitRow{}
 }
 
+// TestBuildTreeBrokenItems pins the rows of items whose declaration has
+// problems (6.5): the row warns with the first problem and keys by the
+// loader's row token, an installed one stays managed and frozen — removal
+// only — and the group summary counts the warning.
+func TestBuildTreeBrokenItems(t *testing.T) {
+	problem := &kit.ValidationError{File: "items/nope/item.yaml", Field: "version", Msg: `"nope" is not a semantic version`}
+	k := &kit.Kit{
+		Name: "solo",
+		Dir:  "~/kits/solo",
+		Items: []*kit.Item{
+			{ID: "good", Version: "1.0.0", Description: "Healthy item"},
+			{Dir: "~/kits/solo/items/nope", ID: "nope", RowID: "nope", Version: "nope", Problems: []error{problem}},
+		},
+	}
+	lk := &lock.Lock{Target: treeTarget, Items: map[string]*lock.Item{
+		"solo/nope": {Version: "0.9.0"},
+	}}
+	reg := &state.Registry{
+		Kits:        map[string]state.Kit{"solo": {Dir: "~/kits/solo"}},
+		Targets:     map[string]state.Target{treeTarget: {}},
+		Attachments: []state.Attachment{{Kit: "solo", Target: treeTarget}},
+	}
+	rows := BuildTree(TreeInput{Target: treeTarget, Registry: reg, Lock: lk, Kits: []*kit.Kit{k}})
+
+	t.Run("the row warns with the problem", func(t *testing.T) {
+		r := findItem(t, rows, "solo/nope")
+		if r.Status != StatusWarning {
+			t.Errorf("status = %v, want %v", r.Status, StatusWarning)
+		}
+		if r.Reason != problem.Error() {
+			t.Errorf("reason = %q, want %q", r.Reason, problem.Error())
+		}
+		if r.KitVersion != "" {
+			t.Errorf("kit version = %q, want none: the declaration is untrusted", r.KitVersion)
+		}
+	})
+
+	t.Run("the installed one stays managed and frozen", func(t *testing.T) {
+		r := findItem(t, rows, "solo/nope")
+		if !r.Installed || r.InstalledVersion != "0.9.0" {
+			t.Errorf("installed = %v at %q, want the lock record", r.Installed, r.InstalledVersion)
+		}
+		if _, ok := DefaultAction(r.Status); ok {
+			t.Error("a broken item has no default action")
+		}
+		if !Removable(r) {
+			t.Error("an installed broken item is removable")
+		}
+		if Resettable(r) {
+			t.Error("a broken item is not resettable")
+		}
+	})
+
+	t.Run("the summary counts the warning", func(t *testing.T) {
+		g := findKit(t, rows, "solo")
+		for _, gc := range g.Summary {
+			if gc.Status == StatusWarning && gc.Count == 1 {
+				return
+			}
+		}
+		t.Errorf("summary = %v, want one warning", g.Summary)
+	})
+
+	t.Run("the healthy sibling is untouched", func(t *testing.T) {
+		r := findItem(t, rows, "solo/good")
+		if r.Status != StatusAvailable || r.KitVersion != "1.0.0" {
+			t.Errorf("status = %v, kit version = %q, want available at 1.0.0", r.Status, r.KitVersion)
+		}
+	})
+
+	t.Run("the broken row follows the healthy ones", func(t *testing.T) {
+		var keys []string
+		for _, r := range rows {
+			if r.Kind == KindItem {
+				keys = append(keys, r.Item.Key)
+			}
+		}
+		if diff := cmp.Diff([]string{"solo/good", "solo/nope"}, keys); diff != "" {
+			t.Errorf("item rows (-want +got):\n%s", diff)
+		}
+	})
+}
+
+// TestBuildTreeBrokenItemWithoutID keys the row of an item whose id is
+// unusable by its directory name, and the installed record still freezes:
+// the lock keeps the key the item was installed under, so the row shows
+// the problem beside the frozen record (6.5, 9.2).
+func TestBuildTreeBrokenItemWithoutID(t *testing.T) {
+	k := &kit.Kit{
+		Name: "solo",
+		Dir:  "~/kits/solo",
+		Items: []*kit.Item{
+			{Dir: "~/kits/solo/items/broken", RowID: "broken", Problems: []error{
+				&kit.ValidationError{File: "items/broken/item.yaml", Msg: "cannot be read"},
+			}},
+		},
+	}
+	lk := &lock.Lock{Target: treeTarget, Items: map[string]*lock.Item{
+		"solo/broken": {Version: "0.4.0"},
+	}}
+	reg := &state.Registry{
+		Kits:        map[string]state.Kit{"solo": {Dir: "~/kits/solo"}},
+		Targets:     map[string]state.Target{treeTarget: {}},
+		Attachments: []state.Attachment{{Kit: "solo", Target: treeTarget}},
+	}
+	rows := BuildTree(TreeInput{Target: treeTarget, Registry: reg, Lock: lk, Kits: []*kit.Kit{k}})
+	r := findItem(t, rows, "solo/broken")
+	if r.ID != "broken" || r.Status != StatusWarning {
+		t.Errorf("id = %q, status = %v, want the directory name and the warning", r.ID, r.Status)
+	}
+	if !r.Installed || !Removable(r) {
+		t.Errorf("installed = %v, removable = %v, want the frozen record", r.Installed, Removable(r))
+	}
+}
+
 // TestBuildTreeStatuses walks the fixture tree: every item kind of 3.1
 // lands on its status, and the conflict reason stands in for the
 // description.

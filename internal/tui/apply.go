@@ -91,7 +91,9 @@ func (m *model) collectApply() *pendingApply {
 				continue
 			}
 			for _, it := range k.Items {
-				if it.ID != itemID {
+				if it.ID != itemID || len(it.Problems) > 0 {
+					// A broken item is never selected, and its
+					// unvalidated targets must not reach the snapshot.
 					continue
 				}
 				for _, c := range it.Contributes {

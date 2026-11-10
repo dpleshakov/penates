@@ -61,7 +61,7 @@ Mockups are shown for terminals of 120, 90 and 64 columns. Colors are not reprod
 | `~` | Modified by the user; kit content unchanged | yellow | `~` |
 | `✗` | Conflict | red | `x` |
 | `!` | Broken: owned content is missing from the target | red | `!` |
-| `△` | Warning: kit content changed without a version change | yellow | `?` |
+| `△` | Warning: kit content changed without a version change, or the item's declaration has problems | yellow | `?` |
 | `◌` | Orphan: removed from its kit | yellow | `.` |
 | `⊘` | Unavailable: the kit cannot be read | dim | `#` |
 
@@ -346,7 +346,7 @@ Other errors:
 - `A kit named personal-opencode is already registered at ~/kits/opencode-old`
 - `The kit is already attached to this target`
 
-Item-level errors, such as an invalid `item.yaml` or duplicate ids, do not prevent attaching the kit. They are shown on the affected item rows.
+Item-level errors, such as an invalid `item.yaml` or duplicate ids, do not prevent attaching the kit. They are shown on the affected item rows: the row carries the `△` warning mark, the problem stands in place of the description, and no action is offered on it. The row of an item whose id is unusable shows the item directory's name. An installed item with a broken declaration stays frozen — removal only (9.2).
 
 ### 6.6 Unreadable kit and relocation
 

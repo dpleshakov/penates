@@ -156,6 +156,7 @@ Rules:
 - `version` is a semantic version and is required.
 - Source paths are relative to the item directory. `to` paths are relative to the target root, use forward slashes, and must not be absolute or contain `..`.
 - An optional `CHANGELOG.md` in the item directory is displayed in the item details.
+- An item whose declaration breaks these rules — a missing or invalid `item.yaml`, an empty, invalid, or duplicated `id` — does not make its kit unreadable: the kit attaches and its healthy items show, the problem is reported on the affected item's row, and the item is excluded from planning. An installed item with a broken declaration stays managed and frozen — removal only, like an orphan (9.2).
 
 ### 6.4 Contribution kinds
 

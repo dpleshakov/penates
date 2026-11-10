@@ -68,6 +68,45 @@ func sectionItem(id, src, to string) *kit.Item {
 	}
 }
 
+// TestBuildSkipsBrokenItems pins the planner's protection: an item whose
+// declaration has problems stays out of the index, so a selection naming it
+// plans as unknown, and its key cannot shadow a healthy item's.
+func TestBuildSkipsBrokenItems(t *testing.T) {
+	broken := &kit.Item{
+		ID:       "good",
+		Version:  "nope",
+		RowID:    "twin",
+		Problems: []error{&kit.ValidationError{File: "items/twin/item.yaml", Field: "version", Msg: `"nope" is not a semantic version`}},
+	}
+	healthy := item("good", "skills/good/SKILL.md")
+	kits := []*kit.Kit{{Name: "k", Items: []*kit.Item{healthy, broken}}}
+
+	p := Build(Input{
+		Kits:      kits,
+		Selection: []string{"k/good", "k/twin"},
+		Lock:      newLock(nil),
+		Snapshot:  snapOf(nil),
+		Sources:   planSources(kits, "content\n"),
+	})
+	if len(p.Items) != 2 {
+		t.Fatalf("plan items = %d, want one per selected key", len(p.Items))
+	}
+	ip := p.Items[0]
+	if ip.Key != "k/good" || ip.Status != StatusInstall {
+		t.Fatalf("healthy: key = %q, status = %q, want a normal install plan", ip.Key, ip.Status)
+	}
+	if ip.Version != "1.0.0" {
+		t.Errorf("healthy: version = %q, want the healthy item's, not the broken twin's", ip.Version)
+	}
+	ip = p.Items[1]
+	if ip.Key != "k/twin" || ip.Status != StatusError {
+		t.Fatalf("broken: key = %q, status = %q, want the unknown-item error", ip.Key, ip.Status)
+	}
+	if len(ip.Reasons) != 1 || !strings.Contains(ip.Reasons[0], "no registered kit provides this item") {
+		t.Errorf("broken reasons = %v, want the unknown-item reason", ip.Reasons)
+	}
+}
+
 func TestBuild(t *testing.T) {
 	tests := map[string]struct {
 		kits      []*kit.Kit

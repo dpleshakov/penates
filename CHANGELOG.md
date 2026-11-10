@@ -18,6 +18,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - A kit holding an item whose declaration is broken — an invalid `item.yaml`, an empty, invalid, or duplicated id — no longer disappears from the tree as a whole: the kit attaches and loads, the healthy items show, and the problem shows on the affected item's row, which offers no actions. An installed item with a broken declaration stays frozen: removal only, no updates or reset.
 - Removing all co-owners of a shared json value in one removal run now takes the value away with the first item's plan. The run saw each item's record still pointing at the other as a living owner, so the value stayed in the file with no owner left recorded and only a second run removed it.
+- A saved selection or reset whose item has moved to another version since it was made is no longer restored silently and applied at the new version: the pending actions record the item version they were made against, restoring drops the ones it no longer matches, and the notice line reports what went. Selections saved before this change restore as they always did. Removals are unaffected — they are planned from the lock and survive version changes.
 
 ## [0.1.0] - 2026-11-08
 

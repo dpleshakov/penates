@@ -81,6 +81,13 @@ type ItemPending struct {
 	Reset bool `json:"reset,omitempty"`
 	// Remove marks an installed item for removal.
 	Remove bool `json:"remove,omitempty"`
+	// Version is the item version the action was saved against: the kit
+	// item's version at selection time. A restored action whose item has
+	// moved to another version is dropped instead of applying silently; a
+	// removal carries none, being planned from the lock alone. Actions
+	// saved before the field existed hold none and are accepted as they
+	// are.
+	Version string `json:"version,omitempty"`
 	// Answers maps a variable id to the answer given for this selection.
 	Answers map[string]string `json:"answers,omitempty"`
 }

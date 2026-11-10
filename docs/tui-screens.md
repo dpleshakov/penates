@@ -648,7 +648,7 @@ When a target with unapplied pending actions is opened — at startup, or by swi
 ╰────────────────────────────────────────────────────────╯
 ```
 
-Restored actions that are no longer valid, for example an update whose kit version has changed, are dropped and reported on the notice line.
+Restored actions that are no longer valid — for example an update whose item version has changed since it was selected — are dropped and reported on the notice line.
 
 ### 11.2 Notices
 

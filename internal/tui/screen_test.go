@@ -505,9 +505,16 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if view := lm.View(); !strings.Contains(view, "1.0.0 → 1.1.0") {
 		t.Errorf("no update arrow:\n%s", view)
 	}
-
-	// The held selection applies the update.
-	m = driveAll(t, m, "a", "enter")
+	// The held selection was made against 1.0.0: the restore drops it and
+	// reports it (11.1), and the update is selected against the new
+	// version instead.
+	if got := lm.notice.Text(); got != "Dropped 1 invalid pending action." {
+		t.Fatalf("restore notice = %q, want the stale selection dropped", got)
+	}
+	if lm.pendingCount() != 0 {
+		t.Fatalf("pending = %d, want none: the stale selection went", lm.pendingCount())
+	}
+	m = driveAll(t, m, "down", "space", "a", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.resultText(), "updated    good 1.1.0") {
 		t.Fatalf("update apply:\n%s", rm.resultText())
@@ -527,10 +534,22 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if view := lm.View(); !strings.Contains(view, "1.1.0 → 0.9.0") {
 		t.Errorf("no downgrade arrow:\n%s", view)
 	}
+	// The selection made against 1.1.0 goes the same way; the downgrade is
+	// a major change, so the review opens first and the second space — in
+	// the view — selects against 0.9.0.
+	if got := lm.notice.Text(); got != "Dropped 1 invalid pending action." {
+		t.Fatalf("restore notice = %q, want the stale selection dropped", got)
+	}
+	m = driveAll(t, m, "down", "space", "space", "esc", "a", "enter")
+	rm = m.(*model)
+	if !strings.Contains(rm.resultText(), "downgraded  good 0.9.0") {
+		t.Fatalf("downgrade apply:\n%s", rm.resultText())
+	}
 
 	// The user modifies the installed file while the kit content is
-	// unchanged; a fresh run applies nothing and keeps the modification.
-	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
+	// unchanged; the held selection, made against the version the item
+	// still holds, survives the restart, and a fresh run applies nothing
+	// and keeps the modification.
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +560,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	}
 	m = driveAll(t, m, "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.resultText(), "kept       good 1.1.0  already installed") {
+	if !strings.Contains(rm.resultText(), "kept       good 0.9.0  already installed") {
 		t.Fatalf("apply over a user modification:\n%s", rm.resultText())
 	}
 	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
@@ -553,7 +572,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	// the result names the verb.
 	m = driveAll(t, m, "enter", "down", "r", "a", "enter")
 	rm = m.(*model)
-	if !strings.Contains(rm.resultText(), "reset      good 1.1.0") {
+	if !strings.Contains(rm.resultText(), "reset      good 0.9.0") {
 		t.Fatalf("reset apply:\n%s", rm.resultText())
 	}
 	data, err = os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
@@ -1066,7 +1085,17 @@ func TestListStatuses(t *testing.T) {
 	}
 
 	// The same version with changed content warns while the item is
-	// selected: applying would keep everything.
+	// selected: applying would keep everything. The selection of the
+	// earlier steps went with the version bumps (11.1), so the selection
+	// is seeded against the version the kit holds now.
+	if err := stateStore.Update(func(reg *state.Registry) error {
+		reg.Pending[targetDir] = &state.Pending{Items: map[string]*state.ItemPending{
+			"ex/plain": {Select: true, Version: "1.0.0"},
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	bumpStatusKit(t, kitDir, "1.0.0", "plain v2 changed\n")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
@@ -1577,23 +1606,24 @@ func TestMajorGate(t *testing.T) {
 		t.Fatalf("install:\n%s", m.(*model).resultText())
 	}
 
-	// The kit publishes 2.0.0: a major update (7.2).
+	// The kit publishes 2.0.0: a major update (7.2). The selection made
+	// against 1.0.0 went at the restore (11.1), so the row is unselected.
 	bumpKit(t, kitDir, "2.0.0", "good skill v2\n")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusUpdate || !r.Major {
 		t.Fatalf("major row = %+v", r)
 	}
-
-	// The applied selection is still held; space unselects it first.
-	m = driveAll(t, m, "down", "space")
-	if n := m.(*model).pendingCount(); n != 0 {
-		t.Fatalf("space did not unselect the held selection: %d pending", n)
+	if got := lm.notice.Text(); got != "Dropped 1 invalid pending action." {
+		t.Fatalf("restore notice = %q, want the stale selection dropped", got)
+	}
+	if n := lm.pendingCount(); n != 0 {
+		t.Fatalf("pending after the restart = %d, want none: the stale selection went", n)
 	}
 
 	// The first space on the row opens the details with the review note;
 	// nothing is selected.
-	m = driveAll(t, m, "space")
+	m = driveAll(t, m, "down", "space")
 	lm = m.(*model)
 	if !lm.view {
 		t.Fatal("the first space on a major update did not open the details")

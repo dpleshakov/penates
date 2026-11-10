@@ -237,6 +237,57 @@ func TestPruneDropsStaleEntries(t *testing.T) {
 	}
 }
 
+func TestItemPendingVersionRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	reg := newRegistry()
+	reg.Kits["example"] = Kit{Dir: "/kits/example"}
+	reg.Targets["/targets/main"] = Target{}
+	reg.Pending["/targets/main"] = &Pending{
+		Items: map[string]*ItemPending{
+			"example/writing": {Select: true, Version: "1.3.0"},
+			"example/old":     {Remove: true},
+		},
+	}
+	if err := store.save(reg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, err := store.LoadRegistry()
+	if err != nil {
+		t.Fatalf("LoadRegistry: %v", err)
+	}
+	if v := got.Pending["/targets/main"].Items["example/writing"].Version; v != "1.3.0" {
+		t.Errorf("selection version after reload = %q, want 1.3.0", v)
+	}
+	if v := got.Pending["/targets/main"].Items["example/old"].Version; v != "" {
+		t.Errorf("removal version after reload = %q, want none: a removal carries no version", v)
+	}
+
+	// The version reaches the file as a field of the item entry.
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"version": "1.3.0"`) {
+		t.Errorf("the state file holds no recorded version:\n%s", data)
+	}
+
+	// The field omits itself when unset, so a state file written before it
+	// existed decodes with no version and needs no migration.
+	out, err := json.Marshal(ItemPending{Remove: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"remove":true}` {
+		t.Errorf("an action without a version marshals as %s, want no version field", out)
+	}
+}
+
 func TestCompatRegistration(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

@@ -11,9 +11,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dpleshakov/penates/internal/markdown"
+	"github.com/dpleshakov/penates/internal/relpath"
 )
 
 // FileState is the observed state of one target file.
@@ -96,7 +96,7 @@ func (s *Snapshot) SharedFile(path string) SharedFileState {
 }
 
 func snapshotFile(root, rel string) (FileState, error) {
-	if !validRelPath(rel) {
+	if !relpath.Valid(rel) {
 		return FileState{}, fmt.Errorf("target path %q is not a relative slash-separated path", rel)
 	}
 	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
@@ -109,7 +109,7 @@ func snapshotFile(root, rel string) (FileState, error) {
 	if info.IsDir() {
 		return FileState{Exists: true}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed validRelPath above; root is the user's target
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed relpath.Valid above; root is the user's target
 	if err != nil {
 		return FileState{}, err
 	}
@@ -117,7 +117,7 @@ func snapshotFile(root, rel string) (FileState, error) {
 }
 
 func snapshotShared(root, rel string) (SharedFileState, error) {
-	if !validRelPath(rel) {
+	if !relpath.Valid(rel) {
 		return SharedFileState{}, fmt.Errorf("target path %q is not a relative slash-separated path", rel)
 	}
 	state := SharedFileState{Blocks: map[string]string{}}
@@ -131,7 +131,7 @@ func snapshotShared(root, rel string) (SharedFileState, error) {
 	if info.IsDir() {
 		return SharedFileState{Exists: true, IsDir: true, Blocks: map[string]string{}}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed validRelPath above; root is the user's target
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) //nolint:gosec // rel passed relpath.Valid above; root is the user's target
 	if err != nil {
 		return state, err
 	}
@@ -148,19 +148,4 @@ func snapshotShared(root, rel string) (SharedFileState, error) {
 func hashOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-// validRelPath reports whether p is a non-empty path of forward-slash-separated
-// plain elements: no absolute paths, no "." or ".." elements, no backslashes, no
-// drive letters. Kit-declared paths are checked the same way in internal/kit.
-func validRelPath(p string) bool {
-	if p == "" || strings.ContainsAny(p, "\\:") {
-		return false
-	}
-	for _, el := range strings.Split(p, "/") {
-		if el == "" || el == "." || el == ".." {
-			return false
-		}
-	}
-	return true
 }

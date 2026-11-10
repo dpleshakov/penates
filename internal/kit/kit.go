@@ -17,6 +17,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"golang.org/x/mod/semver"
+
+	"github.com/dpleshakov/penates/internal/relpath"
 )
 
 // idSyntax is the identifier syntax prescribed for items; kit names follow
@@ -205,7 +207,7 @@ func Read(dir string) (*Kit, []error, error) {
 		fail("kit.yaml", "name", "must match %s", idSyntax)
 	}
 	for i, s := range kf.Shared {
-		if !validRelPath(s) {
+		if !relpath.Valid(s) {
 			fail("kit.yaml", fmt.Sprintf("shared[%d]", i), "%q is not a relative slash-separated path", s)
 		}
 	}
@@ -322,11 +324,11 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 			fail(file, field+"."+string(kind), "is required")
 			continue
 		}
-		if !validRelPath(src) {
+		if !relpath.Valid(src) {
 			fail(file, field+"."+string(kind), "%q is not a relative slash-separated path", src)
 			continue
 		}
-		if !validRelPath(c.To) {
+		if !relpath.Valid(c.To) {
 			fail(file, field+".to", "%q is not a relative slash-separated path", c.To)
 			continue
 		}
@@ -431,21 +433,6 @@ func MajorVersion(v string) string {
 	return semver.Major("v" + v)
 }
 
-// validRelPath reports whether p is a non-empty relative path of forward-slash-
-// separated elements, each a plain name: no absolute paths, no "." or ".." elements,
-// no backslashes, no drive letters.
-func validRelPath(p string) bool {
-	if p == "" || strings.ContainsAny(p, "\\:") {
-		return false
-	}
-	for _, el := range strings.Split(p, "/") {
-		if el == "" || el == "." || el == ".." {
-			return false
-		}
-	}
-	return true
-}
-
 func contains(list []string, s string) bool {
 	for _, el := range list {
 		if el == s {
@@ -482,7 +469,7 @@ func ReadSources(kits []*Kit, selection []string) (map[string][]byte, error) {
 			if _, done := out[path]; done {
 				continue
 			}
-			data, err := os.ReadFile(path) //nolint:gosec // src passed validRelPath at load; the path stays inside the kit
+			data, err := os.ReadFile(path) //nolint:gosec // src passed relpath.Valid at load; the path stays inside the kit
 			if err != nil {
 				return nil, fmt.Errorf("%s: read %s: %w", key, c.Src, err)
 			}

@@ -74,6 +74,7 @@ only client.
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. |
 | `internal/state` | Application state (concept: application state): the registry — kits, targets, the attachments between them, the last active target — and the per-target pending actions with their deferred operations and variable answers. The operations over the registry — attach, detach, edit kit path, forget target — keep its invariants, and every mutation saves; a state file of another format version is refused with the path to delete. The operations receive the lock facts they need — the item keys of a target's lock — as values and delete a lock through a one-method interface, so the package keeps no dependency on internal/lock. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. Until the TUI rewrite, the current TUI reads the registry through a compatibility view. |
 | `internal/lock` | The per-target lock (concept: application state): reading, writing, and deleting the lock, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
+| `internal/relpath` | The shared validity rule for the relative slash-separated paths of the domain — kit-declared contribution paths and paths inside the target — as one `Valid` predicate. Knows no file system. |
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
 | `internal/markdown` | Pure text manipulation over managed blocks in shared Markdown files: parses the block layout and performs the append, replace, and removal operations section contributions are planned and removed with (concept: section contributions, removal). Knows no file system. |
 | `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (concept: json contributions). Knows no file system. |
@@ -99,6 +100,8 @@ flowchart LR
     AP --> LK
     AP --> TG
     AP --> KIT
+    KIT --> RP["internal/relpath"]
+    TG --> RP
 ```
 
 Rules:
@@ -145,7 +148,7 @@ Rules:
 ```
 penates/
 ├── cmd/penates/          # main package
-├── internal/             # one package per module: kit, state, lock, target, plan, apply, tui, licenses, builtin
+├── internal/             # one package per module: kit, state, lock, target, relpath, plan, apply, tui, licenses, builtin
 ├── docs/                 # the concept, this document, and the archive
 └── .github/workflows/    # CI
 ```

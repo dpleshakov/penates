@@ -2,6 +2,11 @@
 
 Accepted work that has not started yet, in priority order.
 
+### `file-exec-bit`
+**Goal:** A `file` contribution whose source file carries the executable bit installs with that bit preserved, so a kit can ship runnable scripts.
+**Context:** apply.Item stages every contribution through stage() (internal/apply/apply.go), which chmods each staged file to 0o644 regardless of its source, and the kit loader reads file bytes only, so the mode is lost before planning. A skill whose helper scripts run as bare commands — symlinked onto PATH — installs unrunnable, and the symlink breaks. Found while publishing the peer-chat item in penates-opencode; that item's README carries a note pointing here until this lands. The fix threads the source mode through kit load → plan action → stage.
+**Added:** 2026-11-18, while publishing the peer-chat kit item
+
 ### `mixed-run-shared-composition`
 **Goal:** An apply that removes and installs items composing the same shared file in one run leaves the file as the run's removals and installs together intend it.
 **Context:** runApply builds the removal and the install plans from the same pre-run snapshot and lock (internal/tui/apply.go), and the install planner composes shared files — sections and json values — from the snapshot alone; the removals the same run plans never reach it. An install into a shared file whose values the run removes writes them back with its whole-file rewrite, leaving the value in the target with no owner recorded. Reachable through the documented swap flow (concept 6.6: mark X for removal and select Y in the same apply). Found while verifying the boundary of the coowner-single-run-removal fix — the same single-run class. The fix direction: hand the removals' composed shared-file contents to plan.Build as the base its items compose from.

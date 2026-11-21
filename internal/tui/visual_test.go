@@ -33,6 +33,16 @@ type marked interface {
 	Mark(Set) string
 }
 
+// statusMarked adapts a state of internal/view to the marked interface:
+// the state is decided once in view, its glyph table lives here.
+type statusMarked Status
+
+// Glyph returns the bare status glyph of the set.
+func (s statusMarked) Glyph(set Set) string { return statusMarks[s].glyph(set) }
+
+// Mark returns the status glyph of the set in its color.
+func (s statusMarked) Mark(set Set) string { return statusMarks[s].rendered(set) }
+
 // markSpec transcribes one row of the tables of 3.1 or 3.2: the glyph of
 // each set and the color role the mark renders in.
 type markSpec struct {
@@ -45,16 +55,16 @@ type markSpec struct {
 
 // statusSpec is the status table of 3.1.
 var statusSpec = []markSpec{
-	{"available", StatusAvailable, "○", "o", roleDim},
-	{"installed", StatusInstalled, "●", "*", roleGreen},
-	{"update", StatusUpdate, "↑", "^", roleCyan},
-	{"downgrade", StatusDowngrade, "↓", "v", roleDim},
-	{"modified", StatusModified, "~", "~", roleYellow},
-	{"conflict", StatusConflict, "✗", "x", roleRed},
-	{"broken", StatusBroken, "!", "!", roleRed},
-	{"warning", StatusWarning, "△", "?", roleYellow},
-	{"orphan", StatusOrphan, "◌", ".", roleYellow},
-	{"unavailable", StatusUnavailable, "⊘", "#", roleDim},
+	{"available", statusMarked(StatusAvailable), "○", "o", roleDim},
+	{"installed", statusMarked(StatusInstalled), "●", "*", roleGreen},
+	{"update", statusMarked(StatusUpdate), "↑", "^", roleCyan},
+	{"downgrade", statusMarked(StatusDowngrade), "↓", "v", roleDim},
+	{"modified", statusMarked(StatusModified), "~", "~", roleYellow},
+	{"conflict", statusMarked(StatusConflict), "✗", "x", roleRed},
+	{"broken", statusMarked(StatusBroken), "!", "!", roleRed},
+	{"warning", statusMarked(StatusWarning), "△", "?", roleYellow},
+	{"orphan", statusMarked(StatusOrphan), "◌", ".", roleYellow},
+	{"unavailable", statusMarked(StatusUnavailable), "⊘", "#", roleDim},
 }
 
 // pendingSpec is the pending-action table of 3.2.

@@ -64,12 +64,14 @@ installs go-licenses with `go install` and runs it by name, so Go's install dire
   checks that would otherwise need a shell live in Go programs under `tools/`, tagged
   `//go:build ignore` so that `go build ./...`, `go vet ./...`, and `go test ./...` do
   not see them.
-- **Error text.** Errors that reach the terminal print on stderr as `Error: message` —
-  no category — and the message names the concrete next step, in parentheses where it
-  fits: `unknown command "foo" for "penates" (run "penates --help" for the available
-  commands)`. Categories arrive with a real command-line interface, if one ever does;
-  until then none are invented. The TUI keeps its own human wording and takes no part in
-  this.
+- **Error text.** Errors that reach the terminal print on stderr as one line in the
+  `Error [category]: message` form, and the message names the concrete next step, in
+  parentheses where it fits: `Error [usage]: unknown command "foo" for "penates" (run
+  "penates --help" for the available commands)`. The categories are a stable contract —
+  existing ones are never removed or renamed, new ones may be added — and the set lives
+  in `internal/cli/errors.go` and in the built-in kit's `reference` skill. The exit codes
+  are a contract of exactly three values: `0` success, `1` any other failure, `2` usage
+  only. The TUI keeps its own human wording and takes no part in this.
 
 ## Before changing behaviour
 

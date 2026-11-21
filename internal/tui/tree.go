@@ -10,6 +10,7 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/target"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The tree model behind the body (tui-screens.md 3.4): one tree of kit rows,
@@ -28,10 +29,6 @@ const OrphansKey = "\x00orphans"
 
 // orphansName is the name the trailing orphans group shows (6.7).
 const orphansName = "orphans"
-
-// brokenReason is the reason a broken item shows in the description column
-// (3.1, 3.4): the content it owns is missing from the target.
-const brokenReason = "owned content is missing from the target"
 
 // RowKind tells the three kinds of tree rows apart.
 type RowKind int
@@ -234,7 +231,7 @@ func BuildTree(in TreeInput) []Row {
 		var items []ItemRow
 		if k != nil {
 			for _, it := range k.Items {
-				key := kit.ItemKey(name, rowToken(it))
+				key := kit.ItemKey(name, view.RowID(it))
 				covered[key] = true
 				items = append(items, kitItemRow(name, it, key, in, rec, pending))
 			}
@@ -336,105 +333,49 @@ func heldRows(name string, in TreeInput, rec *plan.Reconciliation, pending *stat
 	return rows
 }
 
-// rowToken is the identity an item row keys and labels by: the token the
-// loader assigned — the item id, or the directory name of an item whose id
-// is unusable — or the bare id for items built without the loader.
-func rowToken(it *kit.Item) string {
-	if it.RowID != "" {
-		return it.RowID
-	}
-	return it.ID
-}
-
 // kitItemRow builds the row of one item a loaded kit provides: the kit's
-// facts, the lock record, and the reconciliation statuses decide the state
-// (docs/concept.md 8), the planner's verdict adds conflict and warning
-// (3.1).
+// facts, the lock record, and the reconciliation feed the state decision,
+// which internal/view makes once for both clients (docs/concept.md 8); the
+// planner's verdict adds conflict and warning (3.1).
 func kitItemRow(kitName string, it *kit.Item, key string, in TreeInput, rec *plan.Reconciliation, pending *state.Pending) ItemRow {
 	r := ItemRow{
 		Key:         key,
 		KitName:     kitName,
-		ID:          rowToken(it),
-		Status:      StatusAvailable,
+		ID:          view.RowID(it),
 		Tags:        it.Tags,
 		KitVersion:  it.Version,
 		Description: it.Description,
-	}
-	if len(it.Problems) > 0 {
-		// An item whose declaration is broken (6.5): the row warns with the
-		// first problem and offers no action. An installed one stays
-		// managed and frozen — removal only, no updates, no reset (9.2) —
-		// shown like the frozen rows: from the lock record alone.
-		r.Status = StatusWarning
-		r.Reason = it.Problems[0].Error()
-		r.KitVersion = ""
-		if in.Lock != nil {
-			if item := in.Lock.Items[key]; item != nil {
-				r.Installed = true
-				r.InstalledVersion = item.Version
-			}
-		}
-		return r
 	}
 	var item *lock.Item
 	if in.Lock != nil {
 		item = in.Lock.Items[key]
 	}
-	if item == nil {
-		r.applyVerdict(in.Plans[key])
-		r.Pending = pendingOf(pending, key)
+	decided := view.Decide(key, it, item, rec, in.Plans[key])
+	r.Status, r.Reason, r.Major = decided.State, decided.Reason, decided.Major
+	if len(it.Problems) > 0 {
+		// An item whose declaration is broken (6.5): the row warns with the
+		// first problem and offers no action. An installed one stays
+		// managed and frozen — removal only, no updates, no reset (9.2) —
+		// shown like the frozen rows: from the lock record alone.
+		r.KitVersion = ""
+		if item != nil {
+			r.Installed = true
+			r.InstalledVersion = item.Version
+		}
 		return r
 	}
-	r.Installed = true
-	r.InstalledVersion = item.Version
-	if kit.MajorVersion(it.Version) != kit.MajorVersion(item.Version) {
-		r.Major = true
-	}
-	switch {
-	case rec.BrokenItem(key):
-		r.Status = StatusBroken
-		r.Reason = brokenReason
-	case rec.ModifiedItem(key):
-		r.Status = StatusModified
-	default:
-		switch kit.CompareVersions(it.Version, item.Version) {
-		case 1:
-			r.Status = StatusUpdate
-		case -1:
-			r.Status = StatusDowngrade
-		default:
-			r.Status = StatusInstalled
-		}
-	}
-	if ip := in.Plans[key]; ip != nil {
-		r.applyVerdict(ip)
+	if item != nil {
+		r.Installed = true
+		r.InstalledVersion = item.Version
 	}
 	r.Pending = pendingOf(pending, key)
 	return r
 }
 
-// applyVerdict lifts the planner's verdict for the item onto the row: a
-// verdict with conflicts makes the item conflicting, a NoAction verdict
-// with a warning makes it warning (3.1). An available item takes the
-// verdict the same way an installed one does — the planner speaks about
-// the selection, not about the lock.
-func (r *ItemRow) applyVerdict(ip *plan.ItemPlan) {
-	if ip == nil {
-		return
-	}
-	if len(ip.Conflicts) > 0 {
-		r.Status = StatusConflict
-		r.Reason = renderConflict(ip.Conflicts[0])
-	} else if ip.Status == plan.StatusNoAction && ip.Warning {
-		r.Status = StatusWarning
-		r.Reason = ip.Reason
-	}
-}
-
 // frozenRow builds the row of one installed item no kit item backs: the
 // version and the pending action come from the lock and the registry, the
-// status from the reconciliation — a broken or modified item outranks the
-// frozen state it is shown in. desc is the description the row carries;
+// state — a broken or modified item outranks the frozen state it is shown
+// in — internal/view decides. desc is the description the row carries;
 // frozen rows have no kit item behind them, so it says what the row is.
 func frozenRow(key string, base Status, desc string, in TreeInput, rec *plan.Reconciliation, pending *state.Pending) ItemRow {
 	kitName, id, _ := strings.Cut(key, "/")
@@ -451,13 +392,8 @@ func frozenRow(key string, base Status, desc string, in TreeInput, rec *plan.Rec
 			r.InstalledVersion = item.Version
 		}
 	}
-	switch {
-	case rec.BrokenItem(key):
-		r.Status = StatusBroken
-		r.Reason = brokenReason
-	case rec.ModifiedItem(key):
-		r.Status = StatusModified
-	}
+	decided := view.DecideFrozen(key, base, rec)
+	r.Status, r.Reason = decided.State, decided.Reason
 	r.Pending = pendingOf(pending, key)
 	return r
 }
@@ -538,7 +474,7 @@ func collapseOf(states map[string]bool, name string, unreadable bool) bool {
 }
 
 // DefaultAction names the action the space key toggles for a status (7.1):
-// install for an available item, update for an update available, downgrade
+// te available, downgrade
 // for a downgrade available, reset for a broken one. The other states have
 // none; the footer names the applicable key instead. The bool reports
 // whether the status has a default action at all.

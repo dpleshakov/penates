@@ -1,4 +1,4 @@
-package tui
+package view
 
 import (
 	"fmt"
@@ -9,23 +9,24 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 )
 
-// The prose the user sees for the planner's structured verdicts: conflicts
-// render one line per cause, exclusions list their conflicts first. The
-// screens, the tree reasons, and the summary all speak these lines.
+// The prose the user sees for the planner's structured verdicts: a conflict
+// renders one line per cause, an exclusion lists its conflicts first. The
+// screens, the tree reasons, the summary, and the CLI item lines all speak
+// these lines.
 
-// exclusionLines renders an excluded item's causes: the structured
+// ExclusionLines renders an excluded item's causes: the structured
 // conflicts first, then the plain reasons.
-func exclusionLines(ip *plan.ItemPlan) []string {
+func ExclusionLines(ip *plan.ItemPlan) []string {
 	lines := make([]string, 0, len(ip.Conflicts)+len(ip.Reasons))
 	for _, c := range ip.Conflicts {
-		lines = append(lines, renderConflict(c))
+		lines = append(lines, ConflictLine(c))
 	}
 	return append(lines, ip.Reasons...)
 }
 
-// renderConflict renders one structured planner conflict as the prose the
+// ConflictLine renders one structured planner conflict as the prose the
 // user sees: every contribution kind and cause has its own line here.
-func renderConflict(c plan.Conflict) string {
+func ConflictLine(c plan.Conflict) string {
 	rivals := strings.Join(c.Rivals, ", ")
 	switch c.Cause {
 	case plan.CauseClaimed:

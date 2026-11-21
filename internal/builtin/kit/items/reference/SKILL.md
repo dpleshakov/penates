@@ -1,9 +1,9 @@
 ---
 name: penates
-description: penates product reference — the model, ownership, item states, update and removal rules, common errors, keys, and where the state lives. Answer questions about penates behavior from here.
+description: penates product reference — the model, ownership, item states, update and removal rules, common errors, keys, the CLI contract, and where the state lives. Answer questions about penates behavior from here.
 metadata:
   author: The penates project
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # penates reference
@@ -11,9 +11,9 @@ metadata:
 penates installs, updates, and removes agent-harness customization — skills,
 instruction files, plugins, configuration fragments — from local kit
 directories into a harness configuration directory (a target), such as
-`~/.config/opencode`. The user selects items in a terminal UI; a per-target
-lock records everything penates writes. What penates did not write it never
-touches.
+`~/.config/opencode`. People work in the terminal UI; agents and automation
+work through the command line (`penates --help`). A per-target lock records
+everything penates writes. What penates did not write it never touches.
 
 ## Terminology
 
@@ -53,23 +53,28 @@ from the lock with a report; unchanged content is deleted.
 
 ## Item states
 
-| Glyph | State |
-|---|---|
-| ○ | Available (not installed) |
-| ● | Installed, matches the kit |
-| ↑ | Update available |
-| ↓ | Downgrade available (never chosen by default) |
-| ~ | Modified by the user; kit content unchanged |
-| ✗ | Conflict: user modifications vs new kit content |
-| ! | Broken: owned content is missing from the target |
-| △ | Warning: kit content changed without a version change |
-| ◌ | Orphan: removed from its kit; frozen, removable |
-| ⊘ | Unavailable: the kit cannot be read |
+The state of an item is decided once and rendered twice: a glyph in the
+terminal UI, a state word in the CLI. The words are the first token of
+every item line the CLI prints.
 
-Pending actions take a separate mark at the row's right edge: ✓ apply,
-↺ reset, − remove. Version ordering comes from the semver in `item.yaml`
-alone — no git, no hashes. Items are pinned to their source kit: an item
-with the same id in another kit never replaces an installed one.
+| Glyph | Word | State |
+|---|---|---|
+| ○ | `available` | Not installed; nothing stands in the way |
+| ● | `installed` | Matches the kit |
+| ↑ | `update-available` | The kit version is higher |
+| ↓ | `downgrade-available` | The kit version is lower (never chosen by default) |
+| ~ | `modified` | Modified by the user; kit content unchanged |
+| ✗ | `conflict` | A planned verdict claims a taken place |
+| ! | `broken` | Owned content is missing from the target |
+| △ | `warning` | Kit content changed without a version change, or a broken item declaration |
+| ◌ | `orphan` | Removed from its kit; frozen, removable |
+| ⊘ | `unavailable` | The kit cannot be read; installed items are frozen |
+
+The set of glyphs and the set of words are stable contracts. Pending
+actions take a separate mark at the row's right edge: ✓ apply, ↺ reset,
+− remove. Version ordering comes from the semver in `item.yaml` alone — no
+git, no hashes. Items are pinned to their source kit: an item with the same
+id in another kit never replaces an installed one.
 
 ## Common errors
 
@@ -96,8 +101,7 @@ themselves in targets.
 
 penates performs no network access and no version-control operations: how a
 kit reaches the machine is the owner's concern. It knows no harness —
-destination paths come from kit data. There is no CLI beyond the terminal
-UI; the binary takes `version` and `licenses` subcommands.
+destination paths come from kit data.
 
 ## The built-in kit
 
@@ -107,6 +111,40 @@ name `penates`, and kept in step with the binary's content. Attaching and
 installing is the user's choice. A locally modified built-in kit shows on
 its row, blocks its own update, and is restored by the `Reset builtin kit`
 command after a confirmation.
+
+## The CLI contract
+
+The command line is for agents and automation; the stable skeleton of its
+output and failures is the contract below. `penates --help` names the
+commands; `--target <path>` scopes every target-bound command (the default
+is the last active target, which only the terminal UI changes), and flags
+always come after the command path, so permission rules can match the
+command text by its prefix.
+
+Exit codes, a contract of exactly three values:
+
+| Code | When |
+|---|---|
+| `0` | The command fully did what it was asked: success, including the empty ones (nothing staged, nothing to update), a clean `--dry-run` plan, `--help` |
+| `1` | Any other failure: operational, refusal, confirmation the command could not ask for, a partially failed command |
+| `2` | Usage only: the command line is wrong, and no repeat of it can help |
+
+Error categories, one stderr line per failure in `Error [category]:
+message` form, the message naming the next step. The set is a stable
+contract: never removed or renamed, new ones may be added.
+
+| Category | Covers |
+|---|---|
+| `usage` | A wrong or incomplete command line: unknown command or flag, misplaced flag, malformed `--set`, unknown variable id, required variable without a value |
+| `not_found` | A named thing does not exist: item, kit, target, no active target |
+| `conflict` | The planner refused a write under the ownership rules; the message carries the conflict's prose |
+| `kit` | The kit content is at fault: unreadable `kit.yaml`, broken declaration, unknown placeholder |
+| `staged` | A one-shot command refused: the target holds staged pending actions; apply, clear, or ask who staged them |
+| `first-run` | `kit add` on an empty registry: the first kit is registered by a person, in the terminal UI |
+| `busy` | Another penates process holds the state; close it or retry |
+| `confirmation` | An asking command without `--yes` and without a terminal |
+| `state` | penates' own state unreadable or of another format version; the message names the file to delete |
+| `io` | A file-system failure outside the state, and the fallback for anything else |
 
 ## Keys
 

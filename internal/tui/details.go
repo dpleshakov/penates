@@ -13,6 +13,7 @@ import (
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The content the details pane and the details view render (tui-screens.md
@@ -118,7 +119,7 @@ func RenderItemDetails(d ItemDetails, width int, set Set) []string {
 // other states give it a paragraph of its own.
 func itemStatusSection(d ItemDetails, width int, set Set) []string {
 	r := d.Row
-	head := r.Status.Mark(set) + " " + statusName(r.Status)
+	head := statusMark(r.Status, set) + " " + statusName(r.Status)
 	if versioned(r.Status) && r.InstalledVersion != "" && r.KitVersion != "" && r.InstalledVersion != r.KitVersion {
 		head += ", " + r.InstalledVersion + " → " + r.KitVersion
 		if r.Status == StatusUpdate {
@@ -162,7 +163,7 @@ func itemReason(d ItemDetails) (paras []string, step string) {
 	case StatusConflict:
 		if d.Plan != nil {
 			for _, c := range d.Plan.Conflicts {
-				if s := renderConflict(c); s != "" {
+				if s := view.ConflictLine(c); s != "" {
 					paras = append(paras, s)
 					if step == "" {
 						step = conflictNextStep(c)
@@ -178,7 +179,7 @@ func itemReason(d ItemDetails) (paras []string, step string) {
 			"The kit content is unchanged; your version is kept on updates.")
 		step = statusNextStep(r.Status)
 	case StatusBroken:
-		paras = append(paras, brokenReason)
+		paras = append(paras, r.Reason)
 		step = statusNextStep(r.Status)
 	case StatusWarning:
 		if r.Reason != "" {
@@ -391,7 +392,7 @@ func jsonPointers(rec *lock.Item, p *plan.ItemPlan, file string) []string {
 func majorNote(width int, set Set) []string {
 	return wrapIndent(
 		"A major version changes behavior. Review the changelog below, then press space again to select.",
-		StatusWarning.Mark(set)+" ", "  ", width,
+		statusMark(StatusWarning, set)+" ", "  ", width,
 	)
 }
 

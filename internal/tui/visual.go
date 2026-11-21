@@ -2,6 +2,8 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The visual language of the interface (tui-screens.md 3): status and
@@ -92,31 +94,34 @@ func (m mark) rendered(set Set) string {
 }
 
 // Status is the state of an item shown by a glyph and a color together
-// (3.1). The tree model maps the states of the scan onto a Status.
-type Status int
+// (3.1): internal/view decides it once from the kit item, the lock record,
+// the reconciliation and the planner's verdict; this package's table below
+// renders the decision as a glyph, the CLI renders the same states as
+// words. One decision, two renderings.
+type Status = view.State
 
 const (
 	// StatusAvailable — not installed.
-	StatusAvailable Status = iota
+	StatusAvailable = view.StateAvailable
 	// StatusInstalled — matches the kit.
-	StatusInstalled
+	StatusInstalled = view.StateInstalled
 	// StatusUpdate — an update is available.
-	StatusUpdate
+	StatusUpdate = view.StateUpdate
 	// StatusDowngrade — a downgrade is available.
-	StatusDowngrade
+	StatusDowngrade = view.StateDowngrade
 	// StatusModified — modified by the user; kit content unchanged.
-	StatusModified
+	StatusModified = view.StateModified
 	// StatusConflict — a claimed location collides: with a rival, another
 	// owner, or changed content.
-	StatusConflict
+	StatusConflict = view.StateConflict
 	// StatusBroken — owned content is missing from the target.
-	StatusBroken
+	StatusBroken = view.StateBroken
 	// StatusWarning — kit content changed without a version change.
-	StatusWarning
+	StatusWarning = view.StateWarning
 	// StatusOrphan — removed from its kit.
-	StatusOrphan
+	StatusOrphan = view.StateOrphan
 	// StatusUnavailable — the kit cannot be read.
-	StatusUnavailable
+	StatusUnavailable = view.StateUnavailable
 )
 
 // statusMarks are the status glyphs of 3.1: both sets and the colors.
@@ -133,11 +138,8 @@ var statusMarks = [...]mark{
 	StatusUnavailable: {unicode: "⊘", ascii: "#", role: roleDim},
 }
 
-// Glyph returns the status glyph of the set (3.1), uncolored.
-func (s Status) Glyph(set Set) string { return statusMarks[s].glyph(set) }
-
-// Mark returns the status glyph of the set in its color (3.1).
-func (s Status) Mark(set Set) string { return statusMarks[s].rendered(set) }
+// statusMark returns the status glyph of the set in its color (3.1).
+func statusMark(s Status, set Set) string { return statusMarks[s].rendered(set) }
 
 // Pending is a pending action shown in a column at the right edge of the
 // tree, separate from the status (3.2). Install, update and downgrade share

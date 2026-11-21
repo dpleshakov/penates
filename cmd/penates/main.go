@@ -1,14 +1,23 @@
 // Command penates installs kit items into agent harness configuration directories.
 //
-// The command line is cobra's: the first argument is always a command, and
-// penates with no arguments opens the terminal UI — the kit is registered
-// from the first-run screen, never from the arguments. The product behavior
-// is specified in docs/concept.md; the modules and their rules in
-// docs/architecture.md.
+// The command tree and the client behavior live in internal/cli; this
+// main passes the build stamp, the streams, and the TUI runner in, and
+// exits with the code the run returned. The product behavior is specified
+// in docs/concept.md; the modules and their rules in docs/architecture.md.
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/dpleshakov/penates/internal/builtin"
+	"github.com/dpleshakov/penates/internal/cli"
+	"github.com/dpleshakov/penates/internal/lock"
+	"github.com/dpleshakov/penates/internal/state"
+	"github.com/dpleshakov/penates/internal/tui"
 )
 
 // version and commit are stamped at build time with
@@ -20,5 +29,39 @@ var (
 )
 
 func main() {
-	os.Exit(run(build{version: version, commit: commit}, os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(cli.Run(cli.Build{Version: version, Commit: commit}, cli.Options{TUI: runTUI}, os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// runTUI opens the terminal interface over the penates data directory.
+func runTUI(stdout io.Writer) error {
+	dataDir, err := state.DefaultDir()
+	if err != nil {
+		return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
+	}
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
+	}
+	// The built-in kit is brought in step with the binary before the
+	// interface opens; its report rides into the model for the screens.
+	report, err := builtin.Sync(dataDir, stateStore, builtin.Content)
+	if err != nil {
+		return &cli.Error{Category: cli.CategoryIO, Message: err.Error(), Cause: err}
+	}
+	app := tui.NewApp(stateStore, lock.NewStore(dataDir))
+	app.Startup = &report
+	app.BuiltinFS = builtin.Content
+
+	final, err := tea.NewProgram(app.Initial(), tea.WithAltScreen()).Run()
+	if err != nil {
+		return err
+	}
+	// The changes applied during the session print to the regular output
+	// after the interface closes, so a record remains in the terminal
+	// history (10.4); nothing prints when nothing was applied. A failure
+	// to write it leaves the interface closed either way.
+	if rec := tui.ExitRecord(final); rec != "" {
+		_, _ = fmt.Fprint(stdout, rec)
+	}
+	return nil
 }

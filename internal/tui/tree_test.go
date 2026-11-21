@@ -14,6 +14,7 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/target"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // Fixture values for the tree model: a registry with three kits attached to
@@ -402,8 +403,8 @@ func TestBuildTreeStatuses(t *testing.T) {
 		if r.Status != StatusBroken {
 			t.Errorf("status = %v, want %v", r.Status, StatusBroken)
 		}
-		if r.Reason != brokenReason {
-			t.Errorf("reason = %q, want %q", r.Reason, brokenReason)
+		if r.Reason != view.BrokenReason {
+			t.Errorf("reason = %q, want %q", r.Reason, view.BrokenReason)
 		}
 	})
 
@@ -429,8 +430,8 @@ func TestBuildTreeStatuses(t *testing.T) {
 		if r.Status != StatusBroken {
 			t.Errorf("status = %v, want %v", r.Status, StatusBroken)
 		}
-		if r.Reason != brokenReason {
-			t.Errorf("reason = %q, want %q", r.Reason, brokenReason)
+		if r.Reason != view.BrokenReason {
+			t.Errorf("reason = %q, want %q", r.Reason, view.BrokenReason)
 		}
 	})
 
@@ -508,7 +509,7 @@ func TestBuildTreeVerdictOnAvailableItem(t *testing.T) {
 	if r.Status != StatusConflict {
 		t.Errorf("status = %v, want %v", r.Status, StatusConflict)
 	}
-	if want := renderConflict(conflict); r.Reason != want {
+	if want := view.ConflictLine(conflict); r.Reason != want {
 		t.Errorf("reason = %q, want %q", r.Reason, want)
 	}
 	if rival := findItem(t, rows, "ex/two"); rival.Status != StatusAvailable {

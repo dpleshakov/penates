@@ -12,6 +12,7 @@ import (
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // Fixtures for the details renderers: the conflict, modified and major
@@ -34,7 +35,7 @@ func conflictItem() ItemDetails {
 			KitName:          "personal-opencode",
 			ID:               "git-via-gh",
 			Status:           StatusConflict,
-			Reason:           renderConflict(confl),
+			Reason:           view.ConflictLine(confl),
 			Tags:             []string{"gh"},
 			Installed:        true,
 			InstalledVersion: "1.2.0",

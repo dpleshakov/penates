@@ -20,6 +20,7 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/target"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The main screen (tui-screens.md 4): the tree of kits and items rendered
@@ -1300,7 +1301,7 @@ func (m *model) kitItem(key string) *kit.Item {
 			continue
 		}
 		for _, it := range k.Items {
-			if rowToken(it) == itemID {
+			if view.RowID(it) == itemID {
 				return it
 			}
 		}

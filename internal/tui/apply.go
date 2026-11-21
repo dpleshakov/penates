@@ -15,6 +15,7 @@ import (
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/target"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The apply flow of section 10 (tui-screens.md): the pending actions of the
@@ -263,7 +264,7 @@ func summarize(installs, removals []*plan.ItemPlan, lk *lock.Lock, snap *target.
 	var installItems, updateItems, removeItems, resetItems []summaryItem
 	for _, ip := range installs {
 		if ip.Status == plan.StatusError {
-			s.excluded = append(s.excluded, summaryExcluded{id: planID(ip), reasons: exclusionLines(ip)})
+			s.excluded = append(s.excluded, summaryExcluded{id: planID(ip), reasons: view.ExclusionLines(ip)})
 			continue
 		}
 		verb, lines := installLines(ip, lk, snap, resets)
@@ -285,7 +286,7 @@ func summarize(installs, removals []*plan.ItemPlan, lk *lock.Lock, snap *target.
 	}
 	for _, ip := range removals {
 		if ip.Status == plan.StatusError {
-			s.excluded = append(s.excluded, summaryExcluded{id: planID(ip), reasons: exclusionLines(ip)})
+			s.excluded = append(s.excluded, summaryExcluded{id: planID(ip), reasons: view.ExclusionLines(ip)})
 			continue
 		}
 		removeItems = append(removeItems, summaryItem{
@@ -488,7 +489,7 @@ func renderSummary(s applySummary, width int, set Set) []string {
 		}
 		rows = append(rows, "excluded")
 		for _, e := range s.excluded {
-			left := "  " + StatusConflict.Mark(set) + " " + e.id
+			left := "  " + statusMark(StatusConflict, set) + " " + e.id
 			if len(e.reasons) == 0 {
 				rows = append(rows, left)
 				continue
@@ -770,7 +771,7 @@ func runRemovals(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 		case plan.StatusRemove:
 			steps = append(steps, stepOf(ip, verbRemove, lk))
 		case plan.StatusError:
-			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: verbRemove, state: stepKept, excluded: exclusionLines(ip)})
+			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: verbRemove, state: stepKept, excluded: view.ExclusionLines(ip)})
 		}
 	}
 	results := apply.Remove(target, &plan.Plan{Items: items}, lk, store, on)
@@ -812,7 +813,7 @@ func runInstalls(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 			}
 			steps = append(steps, st)
 		case plan.StatusError:
-			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: planVerb(ip, lk, resets), state: stepKept, excluded: exclusionLines(ip)})
+			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: planVerb(ip, lk, resets), state: stepKept, excluded: view.ExclusionLines(ip)})
 		}
 	}
 	results := apply.Apply(target, &plan.Plan{Items: items}, lk, store, on)
@@ -951,7 +952,7 @@ func renderProgress(steps []applyStep, spinner int, set Set) []string {
 		case stepDone:
 			cell = doneMark.rendered(set)
 		case stepFailed:
-			cell = StatusConflict.Mark(set)
+			cell = statusMark(StatusConflict, set)
 		case stepRunning:
 			cell = gloss(roleAccent).Render(frames[spinner%len(frames)])
 		default:
@@ -1005,10 +1006,10 @@ func renderResults(err string, steps []applyStep, deferred, errs []string, set S
 				rows = append(rows, strings.Repeat(" ", resultNoteColumn)+Dim(note))
 			}
 		case st.state == stepFailed:
-			rows = append(rows, resultLine(st, StatusConflict.Mark(set), set))
+			rows = append(rows, resultLine(st, statusMark(StatusConflict, set), set))
 			rows = append(rows, strings.Repeat(" ", resultNoteColumn)+Dim(st.err))
 		case st.excluded != nil:
-			left := "  " + StatusConflict.Mark(set) + fmt.Sprintf(" %-9s  %s", "excluded", st.id)
+			left := "  " + statusMark(StatusConflict, set) + fmt.Sprintf(" %-9s  %s", "excluded", st.id)
 			if len(st.excluded) == 0 {
 				rows = append(rows, left)
 				continue

@@ -802,7 +802,7 @@ func (m *model) addPreviewLines(width int) []string {
 		// one the screen shows.
 		warn := fmt.Sprintf("The kit proposes %s. The current target is %s.", k.TargetHint, displayPath(m.target))
 		lines = append(lines, "")
-		lines = append(lines, wrapIndent(warn, StatusWarning.Mark(m.set)+" ", "  ", width)...)
+		lines = append(lines, wrapIndent(warn, statusMark(StatusWarning, m.set)+" ", "  ", width)...)
 	}
 	return lines
 }
@@ -884,7 +884,7 @@ func (m *model) targetExistsLine() string {
 // errorLines renders one preview error (6.5): the ✗ glyph, the first
 // line, the wrapped rest.
 func errorLines(width int, set Set, text string) []string {
-	return wrapIndent(text, StatusConflict.Mark(set)+" ", "  ", width)
+	return wrapIndent(text, statusMark(StatusConflict, set)+" ", "  ", width)
 }
 
 // detailLines render the indented detail lines under a preview error: the

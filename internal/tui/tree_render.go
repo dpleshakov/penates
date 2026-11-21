@@ -62,14 +62,14 @@ func renderKitRow(g KitRow, set Set) string {
 	s := "  " + m.glyph(set) + " " + g.Name
 	switch {
 	case g.Unreadable:
-		s += "  " + StatusUnavailable.Mark(set) + " unreadable"
+		s += "  " + statusMark(StatusUnavailable, set) + " unreadable"
 	case g.Detaching:
 		s += "  " + Dim("detaching")
 	case g.Modified:
 		if g.UpdateBlocked {
-			s += "  " + StatusModified.Mark(set) + " " + Dim("modified locally — update blocked")
+			s += "  " + statusMark(StatusModified, set) + " " + Dim("modified locally — update blocked")
 		} else {
-			s += "  " + StatusModified.Mark(set) + " " + Dim("modified locally")
+			s += "  " + statusMark(StatusModified, set) + " " + Dim("modified locally")
 		}
 	case g.Filtering:
 		s += "  " + Dim(fmt.Sprintf("%d of %d", g.Matches, g.Total))
@@ -87,7 +87,7 @@ func renderKitRow(g KitRow, set Set) string {
 func summaryGlyphs(summary []GlyphCount, set Set) string {
 	parts := make([]string, 0, len(summary))
 	for _, gc := range summary {
-		parts = append(parts, gc.Status.Mark(set)+strconv.Itoa(gc.Count))
+		parts = append(parts, statusMark(gc.Status, set)+strconv.Itoa(gc.Count))
 	}
 	return strings.Join(parts, " ")
 }
@@ -96,7 +96,7 @@ func summaryGlyphs(summary []GlyphCount, set Set) string {
 // description — or the reason of a conflict, broken or warning item — and
 // the pending mark flush to the right edge of the tree (3.2, 3.4).
 func renderItemRow(r ItemRow, l Layout, set Set) string {
-	s := "  " + r.Status.Mark(set) + " " + r.ID
+	s := "  " + statusMark(r.Status, set) + " " + r.ID
 	if tags := strings.Join(r.Tags, " "); l.Columns.Tags && tags != "" {
 		s += "  " + Dim(tags)
 	}

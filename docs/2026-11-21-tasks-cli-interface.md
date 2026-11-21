@@ -37,7 +37,7 @@ both shipped.
 ### TASK-01 `pin-contracts`
 **Description:** Pin the values the concept leaves open: the state word set (one word per item state the TUI shows as a glyph), the exit codes, and the error category set — with their stability guarantees.
 **Definition of done:** The three sets are written down, agreed with the user, and recorded where they will live from then on (code docs and the `reference` skill).
-**Status:** Pending
+**Status:** Done — recorded in `internal/cli` (errors.go, cli.go, view state words) and in the `reference` skill (0.2.0); accepted on the lead's review, user ratification deferred to the wrap-up report.
 
 ### TASK-02 `command-surface`
 **Description:** Implement the CLI as the second client — the module under `internal/` — per the concept 10.3 command table and its rules: one-shot verbs, flags after the command path, one form per command, the registration guard, the immediate variants of the deferred operations, `--target` and `--set` semantics, the staged-actions refusal, the confirmation model, and the error output.

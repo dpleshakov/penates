@@ -59,7 +59,7 @@ license gate. Adding or replacing a direct dependency follows the Dependencies r
 | `github.com/goccy/go-yaml` | production | MIT | Decodes kit manifests; the swap to `go.yaml.in/yaml/v3` was reviewed on 2026-11-08 and not taken. |
 | `github.com/google/go-cmp` | tests | BSD-3-Clause | Readable diffs of plans, locks, and snapshots; not linked into the release binary. |
 | `github.com/muesli/termenv` | tests | MIT | Direct only so tests can force color profiles; production code reaches it through lipgloss. Maintenance mode upstream; `charmbracelet/colorprofile` is its successor. |
-| `github.com/spf13/cobra` | production | Apache-2.0 | Command tree, help, suggestions, and shell completion. The surface is thin — three commands, no flags — kept for what cobra gives without it. |
+| `github.com/spf13/cobra` | production | Apache-2.0 | Command tree, help, suggestions, and shell completion. The tree of both built-in commands and the CLI client lives here — `internal/cli`, with `cmd/penates` as the entry — and the surface grew with the second client: command groups and per-command flags on top of the bare tree the TUI-only binary had. |
 | `github.com/tailscale/hujson` | production | BSD-3-Clause | The JSONC parser behind `internal/jsonc`; the reference implementation of the JWCC format, from Tailscale. No tagged releases: the version is a pseudo-version pinned by `go.sum`. |
 | `golang.org/x/mod` | production | BSD-3-Clause | The `semver` package only: version ordering for kits. |
 
@@ -67,13 +67,13 @@ license gate. Adding or replacing a direct dependency follows the Dependencies r
 
 The core produces and applies plans; clients render them. The concept fixes two
 clients of equal capability — the CLI for AI agents and automation, the TUI for
-humans; the TUI is built, and the CLI is not yet.
+humans.
 
 ### Modules
 
 | Package | Responsibility |
 |---|---|
-| `cmd/penates` | Process entry: the cobra command tree, wiring, running the TUI. No logic. |
+| `cmd/penates` | Process entry: the build stamp, the streams, and the TUI runner handed to `internal/cli`, and the TUI opened over the data directory. No logic. |
 | `internal/licenses` | The license texts of the code linked into the binary: penates and the Go distribution embedded as values, the third-party modules of the release platform embedded per platform by the release build — a PLACEHOLDER keeps every platform directory in the other builds. `Text` assembles the output of `penates licenses`; the third-party set is optional, and its absence is stated. |
 | `internal/builtin` | The documentation kit penates ships inside the binary: the kit files embedded under `kit/`, and the startup sync that unpacks them into the data directory, keeps the copy in step with the embedded content by the three-state model (concept: the built-in kit), and registers the kit under its reserved name while it is free. The package knows no harness — the kit's own data carries the target hint and the install destinations. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. Read is tolerant: an item whose declaration has problems stays in the kit with its problems attached, and planning skips it; Load keeps the strict contract on top. |
@@ -85,21 +85,34 @@ humans; the TUI is built, and the CLI is not yet.
 | `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (concept: json contributions). Knows no file system. |
 | `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, the exclusions of items with plain reasons and conflicts among them, the conflicts as structure — the contribution kind, the file, block, or JSON location, and the owning installed item —, the answers the plan used, and the JSON locations each item owns. Implements the rules the concept specifies: the three-state conflict model, the per-location table for json contributions, the cross-item conflicts, the variable substitution and required-variable rule, the version table for updates with reset to kit on request, the reconciliation of the lock with the target by recorded hashes, and the removal of installed items. Performs no I/O. |
 | `internal/apply` | Executes a plan as steps: every step applies or removes one item completely or not at all, writes atomically (temp file and rename), and the lock records only completed items. The per-item steps are the exposed unit; Apply and Remove are compositions over them that report the start and the result of every step, so a client can show per-item progress. After an interruption the package reconciles the lock with the target by removing the staged temp files and running the plan-side verdict over the snapshot (concept: atomicity, removal). |
-| `internal/tui` | The Bubble Tea client: the main screen — the tree of kits and items rendered through the layout and the visual language of the spec, the details pane and view, the filter, the add-kit input, the apply summary, form, and results (concept: interfaces). The only package that knows about the terminal. |
+| `internal/view` | The one decision both clients render: the state of every item, decided once from the kit item, its lock record, the lock-vs-target reconciliation, and the planner's verdict, with the prose of conflicts and exclusions beside it. The TUI renders a state as a glyph and a color, the CLI as a state word — one decision, two renderings, so the words and the glyphs cannot drift apart. Performs no I/O. |
+| `internal/tui` | The Bubble Tea client: the main screen — the tree of kits and items rendered through the layout and the visual language of the spec, the details pane and view, the filter, the add-kit input, the apply summary, form, and results (concept: interfaces). The states it shows are the ones internal/view decides, rendered as glyphs. The only package that knows about the terminal. |
+| `internal/cli` | The command-line client: the cobra command tree and the client behavior — the reading commands (`status`, `show`, `kit list`, `target list`), the `Error [category]: message` contract with its exit codes, and the flags-after-the-command-path rule (concept: interfaces). Imported by nothing but `cmd/penates`. |
 
 ### Dependencies
 
 ```mermaid
 flowchart LR
-    TUI["internal/tui"] --> KIT["internal/kit"]
-    TUI --> ST["internal/state"]
-    TUI --> PL["internal/plan"]
+    CLI["internal/cli"] --> VIEW["internal/view"]
+    CLI --> ST["internal/state"]
+    CLI --> BI["internal/builtin"]
+    CLI --> KIT["internal/kit"]
+    CLI --> LK["internal/lock"]
+    CLI --> TG["internal/target"]
+    CLI --> PL["internal/plan"]
+    TUI["internal/tui"] --> VIEW
+    TUI --> KIT["internal/kit"]
+    TUI --> ST
+    TUI --> PL
     TUI --> AP["internal/apply"]
-    TUI --> BI["internal/builtin"]
-    BI["internal/builtin"] --> ST
+    TUI --> BI
+    BI --> ST
+    VIEW --> KIT
+    VIEW --> LK
+    VIEW --> PL
     PL -- types and values only --> KIT
-    PL --> LK["internal/lock"]
-    PL --> TG["internal/target"]
+    PL --> LK
+    PL --> TG
     PL --> JC["internal/jsonc"]
     AP --> PL
     AP --> LK
@@ -112,9 +125,11 @@ flowchart LR
 Rules:
 
 - `internal/plan` imports no package that performs I/O; it receives kits, lock content,
-  and the snapshot as values. A future command-line client reuses the core unchanged.
+  and the snapshot as values. Both clients reuse the core unchanged.
 - No package knows any harness (a concept principle): destination paths come from kit data only.
 - `internal/tui` is imported by nothing.
+- `internal/cli` is imported by nothing but `cmd/penates`; the runner of the TUI is
+  injected into it, so the two clients never import each other.
 
 ### Data flow
 
@@ -126,7 +141,7 @@ Rules:
 3. **Plan.** The lock is reconciled with the target by recorded hashes first
    (concept: atomicity): the staged files of an interrupted apply are removed, and the
    modified and broken items are known. Then `internal/plan` turns selection
-   plus inputs into per-item actions and errors; the TUI shows the summary
+   plus inputs into per-item actions and errors; the client shows the summary
    (concept: interfaces) and collects missing input.
 4. **Apply.** `internal/apply` processes items one at a time: validate the item's
    contributions against the target, write through temp files, record the item in the
@@ -153,12 +168,12 @@ Rules:
 ```
 penates/
 ├── cmd/penates/          # main package
-├── internal/             # one package per module: kit, state, lock, target, relpath, plan, apply, tui, licenses, builtin
+├── internal/             # one package per module: kit, state, lock, target, relpath, plan, apply, view, tui, cli, licenses, builtin
 ├── docs/                 # the concept, this document, and the archive
 └── .github/workflows/    # CI
 ```
 
 `internal/` keeps the core unimportable while its API settles; the boundary mirrors the
-client/core split — a second client adds a directory under `cmd/` and touches nothing
-else. The repository root holds `go.mod`, `Makefile`, `.golangci.yml`, `README.md`,
+client/core split — a second client is a package under `internal/`, and `cmd/` stays a
+process entry. The repository root holds `go.mod`, `Makefile`, `.golangci.yml`, `README.md`,
 `CHANGELOG.md`, `LICENSE`, and `.gitignore`.

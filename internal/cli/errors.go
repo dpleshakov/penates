@@ -34,7 +34,10 @@ const (
 	// CategoryConflict — the planner refused a write under the ownership
 	// rules: user content in the path, a place owned by another item,
 	// changed content against changed kit content, claims between items.
-	// The message carries the conflict's own prose.
+	// A registration that collides with the state the registry already
+	// holds is a conflict too: a kit already attached, a kit or target
+	// name already registered. The message carries the conflict's own
+	// prose.
 	CategoryConflict Category = "conflict"
 	// CategoryKit — the kit content is at fault: an unreadable kit.yaml,
 	// a broken item declaration, an unknown placeholder in a template.
@@ -70,6 +73,11 @@ type Error struct {
 	Category Category
 	Message  string
 	Cause    error
+	// Details are plain lines printed under the Error line, on the same
+	// stderr: the itemized expansion of a refusal whose Error line stays
+	// one line long, such as the list of staged pending actions. They are
+	// ordinary text, not part of the error format — nothing parses them.
+	Details []string
 }
 
 // Error renders the error for the error interface: "[category] message".
@@ -83,8 +91,9 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 // Print writes err to w in the contract format, one line:
-// `Error [category]: message`. An error that is not, and does not wrap, an
-// *Error prints under the fallback category io: `Error [io]: message`.
+// `Error [category]: message`, followed by the error's detail lines when
+// it carries any. An error that is not, and does not wrap, an *Error
+// prints under the fallback category io: `Error [io]: message`.
 // A nil err writes nothing.
 func Print(err error, w io.Writer) {
 	if err == nil {
@@ -93,6 +102,9 @@ func Print(err error, w io.Writer) {
 	var e *Error
 	if errors.As(err, &e) {
 		_, _ = fmt.Fprintf(w, "Error [%s]: %s\n", e.Category, e.Message)
+		for _, d := range e.Details {
+			_, _ = fmt.Fprintln(w, d)
+		}
 		return
 	}
 	_, _ = fmt.Fprintf(w, "Error [%s]: %s\n", CategoryIO, err)

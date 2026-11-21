@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/dpleshakov/penates/internal/apply"
 	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
@@ -36,6 +37,11 @@ type session struct {
 	reconcil *plan.Reconciliation
 	plans    map[string]*plan.ItemPlan
 	pending  *state.Pending
+
+	// stagedRemoved lists the temp files the write path's reconciliation
+	// removed — the debris of an interrupted apply, reported by the
+	// command that cleaned it.
+	stagedRemoved []string
 }
 
 // openSession resolves the data directory, opens the state, brings the
@@ -99,13 +105,41 @@ func (s *session) resolveTarget(explicit string) *Error {
 	return nil
 }
 
-// loadTarget loads everything the target's lines are built from. The kits
-// read tolerantly, the way the tree loads them: a kit whose kit.yaml or
-// items directory cannot be read stays out and the lines show it as
-// unavailable. The reconciliation runs over the lock and the snapshot
-// alone — the cleanup of an interrupted apply writes the target, and the
-// reading commands write nothing outside the penates data directory.
+// loadTarget loads everything the target's lines are built from, and
+// reconciles the lock with the snapshot without writing: the reading
+// commands write nothing outside the penates data directory.
 func (s *session) loadTarget() *Error {
+	if err := s.loadTargetBase(); err != nil {
+		return err
+	}
+	s.reconcil = plan.Reconcile(s.lock, s.snap)
+	s.planSelection()
+	return nil
+}
+
+// loadTargetForWrite is the write path's load: the same values, but the
+// reconciliation is the apply package's — it removes the staged temp
+// files an interrupted apply left beside their destinations, a write to
+// the target that only a mutating command may make.
+func (s *session) loadTargetForWrite() *Error {
+	if err := s.loadTargetBase(); err != nil {
+		return err
+	}
+	rec, staged, err := apply.Reconcile(s.target, s.lock, s.snap)
+	if err != nil {
+		return &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
+	}
+	s.reconcil = rec
+	s.stagedRemoved = staged
+	s.planSelection()
+	return nil
+}
+
+// loadTargetBase loads everything the target's lines are built from. The
+// kits read tolerantly, the way the tree loads them: a kit whose kit.yaml
+// or items directory cannot be read stays out and the lines show it as
+// unavailable.
+func (s *session) loadTargetBase() *Error {
 	lk, err := s.locks.Load(s.target)
 	if err != nil {
 		return &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
@@ -128,8 +162,6 @@ func (s *session) loadTarget() *Error {
 		return &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
 	}
 	s.snap = snap
-	s.reconcil = plan.Reconcile(lk, snap)
-	s.planSelection()
 	return nil
 }
 

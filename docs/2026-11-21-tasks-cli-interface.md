@@ -42,7 +42,7 @@ both shipped.
 ### TASK-02 `command-surface`
 **Description:** Implement the CLI as the second client — the module under `internal/` — per the concept 10.3 command table and its rules: one-shot verbs, flags after the command path, one form per command, the registration guard, the immediate variants of the deferred operations, `--target` and `--set` semantics, the staged-actions refusal, the confirmation model, and the error output.
 **Definition of done:** Every command of the 10.3 table works per its rules; every scenario of concept section 10 is reachable from the CLI (a parity checklist in the tests); `make check` passes.
-**Status:** Pending
+**Status:** Done — every command of the table landed with the mutating round; the parity scenarios hold in `internal/cli` tests (the concurrency leg is TASK-03's own).
 
 ### TASK-03 `concurrency-guard`
 **Description:** Resolve the architecture known risk: guard overlapping runs over the one state file — refused or serialized, never silently merged (concept: application state).

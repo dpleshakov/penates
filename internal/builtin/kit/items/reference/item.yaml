@@ -1,5 +1,5 @@
 id: reference
-version: 0.2.0
+version: 0.2.1
 description: penates product reference — the model, ownership, item states, errors, keys, the CLI contract, and state
 tags: [docs]
 vars: []

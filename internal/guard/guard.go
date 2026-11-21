@@ -8,8 +8,9 @@
 // lock would still let two runs that each saved a "whole" file merge
 // their changes silently, which the concept rules out (concept:
 // application state). The guard is taken before the first access to the
-// data directory and held until the process ends; the process's death
-// closes the descriptor and releases the hold on its own.
+// data directory and held for the length of the run — the terminal UI
+// until the process ends, whose death closes the descriptor and releases
+// the hold on its own; a command run until its Run returns.
 //
 // The guard refuses, it does not wait: an overlapping run — a second
 // terminal UI, any CLI command while the interface is open — gets the
@@ -52,7 +53,8 @@ func (e *BusyError) Error() string {
 }
 
 // Guard is a held run guard. Keep it referenced for as long as the hold
-// must last — a real run keeps it until the process ends.
+// must last — the terminal UI until the process ends, a command run
+// until its Run returns.
 type Guard struct {
 	file *os.File
 	dir  string

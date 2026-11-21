@@ -243,6 +243,15 @@ func newResetCmd(ask *confirmer) *cobra.Command {
 				}
 				return resetBuiltin(s, out, errOut, ask, dry, yes)
 			}
+			if len(args) != 1 {
+				return &Error{
+					Category: CategoryUsage,
+					Message:  fmt.Sprintf("reset takes one item named %q, or --builtin (run %q)", "kit/item", cmd.CommandPath()+" --help"),
+				}
+			}
+			if err := requireTarget(cmd); err != nil {
+				return err
+			}
 			s, err := beginMutate(cmd)
 			if err != nil {
 				return err
@@ -250,16 +259,10 @@ func newResetCmd(ask *confirmer) *cobra.Command {
 			if err := stagedRefusal(s); err != nil {
 				return err
 			}
-			if len(args) != 1 {
-				return &Error{
-					Category: CategoryUsage,
-					Message:  fmt.Sprintf("reset takes one item named %q, or --builtin (run %q)", "kit/item", cmd.CommandPath()+" --help"),
-				}
-			}
 			return resetItem(s, out, errOut, ask, dry, yes, args[0])
 		},
 	}
-	targetFlag(cmd)
+	flagTarget(cmd)
 	dryRunFlag(cmd)
 	yesFlag(cmd)
 	cmd.Flags().Bool("builtin", false, "reset the built-in kit's directory to the content this binary ships")
@@ -495,6 +498,21 @@ func beginMutate(cmd *cobra.Command) (*session, *Error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// requireTarget is the required-flag check of the one command cobra
+// cannot hold to it: reset --builtin shares the --target definition with
+// the target form and runs without one. The wording is pflag's for a
+// missing required flag, the same the marked commands are refused with.
+func requireTarget(cmd *cobra.Command) *Error {
+	v, _ := cmd.Flags().GetString("target")
+	if v != "" {
+		return nil
+	}
+	return &Error{
+		Category: CategoryUsage,
+		Message:  fmt.Sprintf(`required flag(s) "target" not set (run %q)`, cmd.CommandPath()+" --help"),
+	}
 }
 
 // dryOf and yesOf read the flags every mutating command defines.

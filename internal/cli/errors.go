@@ -28,8 +28,7 @@ const (
 	CategoryUsage Category = "usage"
 	// CategoryNotFound — a named thing does not exist: an item the kits
 	// do not provide and the lock does not hold, an unregistered kit or
-	// target, no active target, removing or resetting an uninstalled
-	// item.
+	// target, removing or resetting an uninstalled item.
 	CategoryNotFound Category = "not_found"
 	// CategoryConflict — the planner refused a write under the ownership
 	// rules: user content in the path, a place owned by another item,
@@ -47,10 +46,6 @@ const (
 	// holds staged pending actions; the message names them and the three
 	// ways out: apply, clear, or ask the person who staged them.
 	CategoryStaged Category = "staged"
-	// CategoryFirstRun — a kit add on an empty registry: the first kit is
-	// registered by a person, through the terminal UI. Past it the CLI
-	// registers freely.
-	CategoryFirstRun Category = "first-run"
 	// CategoryBusy — another penates process holds the state; close it
 	// or retry.
 	CategoryBusy Category = "busy"

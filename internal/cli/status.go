@@ -24,7 +24,7 @@ import (
 // noTargetRegistered is the line the reading commands print on an empty
 // state, exit 0: the question was answered, and the answer is that there
 // is nothing yet.
-const noTargetRegistered = `no target is registered (run "penates target add <path>", or open "penates" for the first run)`
+const noTargetRegistered = `no target is registered (run "penates setup --target <path>", or open "penates" for the first run)`
 
 // newStatusCmd builds "penates status": the target, its kits with their
 // paths, the items with their state words and reasons, and the target's
@@ -102,7 +102,7 @@ func newTargetCmd() *cobra.Command {
 }
 
 // newTargetListCmd builds "penates target list": the registered targets
-// with their display names, the active one, and how much is installed.
+// with their display names and the counts a line can be read by.
 func newTargetListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -122,9 +122,20 @@ func newTargetListCmd() *cobra.Command {
 	}
 }
 
-// targetFlag adds the --target flag of a target-scoped command.
+// targetFlag adds the --target flag of a target-scoped command and marks
+// it required: the command line names the target it acts on. There is no
+// default — the CLI neither reads nor writes which target the terminal UI
+// opens.
 func targetFlag(cmd *cobra.Command) {
-	cmd.Flags().String("target", "", "target directory to act on (default: the last active target)")
+	flagTarget(cmd)
+	_ = cmd.MarkFlagRequired("target")
+}
+
+// flagTarget adds --target without the required mark. reset --builtin
+// shares the command with the target form and runs without one, so its
+// RunE enforces the requirement itself (requireTarget).
+func flagTarget(cmd *cobra.Command) {
+	cmd.Flags().String("target", "", "target directory to act on")
 }
 
 // printStatus lays the target's state out: the header, one section per
@@ -437,15 +448,12 @@ func printKitList(w io.Writer, s *session) error {
 }
 
 // printTargetList lays the registered targets out: the path, the display
-// name, the active one, and the counts a line can be read by. One line per
-// target, contiguous — the list is one block.
+// name, and the counts a line can be read by. One line per target,
+// contiguous — the list is one block.
 func printTargetList(w io.Writer, s *session) error {
 	for _, path := range s.registry.TargetPaths() {
 		t := s.registry.Targets[path]
 		line := "target " + path
-		if path == s.registry.LastTarget {
-			line += "  active"
-		}
 		if t.Name != "" {
 			line += "  name " + t.Name
 		}
@@ -460,11 +468,24 @@ func printTargetList(w io.Writer, s *session) error {
 			return &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
 		}
 		line += fmt.Sprintf("  kits %d  installed %d", kits, len(lk.Items))
+		if n := registryPendingCount(s.registry.Pending[path]); n > 0 {
+			line += fmt.Sprintf("  pending %d", n)
+		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// registryPendingCount counts the staged pending actions recorded for a
+// target: the item actions and the deferred operations together — the
+// number a pending clear reports as cleared.
+func registryPendingCount(p *state.Pending) int {
+	if p == nil {
+		return 0
+	}
+	return len(p.Items) + len(p.Deferred)
 }
 
 // printSections writes the sections separated by blank lines.

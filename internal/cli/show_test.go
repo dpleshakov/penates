@@ -19,7 +19,6 @@ func TestShowAProvidedItem(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "0.9.0"},
 	})
@@ -55,7 +54,6 @@ func TestShowThePendingAction(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "0.9.0"},
 	})
@@ -92,7 +90,6 @@ func TestShowTheVariables(t *testing.T) {
 	})
 	e.register("vars", dir)
 	e.attach("vars", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"vars/needed": {Version: "1.0.0", Answers: map[string]string{"source_path": "/src"}},
 	})
@@ -128,7 +125,6 @@ func TestShowTheFrozenItems(t *testing.T) {
 	e.register("broken", filepath.Join(e.base, "kits", "broken"))
 	e.attach("personal", target)
 	e.attach("broken", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"gone-kit/stray": {Version: "1.1.0"},
 		"broken/legacy":  {Version: "0.4.0"},
@@ -158,7 +154,6 @@ func TestShowAnUnknownItem(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 
 	_, stderr, code := execute(t, testBuild, "show", "personal/nothing", "--target", target)
 
@@ -174,7 +169,7 @@ func TestShowAnUnknownItem(t *testing.T) {
 func TestShowAMalformedArgument(t *testing.T) {
 	newTestEnv(t)
 
-	_, stderr, code := execute(t, testBuild, "show", "justanid")
+	_, stderr, code := execute(t, testBuild, "show", "justanid", "--target", "/somewhere")
 
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2", code)

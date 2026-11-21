@@ -8,52 +8,49 @@ import (
 	"testing"
 )
 
-// The parity scenarios of the registration guard and the kit management
-// commands: the first run belongs to a person, past it the CLI registers
-// freely; the management commands never ask and never write the last
-// active target; detach and forget are the immediate variants.
+// The parity scenarios of the kit management commands: the CLI registers
+// freely — on a virgin registry included; `penates setup` is the first
+// run's CLI form, tested in setup_test.go. The management commands never
+// ask and never touch which target the terminal UI opens; detach and
+// forget are the immediate variants.
 
-// TestKitAddFirstRunGuard pins parity scenario 1: kit add on an empty
-// registry is refused as the first-run category, naming the bare
-// command — and the refusal happens before the built-in kit's startup
-// sync, which would otherwise register one in the same run and make the
-// guard dead.
-func TestKitAddFirstRunGuard(t *testing.T) {
+// TestKitAddOnAnEmptyRegistry pins the first half of parity scenario 1:
+// on a virgin machine kit add registers the kit and attaches it to the
+// --target, registering the target — the guard the refusal once raised
+// is gone, and `penates setup` is the agent's other way to begin.
+func TestKitAddOnAnEmptyRegistry(t *testing.T) {
 	e := newTestEnv(t)
 	dir := e.mutateKit("personal")
 	target := filepath.Join(e.base, "harness")
 
 	stdout, stderr, code := execute(t, testBuild, "kit", "add", dir, "--target", target)
 
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
-	if stdout != "" {
-		t.Errorf("stdout = %q, want nothing", stdout)
+	want := strings.Join([]string{
+		"kit personal  " + dir,
+		"  attached  " + target,
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
-	want := "Error [first-run]: no kit is registered yet (run \"penates\" — the first kit is registered through the terminal UI)\n"
-	if stderr != want {
-		t.Errorf("stderr = %q, want %q", stderr, want)
-	}
-	// The proof of the order: the sync never ran, so the registry holds
-	// no kit — the built-in one included.
 	reg := registryOf(e)
-	if len(reg.Kits) != 0 {
-		t.Errorf("the registry holds kits after the refusal: %+v", reg.Kits)
+	if _, ok := reg.Kits["personal"]; !ok {
+		t.Error("the kit was not registered")
+	}
+	if _, ok := reg.Targets[target]; !ok {
+		t.Error("the target was not registered")
 	}
 }
 
-// TestKitAddRegistersAndAttaches pins parity scenario 12: past the first
-// kit the CLI registers freely — the kit is registered under the name
-// its kit.yaml carries and attached to the target, and the last active
-// target stays the CLI's to never write.
+// TestKitAddRegistersAndAttaches pins parity scenario 12: the kit is
+// registered under the name its kit.yaml carries and attached to the
+// target the --target names, and the last active target stays the CLI's
+// to never write — or read.
 func TestKitAddRegistersAndAttaches(t *testing.T) {
 	e := newTestEnv(t)
-	// A command has run before, so the built-in kit is registered and
-	// the guard is past.
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
 	dir := e.mutateKit("personal")
 	target := filepath.Join(e.base, "harness")
 
@@ -82,70 +79,10 @@ func TestKitAddRegistersAndAttaches(t *testing.T) {
 	}
 }
 
-// TestKitAddToTheLastActiveTarget: without --target the kit attaches to
-// the last active one.
-func TestKitAddToTheLastActiveTarget(t *testing.T) {
-	e := newTestEnv(t)
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
-	seed := e.mutateKit("seed")
-	other := e.writeKit("other", map[string]string{
-		"kit.yaml":                 "name: other\nshared:\n  - AGENTS.md\n",
-		"items/greeting/item.yaml": "id: greeting\nversion: 1.0.0\ncontributes:\n  - section: note.md\n    to: AGENTS.md\n",
-		"items/greeting/note.md":   "Greets.\n",
-	})
-	target := filepath.Join(e.base, "harness")
-	e.register("seed", seed)
-	e.attach("seed", target)
-	e.activate(target)
-
-	stdout, stderr, code := execute(t, testBuild, "kit", "add", other)
-
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
-	}
-	if !strings.Contains(stdout, "  attached  "+target) {
-		t.Errorf("stdout lacks the attachment to the last active target:\n%s", stdout)
-	}
-	attached := false
-	for _, a := range registryOf(e).Attachments {
-		if a.Kit == "other" && a.Target == target {
-			attached = true
-		}
-	}
-	if !attached {
-		t.Error("the kit was not attached to the last active target")
-	}
-}
-
-// TestKitAddWithoutTargetIsUsage pins the guard of the attachment: no
-// --target and no last active target is an incomplete command line.
-func TestKitAddWithoutTargetIsUsage(t *testing.T) {
-	e := newTestEnv(t)
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
-	dir := e.mutateKit("personal")
-
-	_, stderr, code := execute(t, testBuild, "kit", "add", dir)
-
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
-	}
-	want := "Error [usage]: no target is given (pass --target <path>)\n"
-	if stderr != want {
-		t.Errorf("stderr = %q, want %q", stderr, want)
-	}
-}
-
 // TestKitAddUnreadablePathIsKitError: the kit content is to blame, and
 // the refusal names the file that could not be read.
 func TestKitAddUnreadablePathIsKitError(t *testing.T) {
 	e := newTestEnv(t)
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
 	missing := filepath.Join(e.base, "nowhere")
 
 	_, stderr, code := execute(t, testBuild, "kit", "add", missing, "--target", filepath.Join(e.base, "harness"))
@@ -163,9 +100,6 @@ func TestKitAddUnreadablePathIsKitError(t *testing.T) {
 // refused as a conflict.
 func TestKitAttachRegistersNewTargetAndRefusesRepeat(t *testing.T) {
 	e := newTestEnv(t)
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
 	dir := e.mutateKit("personal")
 	e.register("personal", dir)
 	target := filepath.Join(e.base, "harness")
@@ -199,9 +133,6 @@ func TestKitAttachRegistersNewTargetAndRefusesRepeat(t *testing.T) {
 // hold cannot be attached.
 func TestKitAttachUnregisteredKitIsNotFound(t *testing.T) {
 	e := newTestEnv(t)
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
-	}
 
 	_, stderr, code := execute(t, testBuild, "kit", "attach", "personal", "--target", filepath.Join(e.base, "harness"))
 

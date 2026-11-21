@@ -122,19 +122,21 @@ func openSession() (*session, *Error) {
 	}, nil
 }
 
-// resolveTarget picks the target the command acts on: the explicit
-// --target, else the last active one — the one the terminal UI last
-// opened; the CLI never changes that choice. Without either there is
-// nothing to act on, and the command says so.
+// resolveTarget picks the target the command acts on: the --target flag
+// every target-bound command requires. There is no fallback: which target
+// the terminal UI opens is the TUI's own state, and the CLI neither reads
+// it nor writes it — a command line that does not name its target is not
+// self-describing. An unregistered path is refused with the way to
+// register it.
 func (s *session) resolveTarget(explicit string) *Error {
 	path := explicit
 	if path == "" {
-		path = s.registry.LastTarget
-	}
-	if path == "" {
+		// Unreachable while every caller's command requires the flag;
+		// kept so a command that stops requiring it fails the contract
+		// loudly instead of acting on a guess.
 		return &Error{
-			Category: CategoryNotFound,
-			Message:  `no target is active (pass --target, or register one with "penates target add <path>")`,
+			Category: CategoryUsage,
+			Message:  `required flag(s) "target" not set (run "penates --help")`,
 		}
 	}
 	t, ok := s.registry.Targets[path]

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,9 +17,9 @@ import (
 // fixtures is the test's own temp directory, so no machine path leaks.
 
 func TestStatusEmptyState(t *testing.T) {
-	newTestEnv(t)
+	e := newTestEnv(t)
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", filepath.Join(e.base, "harness"))
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -39,14 +40,13 @@ func TestStatusShowsTheTargetAndItsItems(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	// writing installed at the kit version; nothing recorded, so the
 	// reconciliation finds nothing broken or modified.
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "1.0.0"},
 	})
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -75,12 +75,11 @@ func TestStatusHeaderNameAndVersionPair(t *testing.T) {
 	e.register("personal", dir)
 	e.attach("personal", target)
 	e.nameTarget(target, "harness one")
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "0.9.0"},
 	})
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -111,9 +110,8 @@ func TestStatusMarksTheBuiltinKit(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	e.attach(state.BuiltinKitName, target)
-	e.activate(target)
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
@@ -138,7 +136,6 @@ func TestStatusAnnotatesTheModifiedBuiltinKit(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	e.attach(state.BuiltinKitName, target)
-	e.activate(target)
 
 	// A local edit in the unpacked kit and a stamp the embedded content
 	// no longer matches: the sync reports the modification and the
@@ -155,7 +152,7 @@ func TestStatusAnnotatesTheModifiedBuiltinKit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
@@ -181,14 +178,13 @@ func TestStatusShowsAnUnreadableKit(t *testing.T) {
 	e.register("broken", filepath.Join(e.base, "kits", "broken"))
 	e.attach("personal", target)
 	e.attach("broken", target)
-	e.activate(target)
 	// A kit directory without kit.yaml does not load.
 	e.writeFiles(map[string]string{filepath.Join(e.base, "kits", "broken", "items", "junk", "item.yaml"): "id: junk\n"})
 	e.saveLock(target, map[string]*lock.Item{
 		"broken/legacy": {Version: "0.4.0"},
 	})
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -217,13 +213,12 @@ func TestStatusShowsTheOrphansGroup(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "1.0.0"},
 		"gone-kit/stray":   {Version: "1.1.0"},
 	})
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -251,7 +246,6 @@ func TestStatusShowsThePendingActions(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "0.9.0"},
 		"personal/old":     {Version: "0.1.0"},
@@ -269,7 +263,7 @@ func TestStatusShowsThePendingActions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, code := execute(t, testBuild, "status")
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", target)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -299,7 +293,7 @@ func TestStateProblemsAreStateErrors(t *testing.T) {
 	e := newTestEnv(t)
 	e.writeFiles(map[string]string{filepath.Join(e.dataDir, state.FileName): `{"version": 1}`})
 
-	_, stderr, code := execute(t, testBuild, "status")
+	_, stderr, code := execute(t, testBuild, "kit", "list")
 
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -347,7 +341,6 @@ func TestStatusPendingVerbs(t *testing.T) {
 	dir := e.kitFixture()
 	e.register("personal", dir)
 	e.attach("personal", target)
-	e.activate(target)
 	e.saveLock(target, map[string]*lock.Item{
 		"personal/writing": {Version: "1.0.0"},
 	})
@@ -363,7 +356,7 @@ func TestStatusPendingVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, _, code := execute(t, testBuild, "status")
+	stdout, _, code := execute(t, testBuild, "status", "--target", target)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -372,6 +365,51 @@ func TestStatusPendingVerbs(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "  reset  personal/writing\n") {
 		t.Errorf("stdout = %q, want the staged reset line", stdout)
+	}
+}
+
+// The required flag: every command that acts on a target refuses without
+// it — a usage error naming the flag, exit 2, nothing printed on stdout.
+// The requirement is the command line's, judged before any state opens.
+func TestTargetCommandsRequireTheTargetFlag(t *testing.T) {
+	e := newTestEnv(t)
+	dir := e.kitFixture()
+	e.register("personal", dir)
+
+	tests := []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"status", []string{"status"}, "penates status"},
+		{"show", []string{"show", "personal/writing"}, "penates show"},
+		{"install", []string{"install", "personal/writing"}, "penates install"},
+		{"update", []string{"update"}, "penates update"},
+		{"remove", []string{"remove", "personal/writing"}, "penates remove"},
+		{"reset", []string{"reset", "personal/writing"}, "penates reset"},
+		{"apply", []string{"apply"}, "penates apply"},
+		{"pending clear", []string{"pending", "clear"}, "penates pending clear"},
+		{"kit add", []string{"kit", "add", dir}, "penates kit add"},
+		{"kit attach", []string{"kit", "attach", "personal"}, "penates kit attach"},
+		{"kit detach", []string{"kit", "detach", "personal"}, "penates kit detach"},
+		{"setup", []string{"setup"}, "penates setup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := fmt.Sprintf("Error [usage]: required flag(s) %q not set (run %q)\n", "target", tt.path+" --help")
+
+			stdout, stderr, code := execute(t, testBuild, tt.args...)
+
+			if code != 2 {
+				t.Errorf("exit code = %d, want 2", code)
+			}
+			if stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+		})
 	}
 }
 
@@ -395,23 +433,26 @@ func TestShorthandAndMalformedFlags(t *testing.T) {
 	}
 }
 
-// The target a --target names wins over the last active one, and an
-// unregistered name is a not_found.
+// The target a --target names is the one the command acts on, and an
+// unregistered name is a not_found. The last active target of the
+// terminal UI plays no part: the CLI never reads it.
 func TestStatusTargetFlag(t *testing.T) {
 	e := newTestEnv(t)
-	active := filepath.Join(e.base, "active")
+	open := filepath.Join(e.base, "open")
 	other := filepath.Join(e.base, "other")
 	dir := e.kitFixture()
 	e.register("personal", dir)
-	e.attach("personal", active)
+	e.attach("personal", open)
 	e.attach("personal", other)
-	e.activate(active)
+	// The terminal UI last opened the other target; the command still
+	// acts only on the one --target names.
+	e.activate(other)
 
-	stdout, stderr, code := execute(t, testBuild, "status", "--target", other)
+	stdout, stderr, code := execute(t, testBuild, "status", "--target", open)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
-	if want := "target " + other + "\n"; !strings.HasPrefix(stdout, want) {
+	if want := "target " + open + "\n"; !strings.HasPrefix(stdout, want) {
 		t.Errorf("stdout = %q, want it to open with %q", stdout, want)
 	}
 
@@ -420,24 +461,6 @@ func TestStatusTargetFlag(t *testing.T) {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 	if want := `Error [not_found]: no target is registered at ` + filepath.Join(e.base, "nowhere") + ` (register it with "penates target add ` + filepath.Join(e.base, "nowhere") + `")` + "\n"; stderr != want {
-		t.Errorf("stderr = %q, want %q", stderr, want)
-	}
-}
-
-// A target that exists but was never opened, without --target: the CLI
-// does not guess, the refusal says so.
-func TestStatusWithoutAnActiveTargetIsAnError(t *testing.T) {
-	e := newTestEnv(t)
-	dir := e.kitFixture()
-	e.register("personal", dir)
-	e.attach("personal", filepath.Join(e.base, "harness"))
-
-	_, stderr, code := execute(t, testBuild, "status")
-
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1", code)
-	}
-	if want := `Error [not_found]: no target is active (pass --target, or register one with "penates target add <path>")` + "\n"; stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }
@@ -468,20 +491,27 @@ func TestKitList(t *testing.T) {
 	}
 }
 
-// target list names the active target and counts the kits and the
-// installed items of each.
+// target list counts the kits, the installed items, and — when the
+// target holds staged pending actions — the pending actions of each.
+// No target is marked active: which one the terminal UI opens is the
+// TUI's own state, not the list's to tell.
 func TestTargetList(t *testing.T) {
 	e := newTestEnv(t)
-	other := filepath.Join(e.base, "other")
-	active := filepath.Join(e.base, "harness")
+	quiet := filepath.Join(e.base, "quiet")
+	staged := filepath.Join(e.base, "staged")
 	dir := e.kitFixture()
 	e.register("personal", dir)
-	e.attach("personal", active)
-	e.attach("personal", other)
-	e.activate(other)
-	e.saveLock(active, map[string]*lock.Item{
+	e.attach("personal", quiet)
+	e.attach("personal", staged)
+	e.saveLock(quiet, map[string]*lock.Item{
 		"personal/writing":  {Version: "1.0.0"},
 		"personal/greeting": {Version: "2.0.0"},
+	})
+	stage(e, staged, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Remove: true},
+		},
+		Deferred: []state.Deferred{{Kind: state.DeferredDetachKit, Kit: "personal"}},
 	})
 
 	stdout, stderr, code := execute(t, testBuild, "target", "list")
@@ -490,8 +520,8 @@ func TestTargetList(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	want := strings.Join([]string{
-		"target " + active + "  kits 1  installed 2",
-		"target " + other + "  active  kits 1  installed 0",
+		"target " + quiet + "  kits 1  installed 2",
+		"target " + staged + "  kits 1  installed 0  pending 2",
 	}, "\n") + "\n"
 	if stdout != want {
 		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)

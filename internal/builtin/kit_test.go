@@ -15,8 +15,8 @@ import (
 )
 
 // The embedded kit itself, installed the way a client installs any kit:
-// sync unpacks it, the kit loads from the managed directory, and both
-// items land in the scratch target at the paths their contributions
+// sync unpacks it, the kit loads from the managed directory, and the
+// three items land in the scratch target at the paths their contributions
 // declare.
 func TestEmbeddedKitInstalls(t *testing.T) {
 	dataDir := t.TempDir()
@@ -44,6 +44,7 @@ func TestEmbeddedKitInstalls(t *testing.T) {
 	snap, err := target.Read(targetDir, []string{
 		"skills/penates/SKILL.md",
 		"skills/penates-kit-authoring/SKILL.md",
+		"skills/penates-operating/SKILL.md",
 	}, nil)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -51,6 +52,7 @@ func TestEmbeddedKitInstalls(t *testing.T) {
 	selection := []string{
 		state.BuiltinKitName + "/reference",
 		state.BuiltinKitName + "/kit-authoring",
+		state.BuiltinKitName + "/operating",
 	}
 	sources, err := kit.ReadSources([]*kit.Kit{k}, selection)
 	if err != nil {
@@ -63,8 +65,8 @@ func TestEmbeddedKitInstalls(t *testing.T) {
 		Snapshot:  snap,
 		Sources:   sources,
 	})
-	if len(p.Installable()) != 2 {
-		t.Fatalf("installable = %v, want both items", p.Installable())
+	if len(p.Installable()) != 3 {
+		t.Fatalf("installable = %v, want all three items", p.Installable())
 	}
 	results := apply.Apply(targetDir, p, lk, locks, nil)
 	for _, r := range results {
@@ -76,6 +78,7 @@ func TestEmbeddedKitInstalls(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{filepath.Join("skills", "penates", "SKILL.md"), "# penates reference"},
 		{filepath.Join("skills", "penates-kit-authoring", "SKILL.md"), "# penates kit authoring"},
+		{filepath.Join("skills", "penates-operating", "SKILL.md"), "# penates operating"},
 	} {
 		data, err := os.ReadFile(filepath.Join(targetDir, tc.path))
 		if err != nil {

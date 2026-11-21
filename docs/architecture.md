@@ -38,6 +38,10 @@ Known risks:
 - `to` paths are slash-separated data (concept: items). They are converted to platform paths
   only at the file-system boundary, in `internal/target` and `internal/apply`; the
   Windows leg of the CI matrix guards the conversion.
+- Concurrent runs over the one state file are not guarded beyond whole-file
+  writes; the concept leaves overlapping runs to the architecture, and the guard
+  is specified together with the CLI client, before a second process can mutate
+  the state.
 
 ### Dependency register
 
@@ -61,8 +65,9 @@ license gate. Adding or replacing a direct dependency follows the Dependencies r
 
 ## Architecture
 
-The core produces and applies plans; clients render them. In v1 the TUI is the
-only client.
+The core produces and applies plans; clients render them. The concept fixes two
+clients of equal capability — the CLI for AI agents and automation, the TUI for
+humans; the TUI is built, and the CLI is not yet.
 
 ### Modules
 
@@ -80,7 +85,7 @@ only client.
 | `internal/jsonc` | Pure editing of JSONC documents: get, insert, replace, and remove object members and array elements by RFC 6901 JSON Pointer, preserving comments and formatting of untouched parts (concept: json contributions). Knows no file system. |
 | `internal/plan` | Pure decision making: kits, lock, snapshot, and selection in; a plan out — actions per item with reasons, the exclusions of items with plain reasons and conflicts among them, the conflicts as structure — the contribution kind, the file, block, or JSON location, and the owning installed item —, the answers the plan used, and the JSON locations each item owns. Implements the rules the concept specifies: the three-state conflict model, the per-location table for json contributions, the cross-item conflicts, the variable substitution and required-variable rule, the version table for updates with reset to kit on request, the reconciliation of the lock with the target by recorded hashes, and the removal of installed items. Performs no I/O. |
 | `internal/apply` | Executes a plan as steps: every step applies or removes one item completely or not at all, writes atomically (temp file and rename), and the lock records only completed items. The per-item steps are the exposed unit; Apply and Remove are compositions over them that report the start and the result of every step, so a client can show per-item progress. After an interruption the package reconciles the lock with the target by removing the staged temp files and running the plan-side verdict over the snapshot (concept: atomicity, removal). |
-| `internal/tui` | The Bubble Tea client: the main screen — the tree of kits and items rendered through the layout and the visual language of the spec, the details pane and view, the filter, the add-kit input, the apply summary, form, and results (concept: user experience). The only package that knows about the terminal. |
+| `internal/tui` | The Bubble Tea client: the main screen — the tree of kits and items rendered through the layout and the visual language of the spec, the details pane and view, the filter, the add-kit input, the apply summary, form, and results (concept: interfaces). The only package that knows about the terminal. |
 
 ### Dependencies
 
@@ -122,7 +127,7 @@ Rules:
    (concept: atomicity): the staged files of an interrupted apply are removed, and the
    modified and broken items are known. Then `internal/plan` turns selection
    plus inputs into per-item actions and errors; the TUI shows the summary
-   (concept: user experience) and collects missing input.
+   (concept: interfaces) and collects missing input.
 4. **Apply.** `internal/apply` processes items one at a time: validate the item's
    contributions against the target, write through temp files, record the item in the
    lock. Removals planned from the lock (concept: removal) run before the installs, and the
@@ -139,8 +144,8 @@ Rules:
 - penates performs no network access (a concept non-goal); writes touch only the target
   and state directories, and every write path derives from a validated `to` path.
 - Variable answers are stored in the state directory. Secrets are out of scope by
-  design (concept: variables), and no output beyond the TUI screens prints variable
-  values.
+  design (concept: variables), and variable values appear only in the interfaces'
+  own output — TUI screens and CLI command output — never in logs or errors.
 - No tokens, credentials, or personal paths appear in logs or error messages.
 
 ## Project Structure

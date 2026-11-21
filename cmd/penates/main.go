@@ -7,7 +7,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,7 +46,7 @@ func runTUI(stdout io.Writer) error {
 	}
 	run, err := guard.Acquire(dataDir)
 	if err != nil {
-		return guardError(err)
+		return cli.GuardError(err)
 	}
 	defer func() { _ = run.Release() }()
 	stateStore, err := state.Open(dataDir)
@@ -76,15 +75,4 @@ func runTUI(stdout io.Writer) error {
 		_, _ = fmt.Fprint(stdout, rec)
 	}
 	return nil
-}
-
-// guardError maps the run guard's refusal into the client's contract: the
-// busy refusal keeps its category, every other failure — the directory or
-// its lock file cannot be made — is the state's.
-func guardError(err error) error {
-	var busy *guard.BusyError
-	if errors.As(err, &busy) {
-		return &cli.Error{Category: cli.CategoryBusy, Message: busy.Error(), Cause: busy}
-	}
-	return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
 }

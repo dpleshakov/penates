@@ -151,28 +151,9 @@ func (m *model) collectApply() *pendingApply {
 	return p
 }
 
-// The verbs of the summary, the progress and the result lines (10.1-10.3).
-const (
-	verbInstall   = "install"
-	verbUpdate    = "update"
-	verbDowngrade = "downgrade"
-	verbRemove    = "remove"
-	verbReset     = "reset"
-)
-
 // summaryNoteColumn is the column the note behind a summary line starts at
 // (10.1).
 const summaryNoteColumn = 32
-
-// summaryLine is one path line under a summary item: the mark of what the
-// apply does to the path, the target-relative path, and the optional note
-// behind it — the block a section writes, the pointer of an owned JSON
-// location, or the reason content is kept (10.1).
-type summaryLine struct {
-	mark   mark
-	path   string
-	suffix string
-}
 
 // summaryItem is one verb group of the summary (10.1): the item line with
 // its verb, id, version and kit, and the path lines under it.
@@ -181,7 +162,7 @@ type summaryItem struct {
 	id      string
 	version string
 	kit     string
-	lines   []summaryLine
+	lines   []view.PathLine
 }
 
 // summaryExcluded is one excluded item of the summary (10.1).
@@ -205,8 +186,8 @@ func (s applySummary) writes() int {
 	n := 0
 	for _, it := range s.items {
 		for _, ln := range it.lines {
-			switch ln.mark {
-			case markCreate, markReplace, markDelete:
+			switch ln.Mark {
+			case view.MarkCreate, view.MarkReplace, view.MarkDelete:
 				n++
 			}
 		}
@@ -287,7 +268,8 @@ func deferredSummaryLines(target string, ops []state.Deferred) []string {
 // action rewrites marks `=`; content a removal leaves behind as the user's
 // own marks `!`. The excluded items group at the end with their reasons.
 // lk and snap are the lock and the snapshot the plans were built against;
-// resets are the items the apply resets to kit.
+// resets are the items the apply resets to kit. The lines themselves come
+// from internal/view, the one builder the CLI prints from too.
 func summarize(installs, removals []*plan.ItemPlan, lk *lock.Lock, snap *target.Snapshot, resets map[string]bool) applySummary {
 	s := applySummary{}
 	var installItems, updateItems, removeItems, resetItems []summaryItem
@@ -296,18 +278,18 @@ func summarize(installs, removals []*plan.ItemPlan, lk *lock.Lock, snap *target.
 			s.excluded = append(s.excluded, summaryExcluded{id: planID(ip), reasons: view.ExclusionLines(ip)})
 			continue
 		}
-		verb, lines := installLines(ip, lk, snap, resets)
+		verb, lines := view.InstallLines(ip, lk, snap, resets)
 		it := summaryItem{
 			verb:    verb,
 			id:      planID(ip),
-			version: summaryVersion(ip, lk, verb),
+			version: view.VersionText(ip, lk, verb),
 			kit:     ip.KitName,
 			lines:   lines,
 		}
 		switch verb {
-		case verbReset:
+		case view.VerbReset:
 			resetItems = append(resetItems, it)
-		case verbUpdate, verbDowngrade:
+		case view.VerbUpdate, view.VerbDowngrade:
 			updateItems = append(updateItems, it)
 		default:
 			installItems = append(installItems, it)
@@ -319,11 +301,11 @@ func summarize(installs, removals []*plan.ItemPlan, lk *lock.Lock, snap *target.
 			continue
 		}
 		removeItems = append(removeItems, summaryItem{
-			verb:    verbRemove,
+			verb:    view.VerbRemove,
 			id:      planID(ip),
 			version: ip.Version,
 			kit:     ip.KitName,
-			lines:   removalLines(ip),
+			lines:   view.RemovalLines(ip),
 		})
 	}
 	s.items = append(s.items, installItems...)
@@ -342,153 +324,6 @@ func planID(ip *plan.ItemPlan) string {
 	return ip.Key
 }
 
-// planVerb is the verb of a planned install: a reset stays a reset, an
-// installed item updates or downgrades, a fresh one installs.
-func planVerb(ip *plan.ItemPlan, lk *lock.Lock, resets map[string]bool) string {
-	if resets[ip.Key] {
-		return verbReset
-	}
-	if lk.Items[ip.Key] != nil {
-		if ip.Downgrade {
-			return verbDowngrade
-		}
-		return verbUpdate
-	}
-	return verbInstall
-}
-
-// summaryVersion is the version text of a summary item line: the installed
-// and the kit version joined with an arrow when they differ (10.1).
-func summaryVersion(ip *plan.ItemPlan, lk *lock.Lock, verb string) string {
-	if verb == verbInstall || verb == verbRemove {
-		return ip.Version
-	}
-	if rec := lk.Items[ip.Key]; rec != nil && rec.Version != ip.Version {
-		return rec.Version + " → " + ip.Version
-	}
-	return ip.Version
-}
-
-// installLines builds the path lines of one install-plan item (10.1): the
-// actions mark `+` where the target has not seen the content and `~` where
-// owned content is replaced; the content the lock records and no action
-// rewrites marks `=` — it stays as installed and remains owned. A NoAction
-// item writes nothing: its verdict reason explains its first kept line.
-func installLines(ip *plan.ItemPlan, lk *lock.Lock, snap *target.Snapshot, resets map[string]bool) (string, []summaryLine) {
-	verb := planVerb(ip, lk, resets)
-	rec := lk.Items[ip.Key]
-	var lines []summaryLine
-	writtenFiles := map[string]bool{}
-	writtenShared := map[string]bool{}
-	for _, a := range ip.Actions {
-		switch a.Kind {
-		case plan.ActionFile:
-			writtenFiles[a.To] = true
-			m := markReplace
-			if !snap.File(a.To).Exists {
-				m = markCreate
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To})
-		case plan.ActionSection:
-			writtenShared[a.To] = true
-			m := markReplace
-			if _, present := snap.SharedFile(a.To).BlockHash(a.Block); !present {
-				m = markCreate
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To, suffix: "section " + a.Block})
-		case plan.ActionJSON:
-			writtenShared[a.To] = true
-			m := markCreate
-			if rec != nil && len(rec.JSON[a.To]) > 0 {
-				m = markReplace
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To})
-		}
-	}
-	kept := keptLines(rec, writtenFiles, writtenShared)
-	if ip.Status == plan.StatusNoAction && ip.Reason != "" && len(kept) > 0 {
-		kept[0].suffix = "kept: " + ip.Reason
-	}
-	lines = append(lines, kept...)
-	// JSON locations the item takes ownership of without a write — values
-	// found satisfied, or carried from the earlier install — mark `=` with
-	// their pointer (the lock records them; nothing is written).
-	for _, file := range sortedKeys(ip.JSONLocations) {
-		if writtenShared[file] || (rec != nil && len(rec.JSON[file]) > 0) {
-			continue
-		}
-		for _, loc := range ip.JSONLocations[file] {
-			lines = append(lines, summaryLine{mark: markKeep, path: file, suffix: loc.Pointer})
-		}
-	}
-	return verb, lines
-}
-
-// keptLines marks the content the lock records that no action rewrites: it
-// stays as installed and remains owned (10.1, `=`).
-func keptLines(rec *lock.Item, writtenFiles, writtenShared map[string]bool) []summaryLine {
-	if rec == nil {
-		return nil
-	}
-	var lines []summaryLine
-	for _, path := range sortedKeys(rec.Files) {
-		if writtenFiles[path] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: path})
-	}
-	for _, file := range sortedKeys(rec.Sections) {
-		if writtenShared[file] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: file, suffix: "section " + rec.Sections[file].Block})
-	}
-	for _, file := range sortedKeys(rec.JSON) {
-		if writtenShared[file] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: file})
-	}
-	return lines
-}
-
-// removalLines builds the path lines of one removal plan (10.1): the owned
-// content taken away marks `-`, the content the user modified — kept and
-// released from the lock — marks `!`.
-func removalLines(ip *plan.ItemPlan) []summaryLine {
-	var lines []summaryLine
-	for _, a := range ip.Actions {
-		switch a.Kind {
-		case plan.ActionRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To})
-		case plan.ActionSectionRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To, suffix: "section " + a.Block})
-		case plan.ActionJSONRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To})
-		}
-	}
-	seen := map[string]bool{}
-	for _, k := range ip.Kept {
-		id := k.Path + "\x00" + k.Reason
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		lines = append(lines, summaryLine{mark: markRelease, path: k.Path, suffix: "kept and released: " + k.Reason})
-	}
-	return lines
-}
-
-// sortedKeys lists a string-keyed map's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // renderSummary lays the summary out into body lines (10.1): one verb group
 // per item — the item line with the kit flush right, the path lines under
 // it — then the excluded with their reasons. A blank line separates the
@@ -505,9 +340,9 @@ func renderSummary(s applySummary, width int, set Set) []string {
 		}
 		rows = append(rows, JoinSides(left, Dim(it.kit), width))
 		for _, ln := range it.lines {
-			row := "  " + ln.mark.rendered(set) + " " + ln.path
-			if ln.suffix != "" {
-				row = padNote(row, ln.suffix)
+			row := "  " + pathMarks[ln.Mark].rendered(set) + " " + ln.Path
+			if ln.Note != "" {
+				row = padNote(row, ln.Note)
 			}
 			rows = append(rows, row)
 		}
@@ -624,7 +459,7 @@ func stepOf(ip *plan.ItemPlan, verb string, lk *lock.Lock) applyStep {
 		id:      planID(ip),
 		version: ip.Version,
 	}
-	if verb == verbRemove {
+	if verb == view.VerbRemove {
 		return st
 	}
 	if rec := lk.Items[ip.Key]; rec != nil {
@@ -640,14 +475,14 @@ func queuedSteps(removals, installs []*plan.ItemPlan, lk *lock.Lock, resets map[
 	var steps []applyStep
 	for _, ip := range removals {
 		if ip.Status == plan.StatusRemove {
-			st := stepOf(ip, verbRemove, lk)
+			st := stepOf(ip, view.VerbRemove, lk)
 			st.state = stepWaiting
 			steps = append(steps, st)
 		}
 	}
 	for _, ip := range installs {
 		if ip.Status == plan.StatusInstall {
-			st := stepOf(ip, planVerb(ip, lk, resets), lk)
+			st := stepOf(ip, view.PlanVerb(ip, lk, resets), lk)
 			st.state = stepWaiting
 			steps = append(steps, st)
 		}
@@ -808,8 +643,9 @@ func (m *model) runApply(p *pendingApply, events chan<- any) *applyOutcome {
 
 	// The selection as applied — the removed items dropped out of it —
 	// replaces the remembered one, so a removed item is not offered selected
-	// again; the resets and removals that ran are consumed.
-	if err := settleApply(m.app, m.target, out.removed, p.selection); err != nil {
+	// again; the resets and removals that ran are consumed. The settle is
+	// the state operation the CLI's apply runs too.
+	if err := m.app.State.SettlePending(m.target, out.removed, p.selection); err != nil {
 		out.errs = append(out.errs, "could not save the state: "+err.Error())
 	}
 
@@ -829,9 +665,9 @@ func runRemovals(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 	for _, ip := range items {
 		switch ip.Status {
 		case plan.StatusRemove:
-			steps = append(steps, stepOf(ip, verbRemove, lk))
+			steps = append(steps, stepOf(ip, view.VerbRemove, lk))
 		case plan.StatusError:
-			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: verbRemove, state: stepKept, excluded: view.ExclusionLines(ip)})
+			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: view.VerbRemove, state: stepKept, excluded: view.ExclusionLines(ip)})
 		}
 	}
 	results := apply.Remove(target, &plan.Plan{Items: items}, lk, store, on)
@@ -866,14 +702,14 @@ func runInstalls(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 	for _, ip := range items {
 		switch ip.Status {
 		case plan.StatusInstall, plan.StatusNoAction:
-			st := stepOf(ip, planVerb(ip, lk, resets), lk)
+			st := stepOf(ip, view.PlanVerb(ip, lk, resets), lk)
 			if ip.Status == plan.StatusNoAction {
 				st.state = stepKept
 				st.note = ip.Reason
 			}
 			steps = append(steps, st)
 		case plan.StatusError:
-			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: planVerb(ip, lk, resets), state: stepKept, excluded: view.ExclusionLines(ip)})
+			steps = append(steps, applyStep{key: ip.Key, id: planID(ip), verb: view.PlanVerb(ip, lk, resets), state: stepKept, excluded: view.ExclusionLines(ip)})
 		}
 	}
 	results := apply.Apply(target, &plan.Plan{Items: items}, lk, store, on)
@@ -894,41 +730,6 @@ func runInstalls(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 		}
 	}
 	return steps
-}
-
-// settleApply folds the apply into the target's pending actions: the
-// applied selection stays remembered as the active selection, a reset and a
-// completed removal are consumed, and the answers of an item that no longer
-// holds a selection go with it.
-func settleApply(app *App, target string, removed map[string]bool, selection []string) error {
-	selected := map[string]bool{}
-	for _, key := range selection {
-		selected[key] = true
-	}
-	return app.State.Update(func(reg *state.Registry) error {
-		p, ok := reg.Pending[target]
-		if !ok {
-			return nil
-		}
-		for key, item := range p.Items {
-			if removed[key] {
-				delete(p.Items, key)
-				continue
-			}
-			item.Reset = false
-			if !selected[key] {
-				item.Select = false
-				item.Answers = nil
-			}
-			if !item.Select && !item.Reset && !item.Remove && len(item.Answers) == 0 {
-				delete(p.Items, key)
-			}
-		}
-		if len(p.Items) == 0 && len(p.Deferred) == 0 {
-			delete(reg.Pending, target)
-		}
-		return nil
-	})
 }
 
 // completeDeferred finishes the deferred operations of the target after the
@@ -1027,23 +828,6 @@ func renderProgress(steps []applyStep, spinner int, set Set) []string {
 	return rows
 }
 
-// pastVerb is the verb a finished step reports in the result (10.3).
-func pastVerb(verb string) string {
-	switch verb {
-	case verbInstall:
-		return "installed"
-	case verbUpdate:
-		return "updated"
-	case verbDowngrade:
-		return "downgraded"
-	case verbReset:
-		return "reset"
-	case verbRemove:
-		return "removed"
-	}
-	return verb
-}
-
 // resultNoteColumn is the column the notes of the result lines start at —
 // the kept content of a removal, the reason of a failure (10.3).
 const resultNoteColumn = 14
@@ -1079,7 +863,7 @@ func renderResults(err string, steps []applyStep, deferred, errs []string, set S
 				rows = append(rows, "    "+Dim(r))
 			}
 		default: // stepKept: nothing was written for the item
-			left := "  " + markKeep.rendered(set) + fmt.Sprintf(" %-9s  %s", "kept", st.id)
+			left := "  " + pathMarks[view.MarkKeep].rendered(set) + fmt.Sprintf(" %-9s  %s", "kept", st.id)
 			if st.version != "" {
 				left += " " + Dim(st.version)
 			}
@@ -1102,8 +886,8 @@ func renderResults(err string, steps []applyStep, deferred, errs []string, set S
 // mark, the past verb, the id and the version it reached — a removal names
 // no version, what it took away is gone.
 func resultLine(st applyStep, mk string, set Set) string {
-	row := "  " + mk + fmt.Sprintf(" %-9s  %s", pastVerb(st.verb), st.id)
-	if st.version != "" && st.verb != verbRemove {
+	row := "  " + mk + fmt.Sprintf(" %-9s  %s", view.PastVerb(st.verb), st.id)
+	if st.version != "" && st.verb != view.VerbRemove {
 		row += " " + Dim(st.version)
 	}
 	return row
@@ -1166,8 +950,8 @@ func recordOf(target string, steps []applyStep, record []recordBlock) []recordBl
 		if st.state != stepDone {
 			continue
 		}
-		e := recordEntry{verb: pastVerb(st.verb), key: st.key}
-		if st.verb == verbRemove {
+		e := recordEntry{verb: view.PastVerb(st.verb), key: st.key}
+		if st.verb == view.VerbRemove {
 			seen := map[string]bool{}
 			for _, k := range st.kept {
 				if seen[k.Path] {

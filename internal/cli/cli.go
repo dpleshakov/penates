@@ -156,6 +156,7 @@ func newRoot(b Build, opts Options, stdout, stderr io.Writer) *cobra.Command {
 	kitCmd.AddCommand(newKitAttachCmd())
 	kitCmd.AddCommand(newKitDetachCmd())
 	kitCmd.AddCommand(newKitPathCmd())
+	kitCmd.AddCommand(newKitMoveCmd())
 	root.AddCommand(kitCmd)
 	targetCmd := newTargetCmd()
 	targetCmd.AddCommand(newTargetListCmd())

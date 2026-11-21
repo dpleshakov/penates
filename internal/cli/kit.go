@@ -171,6 +171,45 @@ func newKitPathCmd() *cobra.Command {
 	}
 }
 
+// newKitMoveCmd builds "penates kit move <kit> <dir>": point the
+// registered kit at the directory that now holds it — the CLI form of
+// the terminal UI's "Edit kit path". The directory must hold a kit of
+// the same name: the kit's name is its identity, so its attachments and
+// pending actions survive the move.
+func newKitMoveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "move <kit> <dir>",
+		Short: "Point a registered kit at the directory that now holds it",
+		Long: "Point the registered kit at the directory it moved to. The directory must\n" +
+			"hold a kit.yaml of the same name — one holding another kit is refused with\n" +
+			"both names. The kit's attachments and pending actions survive the move:\n" +
+			"the name is the identity, not the path.",
+		Args: exactArgs(2, "kit name and directory path"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, sessErr := openSession()
+			if sessErr != nil {
+				return sessErr
+			}
+			if _, ok := s.registry.Kits[args[0]]; !ok {
+				return &Error{
+					Category: CategoryNotFound,
+					Message:  fmt.Sprintf("kit %q is not registered (run %q to see what is)", args[0], "penates kit list"),
+				}
+			}
+			k, _, readErr := kit.Read(args[1])
+			if readErr != nil {
+				return &Error{Category: CategoryKit, Message: readErr.Error(), Cause: readErr}
+			}
+			if err := s.state.EditKitPath(args[0], k.Dir, k.Name); err != nil {
+				return stateOpError(err)
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), k.Dir)
+			return err
+		},
+	}
+	return cmd
+}
+
 // stateOpError maps a registry operation's refusal to the contract
 // categories: a thing that does not exist is not_found, a name reserved
 // for the built-in kit is the kit content to fix, and a collision with

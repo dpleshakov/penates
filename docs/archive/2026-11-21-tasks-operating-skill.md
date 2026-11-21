@@ -36,9 +36,9 @@ design ahead of their implementation" is removed only when both have shipped.
 ### TASK-01 `design`
 **Description:** Design the `operating` skill: scope, structure, and content — the workflows, norms, and boundaries listed in Context — as a draft the user accepts.
 **Definition of done:** A draft of the skill's content exists, covers every item above, and the user has accepted it as the basis for writing.
-**Status:** Pending
+**Status:** Done — the accepted draft (round 5 statement in /tmp) became the shipped skill's structure: daily loop, reference boundary, refusal conduct.
 
 ### TASK-02 `write-and-install`
 **Description:** Write the accepted skill into the built-in kit (`internal/builtin/kit/`), as a new item installing alongside `reference` and `kit-authoring`.
 **Definition of done:** The skill installs and updates through penates like any other kit item; the built-in kit's items and versions reflect it; `make check` passes.
-**Status:** Pending
+**Status:** Done — 6d7b5e0 adds the `operating` item beside `reference`; `make builtin-kit` validates it in `make check`.

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -300,7 +301,7 @@ func resetBuiltin(s *session, out, errOut io.Writer, ask *confirmer, dry, yes bo
 		_, err := fmt.Fprintln(out, "nothing to reset")
 		return err
 	}
-	line := verbReset + "  " + state.BuiltinKitName + "  " + builtin.KitDir(s.dataDir)
+	line := view.VerbReset + "  " + state.BuiltinKitName + "  " + builtin.KitDir(s.dataDir)
 	// A dry-run never asks; it prints the one line the run would print.
 	if !dry {
 		if err := ask.ready(yes); err != nil {
@@ -319,8 +320,7 @@ func resetBuiltin(s *session, out, errOut io.Writer, ask *confirmer, dry, yes bo
 	if err := builtin.Reset(s.dataDir, builtin.Content); err != nil {
 		return &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
 	}
-	_, err := fmt.Fprintln(out, line)
-	return err
+	return nil
 }
 
 // newApplyCmd builds "penates apply": apply the staged pending actions —
@@ -344,17 +344,26 @@ func newApplyCmd(ask *confirmer) *cobra.Command {
 			}
 			staged := collectStaged(s)
 			out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+			dry, yes := dryOf(cmd), yesOf(cmd)
 			if len(staged.selection) == 0 && len(staged.removals) == 0 {
-				// Item actions nothing can apply: an empty pending is
-				// the empty success; a pending that holds deferred
-				// operations is what this very command exists to
-				// finish — the refusal of a one-shot names apply as
-				// the way out, so it has to work here too.
-				if !hasPending(s) || len(s.pending.Deferred) == 0 {
-					_, err := fmt.Fprintln(out, "nothing staged")
-					return err
+				// Item actions nothing can apply: the ones the check
+				// dropped leave the registry here, with their notes —
+				// one-shot commands keep refusing a pending nothing can
+				// ever consume, and this command is the way out its own
+				// refusal names. A pending that holds deferred
+				// operations is what this very command exists to finish.
+				if !dry {
+					if err := dropStaged(s, staged.droppedKeys); err != nil {
+						return err
+					}
 				}
-				return completeDeferredOnly(s, out, ask, dryOf(cmd), yesOf(cmd), staged.dropped)
+				if staged.droppedEverything(s.pending) {
+					if _, err := fmt.Fprintln(out, "nothing staged"); err != nil {
+						return err
+					}
+					return printNotes(out, staged.dropped)
+				}
+				return completeDeferredOnly(s, out, ask, dry, yes, staged)
 			}
 			var removals []*plan.ItemPlan
 			if len(staged.removals) > 0 {
@@ -383,7 +392,7 @@ func newApplyCmd(ask *confirmer) *cobra.Command {
 			}
 			m := &mutation{
 				s: s, out: out, errOut: errOut, conf: ask,
-				dry: dryOf(cmd), yes: yesOf(cmd),
+				dry: dry, yes: yes,
 				installs: installs, removals: removals, resets: staged.resets,
 				selection: staged.selection, answers: staged.answers,
 				notes: staged.dropped,
@@ -534,7 +543,7 @@ func stagedRefusal(s *session) *Error {
 	if !hasPending(s) {
 		return nil
 	}
-	keys := sortedMapKeys(s.pending.Items)
+	keys := view.SortedKeys(s.pending.Items)
 	var parts, details []string
 	for _, key := range keys {
 		item := s.pending.Items[key]
@@ -714,7 +723,7 @@ func requireVars(s *session, keys []string, fresh map[string]map[string]string) 
 	if len(missing) == 0 {
 		return nil
 	}
-	keys = sortedMapKeys(missing)
+	keys = view.SortedKeys(missing)
 	var parts, ids []string
 	for _, key := range keys {
 		var names []string
@@ -759,6 +768,37 @@ type staged struct {
 	resets    map[string]bool
 	answers   map[string]map[string]string
 	dropped   []string
+	// droppedKeys holds the item keys the dropped notes belong to: the
+	// apply removes them from the registry when nothing else can.
+	droppedKeys []string
+}
+
+// drop records one staged action the check dropped.
+func (st *staged) drop(key, note string) {
+	st.dropped = append(st.dropped, note)
+	st.droppedKeys = append(st.droppedKeys, key)
+}
+
+// droppedEverything reports whether the target's pending actions hold
+// nothing the check left no note for: once the dropped actions leave the
+// registry, nothing staged remains.
+func (st *staged) droppedEverything(p *state.Pending) bool {
+	if p == nil {
+		return true
+	}
+	if len(p.Deferred) > 0 {
+		return false
+	}
+	dropped := make(map[string]bool, len(st.droppedKeys))
+	for _, key := range st.droppedKeys {
+		dropped[key] = true
+	}
+	for key := range p.Items {
+		if !dropped[key] {
+			return false
+		}
+	}
+	return true
 }
 
 // collectStaged gathers the target's staged pending actions and checks
@@ -778,11 +818,11 @@ func collectStaged(s *session) *staged {
 		case item.Remove && installed:
 			st.removals = append(st.removals, key)
 		case item.Remove:
-			st.dropped = append(st.dropped, fmt.Sprintf("dropped the staged removal of %s: the item is not installed", key))
+			st.drop(key, "dropped the staged removal of "+key+": the item is not installed")
 		case item.Select && kitIt == nil:
-			st.dropped = append(st.dropped, fmt.Sprintf("dropped the staged selection of %s: no kit provides the item", key))
+			st.drop(key, "dropped the staged selection of "+key+": no kit provides the item")
 		case item.Select && stale:
-			st.dropped = append(st.dropped, fmt.Sprintf("dropped the staged selection of %s: the item moved to %s since it was staged", key, kitIt.Version))
+			st.drop(key, fmt.Sprintf("dropped the staged selection of %s: the item moved to %s since it was staged", key, kitIt.Version))
 		case item.Select:
 			st.selection = append(st.selection, key)
 			if len(item.Answers) > 0 {
@@ -792,12 +832,12 @@ func collectStaged(s *session) *staged {
 		if item.Reset {
 			switch {
 			case kitIt == nil || !installed:
-				st.dropped = append(st.dropped, fmt.Sprintf("dropped the staged reset of %s: the item is not installed or not provided any more", key))
+				st.drop(key, "dropped the staged reset of "+key+": the item is not installed or not provided any more")
 			case stale:
-				st.dropped = append(st.dropped, fmt.Sprintf("dropped the staged reset of %s: the item moved to %s since it was staged", key, kitIt.Version))
+				st.drop(key, fmt.Sprintf("dropped the staged reset of %s: the item moved to %s since it was staged", key, kitIt.Version))
 			default:
 				st.resets[key] = true
-				if !slicesContains(st.selection, key) && !slicesContains(st.removals, key) {
+				if !slices.Contains(st.selection, key) && !slices.Contains(st.removals, key) {
 					st.selection = append(st.selection, key)
 				}
 			}
@@ -807,16 +847,6 @@ func collectStaged(s *session) *staged {
 	sort.Strings(st.removals)
 	sort.Strings(st.dropped)
 	return st
-}
-
-// slicesContains reports whether the list holds the value.
-func slicesContains(list []string, v string) bool {
-	for _, el := range list {
-		if el == v {
-			return true
-		}
-	}
-	return false
 }
 
 // replanInstalls plans the installs again from the target as the removals
@@ -833,6 +863,7 @@ func replanInstalls(s *session, selection []string, answers map[string]map[strin
 	if err != nil {
 		return nil, &Error{Category: CategoryIO, Message: err.Error(), Cause: err}
 	}
+	s.snap = snap
 	sources, err := kit.ReadSources(s.kits, selection)
 	if err != nil {
 		return nil, &Error{Category: CategoryKit, Message: err.Error(), Cause: err}
@@ -849,14 +880,43 @@ func replanInstalls(s *session, selection []string, answers map[string]map[strin
 	}).Items, nil
 }
 
+// dropStaged removes the item actions the restore-time check dropped
+// from the target's pending: nothing can apply them ever again, and a
+// registry that keeps them refuses every one-shot command while the
+// apply that alone could consume them does nothing. The pending object
+// goes with them when they were all it held.
+func dropStaged(s *session, keys []string) *Error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if err := s.state.Update(func(reg *state.Registry) error {
+		p, ok := reg.Pending[s.target]
+		if !ok {
+			return nil
+		}
+		for _, key := range keys {
+			delete(p.Items, key)
+		}
+		if len(p.Items) == 0 && len(p.Deferred) == 0 {
+			delete(reg.Pending, s.target)
+		}
+		return nil
+	}); err != nil {
+		return &Error{Category: CategoryState, Message: "could not save the state: " + err.Error(), Cause: err}
+	}
+	return nil
+}
+
 // completeDeferredOnly runs the apply of a pending that holds deferred
 // operations alone: nothing to plan, the one confirmation like every
 // mutating command, then the deferred operations complete or drop with
-// the reason — the report is the whole output. Every operation
-// completed exits 0; one dropped exits 1 without an Error line: the
-// dropped reason is the honest signal of what still stands in the way,
-// and clearing or removing it is the next step.
-func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bool, dropped []string) error {
+// the reason — the report is the whole output. The item actions the
+// restore-time check dropped leave the registry here too:
+// CompleteDeferred consumes the deferred operations alone. Every
+// operation completed exits 0; one dropped exits 1 without an Error
+// line: the dropped reason is the honest signal of what still stands in
+// the way, and clearing or removing it is the next step.
+func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bool, st *staged) error {
 	// A dry-run never asks; it prints what would go.
 	if !dry {
 		if err := ask.ready(yes); err != nil {
@@ -875,6 +935,9 @@ func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bo
 	if !yes && !ask.ask() {
 		return ask.declined()
 	}
+	if err := dropStaged(s, st.droppedKeys); err != nil {
+		return err
+	}
 	installed := make([]string, 0, len(s.lock.Items))
 	for key := range s.lock.Items {
 		installed = append(installed, key)
@@ -884,6 +947,7 @@ func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bo
 	if err != nil {
 		return &Error{Category: CategoryState, Message: "could not complete the deferred operations: " + err.Error(), Cause: err}
 	}
+	dropped := append([]string{}, st.dropped...)
 	for _, p := range s.stagedRemoved {
 		dropped = append(dropped, "removed the staged file "+p+" left by an interrupted apply")
 	}
@@ -907,39 +971,12 @@ func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bo
 }
 
 // settleAndComplete folds a finished apply into the pending actions and
-// completes the target's deferred operations: the applied selection
-// stays remembered, the resets and the completed removals are consumed,
-// and the deferred detach or forget completes when the apply removed
-// what it waited for — or is dropped with the reason in the report.
+// completes the target's deferred operations: the settle is the state
+// operation both clients share, and the deferred detach or forget
+// completes when the apply removed what it waited for — or is dropped
+// with the reason in the report.
 func settleAndComplete(s *session, removed map[string]bool, selection []string) ([]string, *Error) {
-	selected := map[string]bool{}
-	for _, key := range selection {
-		selected[key] = true
-	}
-	if err := s.state.Update(func(reg *state.Registry) error {
-		p, ok := reg.Pending[s.target]
-		if !ok {
-			return nil
-		}
-		for key, item := range p.Items {
-			if removed[key] {
-				delete(p.Items, key)
-				continue
-			}
-			item.Reset = false
-			if !selected[key] {
-				item.Select = false
-				item.Answers = nil
-			}
-			if !item.Select && !item.Reset && !item.Remove && len(item.Answers) == 0 {
-				delete(p.Items, key)
-			}
-		}
-		if len(p.Items) == 0 && len(p.Deferred) == 0 {
-			delete(reg.Pending, s.target)
-		}
-		return nil
-	}); err != nil {
+	if err := s.state.SettlePending(s.target, removed, selection); err != nil {
 		return nil, &Error{Category: CategoryState, Message: "could not save the state: " + err.Error(), Cause: err}
 	}
 	lk, err := s.locks.Load(s.target)
@@ -1063,13 +1100,18 @@ func (m *mutation) run() error {
 }
 
 // execute performs the confirmed run: the removals first, then the
-// installs — planned again when the removals rewrote the target — and
-// the staged settle afterwards when the command consumes them. The rows
-// build before the steps run: a step that runs rewrites the lock, and
-// the rows behind it must not read it changed.
+// installs — planned again from the target as the removals of the same
+// run leave it — and the staged settle afterwards when the command
+// consumes them. The rows build between the two, after the re-planning
+// and before the install steps run: they read the plans that will
+// execute and a lock no step of theirs has rewritten yet.
 func (m *mutation) execute() *runOutcome {
 	oc := &runOutcome{}
 	m.installsRun = m.installs
+	var results []apply.Result
+	if len(m.removals) > 0 {
+		results = append(results, apply.Remove(m.s.target, &plan.Plan{Items: m.removals}, m.s.lock, m.s.locks, nil)...)
+	}
 	if len(m.removals) > 0 && len(m.installs) > 0 && m.replan != nil {
 		re, err := m.replan()
 		if err != nil {
@@ -1079,7 +1121,9 @@ func (m *mutation) execute() *runOutcome {
 		m.installsRun = re
 	}
 	rows, applied, kept, failed := m.buildRows()
-	results := m.runSteps()
+	if len(m.installsRun) > 0 {
+		results = append(results, apply.Apply(m.s.target, &plan.Plan{Items: m.installsRun}, m.s.lock, m.s.locks, nil)...)
+	}
 	errs := map[string]error{}
 	for _, r := range results {
 		if r.Err != nil {
@@ -1096,6 +1140,9 @@ func (m *mutation) execute() *runOutcome {
 		if err, failedRun := errs[rows[i].key]; failedRun && rows[i].verb != "kept" && rows[i].verb != "excluded" {
 			rows[i].verb, rows[i].note = "failed", err.Error()
 			rows[i].version = ""
+			// A step that failed reached the file system and lost: the
+			// one category its Error line can carry is io.
+			rows[i].category = CategoryIO
 			applied--
 			failed++
 		}
@@ -1130,7 +1177,7 @@ func (m *mutation) buildRows() (rows []resultRow, applied, kept, failed int) {
 	for _, ip := range m.removals {
 		switch ip.Status {
 		case plan.StatusRemove:
-			row := resultRow{verb: pastVerb(verbRemove), key: ip.Key}
+			row := resultRow{verb: view.PastVerb(view.VerbRemove), key: ip.Key}
 			seen := map[string]bool{}
 			for _, k := range ip.Kept {
 				id := k.Path + "\x00" + k.Reason
@@ -1150,9 +1197,9 @@ func (m *mutation) buildRows() (rows []resultRow, applied, kept, failed int) {
 	for _, ip := range m.installsRun {
 		switch ip.Status {
 		case plan.StatusInstall:
-			verb := planVerb(ip, m.s.lock, m.resets)
+			verb := view.PlanVerb(ip, m.s.lock, m.resets)
 			rows = append(rows, resultRow{
-				verb:    pastVerb(verb),
+				verb:    view.PastVerb(verb),
 				key:     ip.Key,
 				version: resultVersion(ip, m.s.lock, verb),
 			})
@@ -1181,18 +1228,6 @@ func (m *mutation) excludedRow(ip *plan.ItemPlan) resultRow {
 		reasons:  view.ExclusionLines(ip),
 		category: exclusionCategoryOf(ip),
 	}
-}
-
-// runSteps executes the removals and the installs of the run.
-func (m *mutation) runSteps() []apply.Result {
-	var results []apply.Result
-	if len(m.removals) > 0 {
-		results = append(results, apply.Remove(m.s.target, &plan.Plan{Items: m.removals}, m.s.lock, m.s.locks, nil)...)
-	}
-	if len(m.installsRun) > 0 {
-		results = append(results, apply.Apply(m.s.target, &plan.Plan{Items: m.installsRun}, m.s.lock, m.s.locks, nil)...)
-	}
-	return results
 }
 
 // hasPending reports whether the target holds staged pending actions of

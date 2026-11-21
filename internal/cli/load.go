@@ -66,16 +66,17 @@ func takeRunGuard(dataDir string) *Error {
 	}
 	g, err := guard.Acquire(dataDir)
 	if err != nil {
-		return guardError(err)
+		return GuardError(err)
 	}
 	runGuard = g
 	return nil
 }
 
-// guardError maps what taking the run guard reported: the busy refusal
-// keeps its category, every other failure is the state's. The terminal
-// entry maps its own guard the same way.
-func guardError(err error) *Error {
+// GuardError maps what taking the run guard reported: the busy refusal
+// keeps its category, every other failure — the directory or its lock
+// file cannot be made — is the state's. The terminal entry maps its own
+// guard through it too.
+func GuardError(err error) *Error {
 	var busy *guard.BusyError
 	if errors.As(err, &busy) {
 		return &Error{Category: CategoryBusy, Message: busy.Error(), Cause: busy}

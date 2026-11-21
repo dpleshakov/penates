@@ -3,8 +3,10 @@
 penates installs, updates, and removes agent-harness customization — skills,
 instruction files, plugins, configuration fragments — from local kit
 directories into a harness configuration directory such as
-`~/.config/opencode`. You select the items in a terminal UI; a per-target lock
-records everything penates writes, and what it did not write it never touches.
+`~/.config/opencode`. It has two interfaces of equal capability: a terminal
+UI for people, and a command line for AI agents and automation. A per-target
+lock records everything penates writes, and what it did not write it never
+touches.
 
 Customization kept in sync across machines faces two independent streams of
 change: the shared content itself evolves, and every machine needs its own
@@ -41,6 +43,46 @@ pending actions into a summary that nothing is applied before: the items
 group by verb with a mark per path, and confirming runs the apply step by
 step, each item ending in a check or a cross. On exit penates prints what
 was applied during the session to the terminal.
+
+## The command line
+
+The subcommands are the second, equal interface — the one AI agents, scripts,
+and automation drive:
+
+```
+penates status [--target]        # the target, its kits and items, staged actions
+penates show <kit/item>          # one item: status, variables, contributions, changelog
+penates install <kit/item>…      # plan and apply in one run
+penates update [<kit/item>…]     # every available update, or the named items
+penates remove <kit/item>…       # plan and apply the removal
+penates reset <kit/item>|--builtin
+penates apply                    # apply what the terminal UI staged
+penates pending clear            # drop the staged actions without applying
+penates kit list|add|attach|detach|path …
+penates target list|add|rename|forget …
+```
+
+A mutating command prints its summary — the target line first — and asks once;
+`--yes` confirms in advance, `--dry-run` prints the summary and writes nothing.
+Without a terminal there is no asking: a command that would ask requires
+`--yes`. Variables flow through repeatable `--set id=value` flags; answers
+stored in the lock are reused.
+
+The output is plain text with a stable skeleton: items are named `kit/item`,
+every item line opens with its state word, and every failure prints one line —
+`Error [category]: message` — naming the concrete next step. The categories
+never go away or get renamed; the exit code is `2` for a wrong command line
+alone and `1` for any other failure. The command path opens the command line,
+flags after it, and each command has exactly one form — so permission rules can
+govern the CLI by the command text. The full contract is specified in
+[docs/concept.md](docs/concept.md) (§10.3) and carried to agents by the
+built-in kit's `operating` skill.
+
+Two guards hold across both interfaces: the first run is a person's — `kit add`
+refuses while no kit is registered and names the bare `penates` that opens the
+UI — and one penates process works on a data directory at a time: an overlapping
+run, any command while the UI is open included, is refused with `busy` rather
+than silently merging state.
 
 ## A minimal kit
 
@@ -113,9 +155,11 @@ opens the target that was active when it last exited.
 
 The binary also ships its own documentation as a kit: on every start it is
 unpacked, registered under the reserved name `penates`, and kept in step
-with the binary's content. The first run offers attaching it; its two
-skills — a product reference and a kit-authoring guide — install like any
-other items, into `skills/penates/` and `skills/penates-kit-authoring/`.
+with the binary's content. The first run offers attaching it; its three
+skills — a product reference, an operating guide for agents driving the
+CLI, and a kit-authoring guide — install like any other items, into
+`skills/penates/`, `skills/penates-operating/`, and
+`skills/penates-kit-authoring/`.
 
 `penates version` prints the version and the commit the binary was built
 from — `penates dev (unknown)` on a plain `go build`. `penates licenses`
@@ -123,7 +167,8 @@ prints the components included in the binary — penates, the Go standard
 library and runtime, and the third-party modules — with the license text of
 each; the third-party texts are embedded only in the release builds, and a
 build from source says so and points at the releases page. A first argument
-that names no command is rejected with one `Error:` line naming what to run.
+that names no command is rejected with one `Error [usage]:` line naming what
+to run.
 
 ## Development
 

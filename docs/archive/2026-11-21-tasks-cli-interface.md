@@ -1,6 +1,6 @@
 # 2026-11-21-tasks-cli-interface.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 

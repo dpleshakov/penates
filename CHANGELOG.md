@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- The command-line interface: every scenario of the terminal UI is reachable from commands — `status`, `show`, `install`, `update`, `remove`, `reset` (with `--builtin`), `apply`, `pending clear`, and the `kit` and `target` management groups. A mutating command prints its summary and asks once; `--yes` confirms in advance, `--dry-run` previews without writing; without a terminal a command that would ask requires `--yes`.
+- The CLI output contract: plain text with a stable skeleton — items named `kit/item`, a stable state word opening every item line, one reason per line — and failures printing one `Error [category]: message` line each, the categories a stable set, every message naming the concrete next step. Exit codes: `0` success, `1` any other failure, `2` a wrong command line alone. Flags come after the command path and each command has exactly one form, so permission rules can govern the CLI by the command text.
+- A run guard over the penates data directory: one penates process at a time — an overlapping run, any command while the terminal UI is open included, is refused with the `busy` error instead of silently merging state, and a process's death releases the hold.
+- The `operating` skill in the built-in kit, the third beside `reference` and `kit-authoring`: it teaches AI agents to drive penates day to day through the CLI — reading state, changing kit content in the kit rather than the target, keeping machine specifics in variables, and the conduct on the `staged`, `busy`, and `first-run` refusals. Installs into `skills/penates-operating/`.
+
+### Changed
+- Errors of `version` and `licenses` print in the `Error [category]: message` form like every CLI failure, and a wrong command line exits `2` instead of `1`.
+
+### Fixed
+- A reset staged in the terminal UI without a selection now applies: pressing `r` on an item and then `a` silently applied nothing before.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added

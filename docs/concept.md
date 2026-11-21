@@ -1,10 +1,12 @@
 # penates concept
 
-This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04, is archived in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md) with only its status stamped; where the shipped build parted from it, this document states the shipped behaviour.
+This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04, is archived in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md) with only its status stamped; where the shipped build parted from it, this document states the shipped behaviour. The command-line interface and the `operating` skill of the built-in kit are accepted design ahead of their implementation; until they ship, the TUI is the only full interface.
 
 ## 1. Summary
 
-penates is a small cross-platform application with a terminal user interface (TUI). It installs, updates and removes harness content from one or more kit directories into the configuration directory of an agent harness, for example `~/.config/opencode`. Harness content includes skills, agent instructions, plugins and configuration fragments.
+penates is a small cross-platform application with two interfaces of equal capability: a terminal user interface (TUI) and a command-line interface (CLI). It installs, updates and removes harness content from one or more kit directories into the configuration directory of an agent harness, for example `~/.config/opencode`. Harness content includes skills, agent instructions, plugins and configuration fragments.
+
+The interfaces share one model and differ in audience: the CLI is the working interface for AI agents and automation, the TUI is the interface for humans. First use is deliberately human, because registering a kit and confirming its target is where trust in what penates will write is decided; daily operation may be delegated to an agent from then on. Who operates never changes the guarantees — recorded ownership decides what is written and deleted in either interface (10).
 
 The design rests on four properties:
 
@@ -27,7 +29,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 ### 2.1 Requirements
 
 1. Group several files and fragments into one installable unit.
-2. Select in a TUI which units to install, without handling individual files.
+2. Select which units to install, without handling individual files.
 3. Install units that are not yet installed.
 4. Update outdated units, with a basis for the decision that a person can understand.
 5. Keep alternative variants of a unit side by side and install the appropriate one.
@@ -52,6 +54,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 - Install, update and remove items from local kit directories into global harness configuration directories.
 - Protect user content through recorded ownership.
 - Support several kits per target.
+- Serve two audiences through two interfaces of equal capability: the CLI for AI agents and automation, the TUI for humans.
 - Run on Windows, Linux and macOS as a single static binary.
 
 ### 3.2 Non-goals
@@ -61,7 +64,6 @@ penates addresses the machine side of this problem: one kit, several machines, e
 - Translation of content between harnesses.
 - Detection of the operating system, installed harnesses or harness versions.
 - Project-scoped targets, such as a `.opencode/` directory inside a repository.
-- A command-line interface. The binary takes the `version` and `licenses` subcommands beside the TUI; a full CLI remains outside v1, and the core permits adding one later without changes to it.
 
 ## 4. Principles
 
@@ -77,6 +79,7 @@ penates addresses the machine side of this problem: one kit, several machines, e
 
 | Term | Meaning |
 |---|---|
+| Interface | One of the two faces of penates: the TUI for humans, the CLI for AI agents and automation. |
 | Harness | An agent environment that consumes the installed content, for example OpenCode or Claude Code. |
 | Kit | A directory containing `kit.yaml` and items for one harness. The source of truth for its items. |
 | Item | A directory inside a kit containing `item.yaml` and all files the item contributes. The unit of selection, installation, versioning and atomicity. |
@@ -115,7 +118,7 @@ shared:                          # files that section and json contributions may
 
 ### 6.2 The built-in kit
 
-penates ships its own documentation as a kit embedded in the binary. On the target it installs two skills — `reference`, the product reference, and `kit-authoring`, the guide to writing kit repositories — through the same machinery as any other kit. The kit's name is `penates`, a reserved name: registering a directory kit under it is refused, and the built-in kit is the only other writer of it.
+penates ships its own documentation as a kit embedded in the binary. On the target it installs the product's self-documentation — three skills: `reference`, the product reference; `kit-authoring`, the guide to writing kit repositories; and `operating`, the guide to driving penates day to day, addressed to the AI agents that run it through the CLI. They install through the same machinery as any other kit. The set is part of the product and moves with it: the kit travels inside the binary, so its documentation cannot lag behind the interfaces the binary ships — a new binary offers it as an ordinary update. The kit's name is `penates`, a reserved name: registering a directory kit under it is refused, and the built-in kit is the only other writer of it.
 
 On every start penates unpacks the embedded kit into the data directory (`builtin-kit` under the penates data directory) and registers it while the name is free. No target is ever attached automatically — attaching is the user's action, like any kit's. A stamp file beside the directory records the embedded hash, written only after the directory is fully in place. The directory itself is governed by the three-state model of 7.2: the stamp is the base, the directory content the current state, the embedded content the incoming one.
 
@@ -198,7 +201,7 @@ A kit attaches to one or more targets, and the attachment is what ties a kit's i
 
 ### 6.8 Application state
 
-All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty), together with the unpacked built-in kit and its stamp (6.2). Nothing is written into a target other than the contributions themselves.
+All state is kept in the penates data directory (`~/.config/penates`, or `$XDG_CONFIG_HOME/penates` when that variable is set and non-empty), together with the unpacked built-in kit and its stamp (6.2). Nothing is written into a target other than the contributions themselves. Both interfaces are processes over this one state: a run reads it as it stands and writes it whole on mutation, and how overlapping runs are kept from merging silently is the architecture's concern.
 
 - **Configuration:** the registry — registered kits (name to directory), registered targets (path, with an optional display name), the attachments between them (a kit attaches to several targets; a target exists without kits), and the last active target.
 - **Pending actions:** per target, the actions chosen since its last apply — select, reset and remove per item — the deferred operations waiting for that apply (detach kit, forget target), and the variable answers given at selection time. The answers stay until the apply writes them into the lock, so a restored selection does not ask again. Pending actions are saved on every mutation; entries that no longer hold are dropped at load with a report the interface can show.
@@ -300,7 +303,7 @@ Two items that claim the same file, the same block identifier, or the same JSON 
 
 ### 7.6 Explicit reset
 
-For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update. The model keeps reset available for every installed item; the interface names the key where it applies — on modified, conflict and broken items (10.2). Resetting the built-in kit's directory (6.2) is a different operation with the same word, reached from the command palette.
+For any installed item, the user may request **reset to kit**. Reset replaces the item's owned content with the incoming content and bypasses the version table. It is never performed as part of a regular update. The model keeps reset available for every installed item; each interface names where it applies — the TUI offers the key on modified, conflict and broken items, the CLI takes an explicitly named item (10.2, 10.3). Resetting the built-in kit's directory (6.2) is a different operation with the same word, reached from the command palette.
 
 ### 7.7 Atomicity
 
@@ -326,7 +329,7 @@ Version conventions for authors:
 - **minor:** added capabilities or sections;
 - **patch:** wording and corrections.
 
-The TUI marks major updates for review and displays `CHANGELOG.md` when present.
+Each interface marks a major update for review and presents the item's `CHANGELOG.md` when present.
 
 Each installed item is pinned to its source kit. Updates come only from that kit. An item with the same id in another kit is a different item and never replaces the installed one.
 
@@ -351,7 +354,11 @@ Files that are not recorded in the lock, including files the user added inside a
 
 An installed item that no longer exists in its kit is an orphan. An orphan remains managed and frozen: it is marked as removed from the kit, receives no updates, and can be removed by the user. All items of a kit that has become unavailable receive the same frozen status.
 
-## 10. User experience
+## 10. Interfaces
+
+penates is operated through two interfaces of equal capability. Parity is a standing contract: every scenario — inspecting, installing, updating, resetting, removing, registering and managing kits and targets — is reachable from each interface, and neither is a wrapper over a subset of the other. Parity is about scenarios, not mechanics: the TUI stages selection, summary and apply as separate acts of a person; the CLI speaks in one-shot commands to an agent or a script. Both are views over the same state — registry, pending actions, locks — so what one interface stages, the other sees and can complete.
+
+The audiences split by interface. The CLI is the working interface for AI agents and automation — the daily way penates is meant to be driven once the first run is behind. The TUI is the interface a person reads: the first run, the inspection of state, the occasional manual act. First use goes through the TUI by design — registering the first kit and confirming its target is where the person decides what penates may write.
 
 ### 10.1 First run
 
@@ -359,7 +366,9 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 2. The user enters the kit's directory; penates reads `kit.yaml` and proposes `target_hint` as the target.
 3. The user confirms or edits the target; the kit and target are registered.
 
-### 10.2 Main screen
+### 10.2 The TUI
+
+Its main screen:
 
 ```
  penates  ~/.config/opencode ▾                                     3 pending · ? help
@@ -393,6 +402,36 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 - Transient results report on the notice line: a rescan names the new items, updates and orphans its diff brought and drops the pending actions it invalidated, and an immediate configuration change — attaching a kit, detaching one without installed items — offers `u` undo while the notice lives, one press performing the reverse operation. Quitting with pending item actions asks once; they are saved either way and offered for restoration on the next start.
 - When the apply finishes, the results list the applied items with their verbs, the content a removal kept, and every failed or excluded item with its reason. On exit, penates prints the changes applied during the session to the regular output, so that a record remains in the terminal history; nothing is printed when nothing was applied.
 
+### 10.3 The CLI
+
+The CLI is penates for agents, scripts and automation: equal in capability to the TUI and dialog-free — a mutating command asks at most one confirmation. A bare `penates` opens the TUI; the subcommands are the CLI.
+
+| Command | Effect |
+|---|---|
+| `version` | The version and the commit the binary was built from. |
+| `licenses` | The license texts of the components in the binary. |
+| `status` | The current target, its kits and items with states and reasons, and the staged pending actions. |
+| `show <kit/item>` | The details of one item: description, status with reason, tags, variables with their stored answers, contributions, changelog. |
+| `install <kit/item>…` | Plan and apply in one run; a version below the installed one is named as a downgrade in the summary. |
+| `update [<kit/item>…]` | Every available update, or the named items. Never downgrades. |
+| `remove <kit/item>…` | Plan and apply the removal in one run. |
+| `reset <kit/item>` | Reset to kit (7.6); `reset --builtin` resets the built-in kit's directory (6.2). |
+| `apply` | Apply the pending actions staged for the target — the bridge to the TUI's staging. |
+| `pending clear` | Drop the staged pending actions without applying them; asks once, like any mutating command. |
+| `kit …` | Registration and management of kits: `list`; `add`, `attach`, `detach`, `path`. |
+| `target …` | Registration and management of targets: `list`; `add`, `rename`, `forget`. |
+
+- Items are named `kit/item`. `--target` selects the target for the one run and defaults to the last active one; it never changes which target the TUI opens — only switching targets in the TUI does.
+- Registration is human: `kit add` refuses while no kit is registered, and the error names the first run's way in — a bare `penates` (10.1). `kit add <path>` registers the kit and attaches it to `--target`, or to the last active target when omitted; the `target_hint` flow belongs to the TUI (10.1). Past the first kit, the CLI registers freely.
+- A registration or management command takes the immediate variant of 6.7: `detach` detaches at once, the installed items staying installed and owned, listed for `remove`; `forget` forgets at once, deleting the lock and leaving the files. Waiting for the apply is the TUI's mechanics.
+- Variables: answers stored in the lock are reused; `--set id=value` is needed only for a variable that is new or whose answer is being changed. A required variable left without a value fails the command, naming the missing ids.
+- A mutating command prints the apply summary and asks once; `--yes` confirms in advance, `--dry-run` prints the summary and writes nothing. A major update is marked in the summary, with its `CHANGELOG.md` printed (8). Without a terminal there is no asking — a command that would ask requires `--yes`.
+- One-shot commands never consume or mix staged pending actions: while the target holds any, they refuse and name them, and the error lays out the three ways out — `apply` them, `pending clear` them, or ask the person who staged them.
+- Output is plain text; there is no machine-readable mode (11). The stability is a contract about the skeleton, not the prose: item names `kit/item`, the state words, one reason per line, the error format, the exit codes. Errors print one per line as `Error [category]: message` to stderr, the categories themselves a stable contract — never removed or renamed, new ones may come — and the exit code is non-zero whenever the command did not fully succeed.
+- Every error names the concrete next step — the command to run, the flag or value to set, or the act only a person can take. An error without a next step is a defect.
+- The command line is written to be governed by permission rules: the command path opens the line with flags after it, and each command has exactly one form — no aliases, no abbreviations. A mutation is told by the command's verb and confirmed by `--yes`; the reading commands write nothing outside the penates data directory (the built-in kit's startup sync unpacks and registers there, 6.2), so one allow rule covers them all.
+- The command set grows as scenarios demand; the parity contract holds.
+
 ## 11. Rejected directions
 
 | Decision | Reason for rejection |
@@ -409,6 +448,8 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 | Template logic (conditionals, loops) | Contradicts principle 2. |
 | Storing state inside the target directory | The target directory holds only installed content. |
 | Project-scoped targets | Project configuration is shared through the project repository and belongs to tooling for that axis. |
+| An MCP server as a third, agent-facing interface | It would re-expose the same operations behind a protocol, a long-lived server process and per-harness configuration — a second agent-facing surface to build and keep in parity. MCP earns its keep for remote services with authentication and streaming; penates is a local tool without network access, and anything that can run the CLI can do everything. |
+| A machine-readable output mode (`--json`) | Doubles the output surface that must stay stable. penates output is read, never fed back — no command takes a previous output as its input — so one plain-text format serves both audiences, humans and agents alike. |
 
 ## 12. Open questions
 

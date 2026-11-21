@@ -108,7 +108,9 @@ func newRoot(b Build, opts Options, stdout, stderr io.Writer) *cobra.Command {
 			"instruction files, plugins, configuration fragments — from local kit\n" +
 			"directories into a harness configuration directory such as ~/.config/opencode.\n\n" +
 			"Run penates with no arguments to open the terminal UI: the first run explains\n" +
-			"what a kit is and offers to add one. \"penates status\" shows what is installed.\n\n" +
+			"what a kit is and offers to add one. \"penates status --target <path>\" shows\n" +
+			"what a target holds, and \"penates setup --target <path>\" is the first run's\n" +
+			"command-line form.\n\n" +
 			"Flags come after the command path, so permission rules can match the command\n" +
 			"text by its prefix.",
 		SilenceUsage:  true,

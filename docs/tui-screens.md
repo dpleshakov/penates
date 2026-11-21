@@ -588,6 +588,8 @@ Commands: Add kit, Attach kit, Detach kit, Edit kit path, Reset builtin kit, Swi
 
 A reset is listed as `reset` with `~` lines. A replacement of a variant (7.4) is listed as one `replace` group. When every pending item is excluded, `enter` is unavailable and the footer reads `nothing to apply`.
 
+A pending that holds only deferred operations — a staged detach or forget with no item actions — shows them as a `deferred` group with its own count. Confirming completes the ones whose items are gone and drops the rest with the reason; there are no item steps to follow, so the report becomes the result without a progress view.
+
 ### 10.2 Progress
 
 ```

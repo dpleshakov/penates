@@ -1,6 +1,6 @@
 # penates concept
 
-This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04, is archived in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md) with only its status stamped; where the shipped build parted from it, this document states the shipped behaviour. The command-line interface and the `operating` skill of the built-in kit are accepted design ahead of their implementation; until they ship, the TUI is the only full interface.
+This document describes what penates is and how it behaves: the concept, the model, and the rules of ownership, updates, and removal. It is a living document — it changes when the product changes, which is not expected to happen often. How penates is built — the stack, the modules, their boundaries — is recorded in [architecture.md](architecture.md); this document does not repeat it. The original design RFC, accepted 2026-11-04, is archived in [archive/2026-11-04-rfc-penates.md](archive/2026-11-04-rfc-penates.md) with only its status stamped; where the shipped build parted from it, this document states the shipped behaviour.
 
 ## 1. Summary
 

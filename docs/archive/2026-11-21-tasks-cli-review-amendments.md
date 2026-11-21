@@ -1,6 +1,6 @@
 # 2026-11-21-tasks-cli-review-amendments.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -34,4 +34,4 @@ does.
 ### TASK-03 `tui-deferred-apply`
 **Description:** The TUI's apply with only deferred operations staged completes or drops them with a report, mirroring the CLI's semantics, instead of showing an empty results screen; close the `tui-deferred-only-apply` backlog entry.
 **Definition of done:** A staged detach (or forget) with no item actions, applied in the TUI, shows the deferred operations in the summary and completes or drops them at apply with the report; tui-screens.md is updated if it describes the old behavior; the backlog entry is removed; `make check` passes.
-**Status:** Pending
+**Status:** Done

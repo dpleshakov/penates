@@ -1843,7 +1843,9 @@ func (m *model) resultsFrame(width int) Frame {
 		return f
 	}
 	if m.outcome.err == "" {
-		f.Header = JoinSides(f.Header, m.resultCounts(), width)
+		if counts := m.resultCounts(); counts != "" {
+			f.Header = JoinSides(f.Header, counts, width)
+		}
 	}
 	f.Rows = renderResults(m.outcome.err, m.outcome.steps, m.outcome.deferred, m.outcome.errs, m.set)
 	f.Notice = m.noticeLine()

@@ -20,6 +20,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - A reset staged in the terminal UI without a selection now applies: pressing `r` on an item and then `a` silently applied nothing before.
+- Applying in the terminal UI with only deferred operations staged now completes or drops them with a report, instead of showing an empty results screen that left the pending actions waiting forever.
 
 ## [0.1.1] - 2026-11-08
 

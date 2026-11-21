@@ -132,6 +132,76 @@ func TestApplySummaryNothingToApply(t *testing.T) {
 	}
 }
 
+// TestApplyRunsAStagedResetWithoutSelection pins the collectApply rule:
+// a reset staged without a selection rides its own item into the apply —
+// the summary lists it as a reset group and the confirmed run resets the
+// content the user modified. A reset staged by `r` or by the default
+// action of a broken item carries no selection; a plan that never saw it
+// applied nothing, silently.
+func TestApplyRunsAStagedResetWithoutSelection(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	st, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerKitAt(t, st, "ex", kitDir, target)
+
+	// The item is installed and the user has edited the installed file:
+	// the reset has something to take back.
+	locks := lock.NewStore(dataDir)
+	lk, err := locks.Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk.SetItem("ex/good", &lock.Item{Version: "1.0.0", Files: map[string]string{"skills/good/SKILL.md": sha("good skill\n")}})
+	if err := locks.Save(lk); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, "skills", "good"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("my own words\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.Update(func(reg *state.Registry) error {
+		reg.Pending[target] = &state.Pending{Items: map[string]*state.ItemPending{
+			"ex/good": {Reset: true, Version: "1.0.0"},
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(st, locks)
+	lm := drive(t, resize(t, app.Initial(), 120, 30), "enter").(*model) // the restore offer is taken
+	lm = drive(t, lm, "a").(*model)                                     // the apply summary
+
+	// The reset-only staged item is in the plan: one reset group.
+	if s := lm.applySummary; s == nil || len(s.items) != 1 || s.items[0].verb != "reset" {
+		t.Fatalf("summary = %+v, want one reset group", lm.applySummary)
+	}
+
+	lm, cmd := confirmAll(t, lm)
+	runApplyCmd(t, lm, cmd, func(m *model, msg tea.Msg) {
+		if _, ok := msg.(applyDoneMsg); ok {
+			if !strings.Contains(m.resultText(), "good") {
+				t.Errorf("the results miss the reset item:\n%s", m.resultText())
+			}
+		}
+	})
+	data, err := os.ReadFile(filepath.Join(target, "skills", "good", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "good skill\n" {
+		t.Errorf("the staged reset did not restore the kit content: %q", data)
+	}
+}
+
 // progressFixture is the running apply of the 10.2 mockup: two steps done,
 // the third under the spinner.
 var progressFixture = []applyStep{

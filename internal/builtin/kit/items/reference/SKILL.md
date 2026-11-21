@@ -3,7 +3,7 @@ name: penates
 description: penates product reference — the model, ownership, item states, update and removal rules, common errors, keys, the CLI contract, and where the state lives. Answer questions about penates behavior from here.
 metadata:
   author: The penates project
-  version: 0.2.0
+  version: 0.2.2
 ---
 
 # penates reference
@@ -107,7 +107,10 @@ destination paths come from kit data.
 
 penates ships this documentation as a kit embedded in the binary: on every
 start it is unpacked into the data directory, registered under the reserved
-name `penates`, and kept in step with the binary's content. Attaching and
+name `penates`, and kept in step with the binary's content. Its skills
+divide the addressing: `reference` (this document) specifies the behavior,
+`operating` teaches the agents to drive penates day to day through the CLI,
+and `kit-authoring` addresses kit authors. Attaching and
 installing is the user's choice. A locally modified built-in kit shows on
 its row, blocks its own update, and is restored by the `Reset builtin kit`
 command after a confirmation.

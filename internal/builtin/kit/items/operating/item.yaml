@@ -1,0 +1,8 @@
+id: operating
+version: 0.1.0
+description: Driving penates day to day through the CLI — reading state, changing kit content, variables, confirmations, and conduct on refusals
+tags: [docs]
+vars: []
+contributes:
+  - file: SKILL.md
+    to: skills/penates-operating/SKILL.md

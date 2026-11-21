@@ -52,9 +52,12 @@ func (m *model) beginApply() {
 
 // collectApply gathers the target's pending actions into one pending apply.
 // A removal wins over a held selection: the removed item does not join the
-// installs of the same apply. The paths cover the selected items' owned
-// files, the kits' shared files, and the removals' recorded files and
-// shared files, so the planning sees everything it may touch.
+// installs of the same apply. A reset staged without a selection rides its
+// own item into the apply, when the kit still provides the item and the
+// lock still holds it — the plan never sees a reset that is not planned.
+// The paths cover the selected items' owned files, the kits' shared files,
+// and the removals' recorded files and shared files, so the planning sees
+// everything it may touch.
 func (m *model) collectApply() *pendingApply {
 	p := &pendingApply{resets: map[string]bool{}}
 	if pending := m.pendingActions(); pending != nil {
@@ -63,6 +66,8 @@ func (m *model) collectApply() *pendingApply {
 			case item.Remove:
 				p.removals = append(p.removals, key)
 			case item.Select:
+				p.selection = append(p.selection, key)
+			case item.Reset && m.kitItem(key) != nil && m.lk != nil && m.lk.Items[key] != nil:
 				p.selection = append(p.selection, key)
 			}
 			if item.Reset {

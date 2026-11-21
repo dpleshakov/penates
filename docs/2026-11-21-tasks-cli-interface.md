@@ -47,7 +47,7 @@ both shipped.
 ### TASK-03 `concurrency-guard`
 **Description:** Resolve the architecture known risk: guard overlapping runs over the one state file — refused or serialized, never silently merged (concept: application state).
 **Definition of done:** Two concurrent penates processes cannot corrupt or silently merge state; the known-risks entry in architecture.md is resolved by this work.
-**Status:** Pending
+**Status:** Done — `internal/guard` refuses an overlapping run before it touches the state (busy category, exit 1); architecture.md records the resolution and the deliberate residual limitation.
 
 ### TASK-04 `ship-riders`
 **Description:** The riders that ship with the CLI: the architecture.md updates (module row, dependency register for the grown cobra surface, data flow with the second client), the README section for the CLI, the CHANGELOG entry under Unreleased, and — together with the shipped `operating` skill — removal of the concept's intro note about accepted design ahead of implementation.

@@ -65,16 +65,20 @@ func newKitAddCmd() *cobra.Command {
 	return cmd
 }
 
-// openSessionForAdd opens the state the way kit add needs it: the
-// registry is read before the built-in kit's startup sync runs, because
-// the guard of the first run checks that no kit is registered at all —
-// and the sync itself registers one while the name is free. The guard
-// judged before the sync is live; judged after it, it is dead in the
-// same process.
+// openSessionForAdd opens the state the way kit add needs it: the run
+// guard is taken before anything reads there, so a busy directory wins
+// over the first-run refusal. The registry is read before the built-in
+// kit's startup sync runs, because the guard of the first run checks
+// that no kit is registered at all — and the sync itself registers one
+// while the name is free. The guard judged before the sync is live;
+// judged after it, it is dead in the same process.
 func openSessionForAdd() (*session, *Error) {
 	dataDir, err := state.DefaultDir()
 	if err != nil {
 		return nil, &Error{Category: CategoryState, Message: fmt.Sprintf("cannot resolve the penates data directory: %v", err), Cause: err}
+	}
+	if sessErr := takeRunGuard(dataDir); sessErr != nil {
+		return nil, sessErr
 	}
 	st, err := state.Open(dataDir)
 	if err != nil {

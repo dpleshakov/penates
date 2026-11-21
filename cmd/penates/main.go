@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/cli"
+	"github.com/dpleshakov/penates/internal/guard"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/state"
 	"github.com/dpleshakov/penates/internal/tui"
@@ -33,11 +35,21 @@ func main() {
 }
 
 // runTUI opens the terminal interface over the penates data directory.
+// The run guard is taken before the state opens and held for the whole
+// session: the interface keeps its lock objects in memory until it
+// closes, so no other penates process — no CLI command, reading ones
+// included — may touch the directory meanwhile. A refused run reports
+// busy, like every command of the client.
 func runTUI(stdout io.Writer) error {
 	dataDir, err := state.DefaultDir()
 	if err != nil {
 		return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
 	}
+	run, err := guard.Acquire(dataDir)
+	if err != nil {
+		return guardError(err)
+	}
+	defer func() { _ = run.Release() }()
 	stateStore, err := state.Open(dataDir)
 	if err != nil {
 		return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
@@ -64,4 +76,15 @@ func runTUI(stdout io.Writer) error {
 		_, _ = fmt.Fprint(stdout, rec)
 	}
 	return nil
+}
+
+// guardError maps the run guard's refusal into the client's contract: the
+// busy refusal keeps its category, every other failure — the directory or
+// its lock file cannot be made — is the state's.
+func guardError(err error) error {
+	var busy *guard.BusyError
+	if errors.As(err, &busy) {
+		return &cli.Error{Category: cli.CategoryBusy, Message: busy.Error(), Cause: busy}
+	}
+	return &cli.Error{Category: cli.CategoryState, Message: err.Error(), Cause: err}
 }

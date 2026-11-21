@@ -280,7 +280,9 @@ func TestApplyCompletesADeferredOnlyPending(t *testing.T) {
 	if err := st.DeferDetachKit("team", target); err != nil {
 		t.Fatal(err)
 	}
-	m := resize(t, app.Initial(), 120, 30)
+	// A wide terminal: the macOS TMPDIR puts the target path near a
+	// hundred characters, and the deferred row must render untruncated.
+	m := resize(t, app.Initial(), 200, 30)
 
 	m = drive(t, m, "a")
 	lm := m.(*model)

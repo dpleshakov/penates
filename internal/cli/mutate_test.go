@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/state"
 )
 
@@ -1253,9 +1254,11 @@ func TestApplyMixedRemovalAndSelectionShareOneFile(t *testing.T) {
 
 // TestFailedStepPrintsIOCategory pins the Error line of a step that
 // failed at apply time: the skeleton holds its category, and a write
-// that failed carries io. A read-only target directory leaves the
-// planning untouched — the snapshot only reads — and fails the step's
-// directory creation.
+// that failed carries io. The refusal reaches the step on every
+// platform: a read-only target directory fails the step's directory
+// creation where directory modes are honored, and Windows, which
+// treats them as advisory, runs the step to its lock save — the
+// rename over the read-only lock file is what refuses there.
 func TestFailedStepPrintsIOCategory(t *testing.T) {
 	e := newTestEnv(t)
 	_, target := e.readyKit("personal")
@@ -1265,7 +1268,21 @@ func TestFailedStepPrintsIOCategory(t *testing.T) {
 	if err := os.Chmod(target, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(target, 0o700) })
+	// The lock file stands read-only in place of the one the first
+	// install would create: nothing reads it differently, and the
+	// Windows leg, which sails past the directory modes, is refused
+	// exactly here, at the step's lock save.
+	if err := e.locks.Save(&lock.Lock{Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := e.locks.Path(target)
+	if err := os.Chmod(lockPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(lockPath, 0o600)
+		_ = os.Chmod(target, 0o700)
+	})
 
 	stdout, stderr, code := execute(t, testBuild, "install", "personal/writing", "--target", target, "--yes")
 

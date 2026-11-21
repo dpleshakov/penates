@@ -133,10 +133,10 @@ func TestUnmakeableDataDirIsAStateError(t *testing.T) {
 	}
 }
 
-// One process holds one guard: the next command run in the same process
-// releases the previous run's hold, the way the previous run's process
-// ending would have. Tests run many runs back to back; real runs take
-// the guard once per process and never see this.
+// One Run holds the run guard for the length of the call and releases
+// it at its end, the way a real run's process ending releases the hold:
+// sequential runs in one process — the test shape — pass the guard
+// along, and no run leaves a handle behind.
 func TestSequentialRunsShareTheProcess(t *testing.T) {
 	e := newTestEnv(t)
 
@@ -145,14 +145,10 @@ func TestSequentialRunsShareTheProcess(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("run %d over %s: exit code = %d, want 0 (stderr: %s)", i+1, e.dataDir, code, stderr)
 		}
+		if runGuard != nil {
+			t.Errorf("run %d ended with the guard still held", i+1)
+		}
 	}
-	if runGuard == nil {
-		t.Errorf("the run left no guard behind")
-	}
-	if err := runGuard.Release(); err != nil {
-		t.Errorf("releasing the run's own guard: %v", err)
-	}
-	runGuard = nil
 }
 
 // The busy refusal maps into the contract with its category: ExitCode

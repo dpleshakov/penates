@@ -46,30 +46,36 @@ type session struct {
 	stagedRemoved []string
 }
 
-// runGuard is the guard the process holds over its data directory. A
-// real run takes it once, in the first session it opens, and keeps it
-// until the process ends — the process's death releases the hold. The
-// only caller that finds a guard already here is a test running many
-// command runs back to back in one process: the previous run's guard is
-// released the way its process ending would have.
+// runGuard is the guard the command run holds over its data directory.
+// It is the storage for the defer-release in Run: the guard is taken
+// deep inside the command tree, where a session opens, and let go where
+// the run ends.
 var runGuard *guard.Guard
 
-// takeRunGuard takes the process's run guard over the data directory,
-// before anything reads or writes there. A refusal means another penates
+// takeRunGuard takes the run's guard over the data directory, before
+// anything reads or writes there. A refusal means another penates
 // process holds the directory — an open terminal UI, most likely — and
 // says so under the busy category; every other failure is the state's:
 // the directory or its lock file cannot be made.
 func takeRunGuard(dataDir string) *Error {
-	if runGuard != nil {
-		_ = runGuard.Release()
-		runGuard = nil
-	}
 	g, err := guard.Acquire(dataDir)
 	if err != nil {
 		return GuardError(err)
 	}
 	runGuard = g
 	return nil
+}
+
+// releaseRunGuard lets the run's guard go at Run's end, the way a real
+// run's process ending releases the hold a moment later. The open
+// handle must not outlive the run: on Windows it keeps the lock file
+// undeletable, and a test's TempDir cleanup fails over it.
+func releaseRunGuard() {
+	if runGuard == nil {
+		return
+	}
+	_ = runGuard.Release()
+	runGuard = nil
 }
 
 // GuardError maps what taking the run guard reported: the busy refusal
@@ -142,9 +148,11 @@ func (s *session) resolveTarget(explicit string) *Error {
 	}
 	t, ok := s.registry.Targets[path]
 	if !ok {
+		// The suggestion quotes the path plainly: %q would double the
+		// backslashes of a Windows path.
 		return &Error{
 			Category: CategoryNotFound,
-			Message:  fmt.Sprintf("no target is registered at %s (register it with %q)", path, "penates target add "+path),
+			Message:  fmt.Sprintf("no target is registered at %s (register it with \"penates target add %s\")", path, path),
 		}
 	}
 	s.target, s.name = path, t.Name

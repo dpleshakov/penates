@@ -60,6 +60,12 @@ func Run(b Build, opts Options, args []string, stdout, stderr io.Writer) int {
 	if opts.IsTerminal == nil {
 		opts.IsTerminal = stdinIsTerminal
 	}
+	// The guard the command run takes lives exactly as long as the run:
+	// Run's end releases it, the way the process's ending releases a
+	// real run's hold a moment later. An open handle must not outlive
+	// the call — on Windows it keeps the data directory's files
+	// undeletable, and a test's TempDir cleanup fails over it.
+	defer releaseRunGuard()
 	root := newRoot(b, opts, stdout, stderr)
 	// The command path has to open the command line: permission rules
 	// match the command text by its prefix (flagorder.go).

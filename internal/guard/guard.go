@@ -82,9 +82,10 @@ func Acquire(dir string) (*Guard, error) {
 	return &Guard{file: file, dir: dir}, nil
 }
 
-// Release lets the hold go, so another Acquire — another run in the same
-// process, a test's — can take it. A real run does not call it: the
-// process's death releases the hold.
+// Release lets the hold go, so another Acquire — the next run in the
+// same process, a test's — can take it. The command-line client
+// releases at the end of each Run; a hold no one releases ends with
+// the process, whose death releases it on its own.
 func (g *Guard) Release() error {
 	err := unlockFile(g.file)
 	if cerr := g.file.Close(); err == nil {

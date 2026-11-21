@@ -32,7 +32,7 @@ func newShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The argument's shape is the command line's business: it is
 			// judged before any state is touched.
-			if _, _, err := splitItemArg(args[0]); err != nil {
+			if _, _, err := splitItemArg(args[0], cmd.Name()); err != nil {
 				return err
 			}
 			explicit, _ := cmd.Flags().GetString("target")
@@ -71,7 +71,7 @@ type found struct {
 // the lock. An argument that does not split into kit and id never names an
 // identity: a usage error.
 func resolveItem(s *session, arg string) (*found, *Error) {
-	kitName, id, err := splitItemArg(arg)
+	kitName, id, err := splitItemArg(arg, "show")
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +106,14 @@ func resolveItem(s *session, arg string) (*found, *Error) {
 }
 
 // splitItemArg splits "kit/item" into its parts. An argument that does not
-// split is not an item identity, and the command line is at fault.
-func splitItemArg(arg string) (kitName, id string, err *Error) {
+// split is not an item identity, and the command line is at fault; the
+// command's name goes into the next step the refusal names.
+func splitItemArg(arg, cmdName string) (kitName, id string, err *Error) {
 	kitName, id, ok := strings.Cut(arg, "/")
 	if !ok || kitName == "" || id == "" {
 		return "", "", &Error{
 			Category: CategoryUsage,
-			Message:  fmt.Sprintf("%q does not name an item as \"kit/item\" (run %q)", arg, "penates show --help"),
+			Message:  fmt.Sprintf("%q does not name an item as \"kit/item\" (run %q)", arg, "penates "+cmdName+" --help"),
 		}
 	}
 	return kitName, id, nil

@@ -137,7 +137,7 @@ contract: never removed or renamed, new ones may be added.
 |---|---|
 | `usage` | A wrong or incomplete command line: unknown command or flag, misplaced flag, malformed `--set`, unknown variable id, required variable without a value |
 | `not_found` | A named thing does not exist: item, kit, target, no active target |
-| `conflict` | The planner refused a write under the ownership rules; the message carries the conflict's prose |
+| `conflict` | The planner refused a write under the ownership rules, and a registration that collides with the state — a kit already attached, a kit or target name already registered; the message carries the conflict's prose |
 | `kit` | The kit content is at fault: unreadable `kit.yaml`, broken declaration, unknown placeholder |
 | `staged` | A one-shot command refused: the target holds staged pending actions; apply, clear, or ask who staged them |
 | `first-run` | `kit add` on an empty registry: the first kit is registered by a person, in the terminal UI |

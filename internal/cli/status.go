@@ -280,17 +280,33 @@ func statusOrphanLines(s *session, covered map[string]bool) []string {
 
 // statusPendingLines builds the section of the target's staged pending
 // actions: one line per item action — the verb the apply would run — and
-// one per deferred operation.
+// one per deferred operation. The header counts the item actions; the
+// deferred operations follow as their own lines.
 func statusPendingLines(s *session) []string {
-	if s.pending == nil || (len(s.pending.Items) == 0 && len(s.pending.Deferred) == 0) {
+	if !hasPending(s) {
 		return nil
 	}
+	lines := []string{fmt.Sprintf("pending %d", len(s.pending.Items))}
+	return append(lines, pendingActionLines(s)...)
+}
+
+// pendingActionCount counts everything the target's pending actions
+// hold: the item actions and the deferred operations together — the
+// number a pending clear reports as cleared.
+func pendingActionCount(s *session) int {
+	return len(s.pending.Items) + len(s.pending.Deferred)
+}
+
+// pendingActionLines lays the staged pending actions out, one line per
+// item action — the verb the apply would run, the versions it reports —
+// and one per deferred operation.
+func pendingActionLines(s *session) []string {
 	keys := make([]string, 0, len(s.pending.Items))
 	for key := range s.pending.Items {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	lines := []string{fmt.Sprintf("pending %d", len(keys))}
+	var lines []string
 	for _, key := range keys {
 		item := s.pending.Items[key]
 		verb, versions := statusPendingVerb(s, key, item)
@@ -300,6 +316,13 @@ func statusPendingLines(s *session) []string {
 		}
 		lines = append(lines, line)
 	}
+	return append(lines, pendingDeferredLines(s)...)
+}
+
+// pendingDeferredLines lays the target's deferred operations out, the
+// lines the status section shows and a deferred-only apply confirms.
+func pendingDeferredLines(s *session) []string {
+	var lines []string
 	for _, d := range s.pending.Deferred {
 		switch d.Kind {
 		case state.DeferredDetachKit:

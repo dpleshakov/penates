@@ -2,6 +2,11 @@
 
 Accepted work that has not started yet, in priority order.
 
+### `tui-deferred-only-apply`
+**Goal:** Applying a target whose pending holds only deferred operations completes them in the TUI, the way the CLI's apply does, instead of showing an empty results screen.
+**Context:** `beginApply` (internal/tui/apply.go) skips the summary and shows empty results when no item actions are staged, so a deferred detach or forget waits forever unless item actions are staged beside it. The CLI's apply completes or drops the deferred with a report (internal/cli/mutate.go, completeDeferredOnly); the open question is what the TUI summary shows for a deferred-only apply. Found while implementing the CLI's apply.
+**Added:** 2026-11-21, during the CLI interface work
+
 ### `file-exec-bit`
 **Goal:** A `file` contribution whose source file carries the executable bit installs with that bit preserved, so a kit can ship runnable scripts.
 **Context:** apply.Item stages every contribution through stage() (internal/apply/apply.go), which chmods each staged file to 0o644 regardless of its source, and the kit loader reads file bytes only, so the mode is lost before planning. A skill whose helper scripts run as bare commands — symlinked onto PATH — installs unrunnable, and the symlink breaks. Found while publishing the peer-chat item in penates-opencode; that item's README carries a note pointing here until this lands. The fix threads the source mode through kit load → plan action → stage.

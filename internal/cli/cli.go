@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -35,14 +36,29 @@ type Options struct {
 	// penates with no arguments runs it. Tests pin it to keep the tree
 	// from opening an interface.
 	TUI func(stdout io.Writer) error
+	// Stdin carries the answers of the mutating commands' one
+	// confirmation. The process passes os.Stdin; nil means the same.
+	Stdin io.Reader
+	// IsTerminal reports whether stdin holds a terminal — a mutating
+	// command without --yes asks only then. The process passes the
+	// isatty test; nil means the same.
+	IsTerminal func() bool
 }
 
 // Run executes the command tree the way main does and returns the process
 // exit code: 0 on success, 2 for a usage error, 1 for every other failure
 // (errors.go). Errors print here, one stderr line in the contract format;
 // cobra must not write its own message or dump the usage text on top of it
-// (SilenceErrors, SilenceUsage).
+// (SilenceErrors, SilenceUsage). A command that has already reported its
+// outcome and pinned its code — a declined confirmation, a run with
+// excluded or failed items — exits without anything printed on top.
 func Run(b Build, opts Options, args []string, stdout, stderr io.Writer) int {
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
+	if opts.IsTerminal == nil {
+		opts.IsTerminal = stdinIsTerminal
+	}
 	root := newRoot(b, opts, stdout, stderr)
 	// The command path has to open the command line: permission rules
 	// match the command text by its prefix (flagorder.go).
@@ -52,6 +68,10 @@ func Run(b Build, opts Options, args []string, stdout, stderr io.Writer) int {
 	}
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
+		var pinned *exitError
+		if errors.As(err, &pinned) {
+			return pinned.code
+		}
 		Print(err, stderr)
 		return ExitCode(err)
 	}
@@ -94,11 +114,32 @@ func newRoot(b Build, opts Options, stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newLicensesCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newShowCmd())
+	ask := &confirmer{
+		stdin:      opts.Stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		isTerminal: opts.IsTerminal,
+	}
+	root.AddCommand(newInstallCmd(ask))
+	root.AddCommand(newUpdateCmd(ask))
+	root.AddCommand(newRemoveCmd(ask))
+	root.AddCommand(newResetCmd(ask))
+	root.AddCommand(newApplyCmd(ask))
+	pendingCmd := newPendingCmd()
+	pendingCmd.AddCommand(newPendingClearCmd(ask))
+	root.AddCommand(pendingCmd)
 	kitCmd := newKitCmd()
 	kitCmd.AddCommand(newKitListCmd())
+	kitCmd.AddCommand(newKitAddCmd())
+	kitCmd.AddCommand(newKitAttachCmd())
+	kitCmd.AddCommand(newKitDetachCmd())
+	kitCmd.AddCommand(newKitPathCmd())
 	root.AddCommand(kitCmd)
 	targetCmd := newTargetCmd()
 	targetCmd.AddCommand(newTargetListCmd())
+	targetCmd.AddCommand(newTargetAddCmd())
+	targetCmd.AddCommand(newTargetRenameCmd())
+	targetCmd.AddCommand(newTargetForgetCmd())
 	root.AddCommand(targetCmd)
 	// Cobra adds help and completion only when it executes the tree;
 	// adding them here keeps the surface the same however the tree runs.
@@ -210,6 +251,21 @@ func exactArgs(n int, what string) cobra.PositionalArgs {
 			return &Error{
 				Category: CategoryUsage,
 				Message: fmt.Sprintf("%s takes %d %s, got %d (run %q)",
+					cmd.Name(), n, what, len(args), cmd.CommandPath()+" --help"),
+			}
+		}
+		return nil
+	}
+}
+
+// minimumArgs is the Args validator of a command that takes at least n
+// positional arguments, with the wording of the contract.
+func minimumArgs(n int, what string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) < n {
+			return &Error{
+				Category: CategoryUsage,
+				Message: fmt.Sprintf("%s takes at least %d %s, got %d (run %q)",
 					cmd.Name(), n, what, len(args), cmd.CommandPath()+" --help"),
 			}
 		}

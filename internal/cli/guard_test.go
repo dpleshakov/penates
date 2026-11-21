@@ -159,7 +159,7 @@ func TestSequentialRunsShareTheProcess(t *testing.T) {
 // keeps it at 1 and Print keeps its one-line form. Anything else taking
 // the guard reported is a state failure, not a busy refusal.
 func TestGuardErrorCarriesItsCategory(t *testing.T) {
-	e := guardError(&guard.BusyError{Dir: "/somewhere"})
+	e := GuardError(&guard.BusyError{Dir: "/somewhere"})
 	if e.Category != CategoryBusy {
 		t.Errorf("category = %q, want busy", e.Category)
 	}
@@ -168,7 +168,7 @@ func TestGuardErrorCarriesItsCategory(t *testing.T) {
 		t.Errorf("message = %q, want %q", e.Message, want)
 	}
 
-	e = guardError(errors.New("mkdir /x: not a directory"))
+	e = GuardError(errors.New("mkdir /x: not a directory"))
 	if e.Category != CategoryState {
 		t.Errorf("category = %q, want state", e.Category)
 	}

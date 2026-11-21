@@ -3,7 +3,7 @@ name: penates-operating
 description: Drive penates day to day through the CLI — read the state, change kit content in the kit rather than the target, answer for confirmations, and behave when penates refuses. For the behavior specification — the model, ownership, the state words, and the error categories — see the penates reference skill.
 metadata:
   author: The penates project
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # penates operating
@@ -31,8 +31,8 @@ category, look there.
 State is read with two commands:
 
 ```
-penates status              # the target, its kits and items with reasons, staged pending actions
-penates show <kit/item>     # one item: description, status with reason, variables, contributions
+penates status --target <path>  # the target, its kits and items with reasons, staged pending actions
+penates show <kit/item> --target <path>  # one item: description, status with reason, variables, contributions
 ```
 
 Every item line of `status` opens with its state word — `installed`,
@@ -70,12 +70,17 @@ change (writing kits is the `penates-kit-authoring` skill's subject), and
 run `update`; it applies every available update, or the named items, and
 never downgrades.
 
+The kit's directory may move — another checkout path, a renamed clone.
+Point the registered kit at the place that now holds it with
+`penates kit move <kit> <dir>`; the directory must hold a kit of the same
+name, and the kit's attachments and pending actions survive the move.
+
 Machine-specific variation is data, not edits: variables. Stored answers
 are reused, so `--set id=value` is needed only for a variable that is new
 or whose answer changes:
 
 ```
-penates install <kit/item> --set opencode_source_path=~/dev/opencode
+penates install <kit/item> --set opencode_source_path=~/dev/opencode --target <path>
 ```
 
 `penates reset <kit/item>` returns an item to its kit content and
@@ -85,7 +90,8 @@ discards the user's modifications — that is the person's call, not yours.
 
 A mutating command — `install`, `update`, `remove`, `reset`, `apply`,
 `pending clear`, `setup` — prints the summary and asks once. `--dry-run`
-prints the summary and writes nothing; reach for it when the outcome is
+prints the summary and writes nothing of it, beside removing an
+interrupted apply's staged temp files; reach for it when the outcome is
 not obvious. `--yes` confirms in advance: use it when you have full right
 to the action — and note that without a terminal there is no asking at
 all, so a scripted run that would ask needs `--yes` anyway.

@@ -59,7 +59,7 @@ penates remove <kit/item>…        # plan and apply the removal
 penates reset <kit/item>|--builtin
 penates apply                     # apply what the terminal UI staged
 penates pending clear             # drop the staged actions without applying
-penates kit list|add|attach|detach|path …
+penates kit list|add|attach|detach|path|move …
 penates target list|add|rename|forget …
 ```
 
@@ -68,7 +68,8 @@ wherever a command acts on one: the CLI neither reads nor writes which
 target the terminal UI opens — switching targets is the TUI's own state.
 
 A mutating command prints its summary — the target line first — and asks once;
-`--yes` confirms in advance, `--dry-run` prints the summary and writes nothing.
+`--yes` confirms in advance, `--dry-run` prints the summary and writes nothing
+of it, beside removing an interrupted apply's staged temp files.
 Without a terminal there is no asking: a command that would ask requires
 `--yes`. Variables flow through repeatable `--set id=value` flags; answers
 stored in the lock are reused.

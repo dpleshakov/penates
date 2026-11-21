@@ -474,7 +474,7 @@ func collapseOf(states map[string]bool, name string, unreadable bool) bool {
 }
 
 // DefaultAction names the action the space key toggles for a status (7.1):
-// te available, downgrade
+// install for an available item, update for an update available, downgrade
 // for a downgrade available, reset for a broken one. The other states have
 // none; the footer names the applicable key instead. The bool reports
 // whether the status has a default action at all.

@@ -14,6 +14,7 @@ import (
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
 	"github.com/dpleshakov/penates/internal/state"
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // The apply screens of section 10: the summary, the progress and the result
@@ -26,24 +27,24 @@ import (
 var summaryFixture = applySummary{
 	items: []summaryItem{
 		{
-			verb: verbInstall, id: "review", version: "0.3.0", kit: "team-opencode",
-			lines: []summaryLine{
-				{mark: markCreate, path: "agents/review.md"},
-				{mark: markCreate, path: "AGENTS.md", suffix: "section team-opencode/review"},
+			verb: view.VerbInstall, id: "review", version: "0.3.0", kit: "team-opencode",
+			lines: []view.PathLine{
+				{Mark: view.MarkCreate, Path: "agents/review.md"},
+				{Mark: view.MarkCreate, Path: "AGENTS.md", Note: "section team-opencode/review"},
 			},
 		},
 		{
-			verb: verbUpdate, id: "done-v2", version: "1.2.0 → 1.3.0", kit: "personal-opencode",
-			lines: []summaryLine{
-				{mark: markReplace, path: "plugin/done.ts"},
-				{mark: markKeep, path: "plugin/README.md", suffix: "kept: already installed"},
+			verb: view.VerbUpdate, id: "done-v2", version: "1.2.0 → 1.3.0", kit: "personal-opencode",
+			lines: []view.PathLine{
+				{Mark: view.MarkReplace, Path: "plugin/done.ts"},
+				{Mark: view.MarkKeep, Path: "plugin/README.md", Note: "kept: already installed"},
 			},
 		},
 		{
-			verb: verbRemove, id: "old-lint", version: "0.2.0", kit: "team-opencode",
-			lines: []summaryLine{
-				{mark: markDelete, path: "agents/old-lint.md"},
-				{mark: markRelease, path: "agents/old-lint-notes.md", suffix: "kept and released: modified by the user"},
+			verb: view.VerbRemove, id: "old-lint", version: "0.2.0", kit: "team-opencode",
+			lines: []view.PathLine{
+				{Mark: view.MarkDelete, Path: "agents/old-lint.md"},
+				{Mark: view.MarkRelease, Path: "agents/old-lint-notes.md", Note: "kept and released: modified by the user"},
 			},
 		},
 	},
@@ -205,9 +206,9 @@ func TestApplyRunsAStagedResetWithoutSelection(t *testing.T) {
 // progressFixture is the running apply of the 10.2 mockup: two steps done,
 // the third under the spinner.
 var progressFixture = []applyStep{
-	{key: "team-opencode/review", id: "review", verb: verbInstall, version: "0.3.0", state: stepDone},
-	{key: "personal-opencode/done-v2", id: "done-v2", verb: verbUpdate, version: "1.3.0", state: stepDone},
-	{key: "team-opencode/old-lint", id: "old-lint", verb: verbRemove, version: "0.2.0", state: stepRunning},
+	{key: "team-opencode/review", id: "review", verb: view.VerbInstall, version: "0.3.0", state: stepDone},
+	{key: "personal-opencode/done-v2", id: "done-v2", verb: view.VerbUpdate, version: "1.3.0", state: stepDone},
+	{key: "team-opencode/old-lint", id: "old-lint", verb: view.VerbRemove, version: "0.2.0", state: stepRunning},
 }
 
 func TestApplyProgress(t *testing.T) {
@@ -231,9 +232,9 @@ func TestApplyProgress(t *testing.T) {
 // resultsFixture is the finished apply of the 10.3 mockup.
 var resultsFixture = &applyOutcome{
 	steps: []applyStep{
-		{key: "team-opencode/review", id: "review", verb: verbInstall, version: "0.3.0", state: stepDone},
-		{key: "personal-opencode/done-v2", id: "done-v2", verb: verbUpdate, version: "1.3.0", state: stepDone},
-		{key: "team-opencode/old-lint", id: "old-lint", verb: verbRemove, version: "0.2.0", state: stepDone,
+		{key: "team-opencode/review", id: "review", verb: view.VerbInstall, version: "0.3.0", state: stepDone},
+		{key: "personal-opencode/done-v2", id: "done-v2", verb: view.VerbUpdate, version: "1.3.0", state: stepDone},
+		{key: "team-opencode/old-lint", id: "old-lint", verb: view.VerbRemove, version: "0.2.0", state: stepDone,
 			kept: []plan.KeptNote{{Path: "agents/old-lint-notes.md", Reason: "modified by the user"}}},
 	},
 }
@@ -475,7 +476,7 @@ func TestApplyFailsBeforeTheSteps(t *testing.T) {
 func TestStepEventFailsTheStep(t *testing.T) {
 	forceVisual(t, termenv.Ascii, true)
 	m := &model{target: "~/.config/opencode", set: UnicodeSet, screen: screenProgress,
-		progress: []applyStep{{key: "ex/good", id: "good", verb: verbInstall, version: "1.0.0", state: stepWaiting}}}
+		progress: []applyStep{{key: "ex/good", id: "good", verb: view.VerbInstall, version: "1.0.0", state: stepWaiting}}}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	mm, _ = mm.Update(apply.StepEvent{Key: "ex/good", Start: true})
 	lm := mm.(*model)

@@ -948,6 +948,44 @@ func TestApplyDropsDeferredOnly(t *testing.T) {
 	}
 }
 
+// TestApplyCleansDroppedStagedActions pins the cleanup of a pending the
+// restore-time check emptied: every staged action too stale to apply
+// leaves the registry with its note, the run is the empty success it is,
+// and a follow-up one-shot command works without pending clear.
+func TestApplyCleansDroppedStagedActions(t *testing.T) {
+	e := newTestEnv(t)
+	dir, target := e.readyKit("personal")
+	stage(e, target, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Select: true, Version: "0.9.0"},
+		},
+	})
+	e.writeFiles(map[string]string{
+		filepath.Join(dir, "items/writing/item.yaml"): "id: writing\nversion: 1.1.0\ncontributes:\n  - file: skill/SKILL.md\n    to: skills/writing/SKILL.md\n",
+	})
+
+	stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "nothing staged") {
+		t.Errorf("stdout lacks the empty success:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "note  dropped the staged selection of personal/writing") {
+		t.Errorf("stdout lacks the drop note:\n%s", stdout)
+	}
+	if p := registryOf(e).Pending[target]; p != nil {
+		t.Errorf("the dropped actions stayed in the registry: %+v", p.Items)
+	}
+
+	// The one-shot command works without pending clear.
+	_, stderr, code = execute(t, testBuild, "install", "personal/greeting", "--target", target, "--yes")
+	if code != 0 {
+		t.Fatalf("the follow-up install exited %d (stderr: %s)", code, stderr)
+	}
+}
+
 // TestApplyDropsStaleStagedActions pins the restore-time check: a staged
 // selection whose item moved to another version since drops with a note,
 // and the rest applies.
@@ -1147,6 +1185,98 @@ func TestApplyRunsRemovalsResetsAndSelection(t *testing.T) {
 	reg := registryOf(e)
 	if p := reg.Pending[target]; p != nil && len(p.Items) > 0 {
 		t.Errorf("the pending actions did not settle: %+v", p.Items)
+	}
+}
+
+// TestApplyMixedRemovalAndSelectionShareOneFile pins the execution order
+// of the mixed apply: the removals run first, and the installs plan again
+// from the target as the removals leave it — a removed item's block must
+// not rise again in the shared file the selection writes into.
+func TestApplyMixedRemovalAndSelectionShareOneFile(t *testing.T) {
+	e := newTestEnv(t)
+	dir, target := e.readyKit("personal")
+	// The signoff item writes a section into the same shared AGENTS.md
+	// the greeting item's block lives in.
+	e.writeFiles(map[string]string{
+		filepath.Join(dir, "items/signoff/item.yaml"):  "id: signoff\nversion: 1.0.0\ncontributes:\n  - section: signoff.md\n    to: AGENTS.md\n",
+		filepath.Join(dir, "items/signoff/signoff.md"): "# signoff\n",
+	})
+	if _, _, code := execute(t, testBuild, "install", "personal/greeting", "--target", target, "--yes"); code != 0 {
+		t.Fatalf("the install exited %d", code)
+	}
+	stage(e, target, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/greeting": {Remove: true},
+			"personal/signoff":  {Select: true, Version: "1.0.0"},
+		},
+	})
+
+	stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	for _, want := range []string{
+		"removed  personal/greeting",
+		"installed  personal/signoff  1.0.0",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if strings.Contains(string(data), "Greets.") {
+		t.Errorf("the removed item's block rose again in the shared file:\n%s", data)
+	}
+	if !strings.Contains(string(data), "# signoff") {
+		t.Errorf("the installed item's block is missing from the shared file:\n%s", data)
+	}
+	lk, _ := e.locks.Load(target)
+	if _, held := lk.Items["personal/greeting"]; held {
+		t.Error("the lock still owns the removed item")
+	}
+	rec, held := lk.Items["personal/signoff"]
+	if !held {
+		t.Fatal("the lock does not own the installed item")
+	}
+	if _, owned := rec.Sections["AGENTS.md"]; !owned {
+		t.Errorf("the lock does not own the installed section: %+v", rec.Sections)
+	}
+	reg := registryOf(e)
+	if p := reg.Pending[target]; p != nil && p.Items["personal/greeting"] != nil {
+		t.Errorf("the staged removal did not settle: %+v", p.Items)
+	}
+}
+
+// TestFailedStepPrintsIOCategory pins the Error line of a step that
+// failed at apply time: the skeleton holds its category, and a write
+// that failed carries io. A read-only target directory leaves the
+// planning untouched — the snapshot only reads — and fails the step's
+// directory creation.
+func TestFailedStepPrintsIOCategory(t *testing.T) {
+	e := newTestEnv(t)
+	_, target := e.readyKit("personal")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(target, 0o700) })
+
+	stdout, stderr, code := execute(t, testBuild, "install", "personal/writing", "--target", target, "--yes")
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout, "failed  personal/writing") {
+		t.Errorf("stdout lacks the failed row:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "Error [io]: personal/writing: ") {
+		t.Errorf("stderr lacks the io Error line:\n%s", stderr)
 	}
 }
 

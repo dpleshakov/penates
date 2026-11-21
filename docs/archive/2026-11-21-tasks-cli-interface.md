@@ -52,4 +52,4 @@ both shipped.
 ### TASK-04 `ship-riders`
 **Description:** The riders that ship with the CLI: the architecture.md updates (module row, dependency register for the grown cobra surface, data flow with the second client), the README section for the CLI, the CHANGELOG entry under Unreleased, and — together with the shipped `operating` skill — removal of the concept's intro note about accepted design ahead of implementation.
 **Definition of done:** architecture.md, README.md and CHANGELOG.md describe the shipped CLI; the concept intro note is gone; `make check` passes.
-**Status:** Pending
+**Status:** Done — f252273 ships the riders (README, changelog, the concept note) on top of the architecture updates of the earlier rounds.

@@ -5,13 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
-	"github.com/dpleshakov/penates/internal/target"
 	"github.com/dpleshakov/penates/internal/view"
 )
 
@@ -26,36 +24,9 @@ import (
 // not. Sections separate by blank lines; a note follows its line after
 // two spaces; a reason indents by four.
 
-// The verbs of the summary and the result, the same words the terminal
-// UI's summary speaks.
-const (
-	verbInstall   = "install"
-	verbUpdate    = "update"
-	verbDowngrade = "downgrade"
-	verbRemove    = "remove"
-	verbReset     = "reset"
-)
-
-// The marks of the summary path lines: a write the target has not seen,
-// owned content replaced, owned content taken away, content that stands
-// as recorded, content a removal leaves behind as the user's own.
-const (
-	markCreate  = "+"
-	markReplace = "~"
-	markDelete  = "-"
-	markKeep    = "="
-	markRelease = "!"
-)
-
-// summaryLine is one path line under a summary item: the mark of what
-// the apply does to the path, the target-relative path, and the optional
-// note behind it — the block a section writes, the pointer of an owned
-// JSON location, or the reason content is kept.
-type summaryLine struct {
-	mark string
-	path string
-	note string
-}
+// The verbs of the summary and the result, the marks of the path lines,
+// and the line builders behind them live in internal/view: the CLI
+// prints what the TUI renders, one decision about what each line says.
 
 // summaryItem is one verb group of the summary: the item line with its
 // verb, key, version text and major mark, and the path lines under it.
@@ -64,7 +35,7 @@ type summaryItem struct {
 	key     string
 	version string
 	major   bool
-	lines   []summaryLine
+	lines   []view.PathLine
 }
 
 // summaryExcluded is one excluded item of the summary: the reasons and
@@ -89,8 +60,8 @@ func (s *summary) writes() int {
 	n := 0
 	for _, it := range s.items {
 		for _, ln := range it.lines {
-			switch ln.mark {
-			case markCreate, markReplace, markDelete:
+			switch ln.Mark {
+			case view.MarkCreate, view.MarkReplace, view.MarkDelete:
 				n++
 			}
 		}
@@ -116,18 +87,18 @@ func buildSummary(s *session, installs, removals []*plan.ItemPlan, resets map[st
 			summ.excl = append(summ.excl, excludedSummaryItem(ip))
 			continue
 		}
-		verb, lines := installSummaryLines(ip, s.lock, s.snap, resets)
+		verb, lines := view.InstallLines(ip, s.lock, s.snap, resets)
 		it := summaryItem{
 			verb:    verb,
 			key:     ip.Key,
-			version: summaryVersionText(ip, s.lock, verb),
+			version: view.VersionText(ip, s.lock, verb),
 			major:   summaryMajor(ip, s.lock),
 			lines:   lines,
 		}
 		switch verb {
-		case verbReset:
+		case view.VerbReset:
 			resetItems = append(resetItems, it)
-		case verbUpdate, verbDowngrade:
+		case view.VerbUpdate, view.VerbDowngrade:
 			updateItems = append(updateItems, it)
 		default:
 			installItems = append(installItems, it)
@@ -139,10 +110,10 @@ func buildSummary(s *session, installs, removals []*plan.ItemPlan, resets map[st
 			continue
 		}
 		removeItems = append(removeItems, summaryItem{
-			verb:    verbRemove,
+			verb:    view.VerbRemove,
 			key:     ip.Key,
 			version: ip.Version,
-			lines:   removalSummaryLines(ip),
+			lines:   view.RemovalLines(ip),
 		})
 	}
 	summ.items = append(summ.items, installItems...)
@@ -150,33 +121,6 @@ func buildSummary(s *session, installs, removals []*plan.ItemPlan, resets map[st
 	summ.items = append(summ.items, removeItems...)
 	summ.items = append(summ.items, resetItems...)
 	return summ
-}
-
-// planVerb is the verb of a planned install: a reset stays a reset, an
-// installed item updates or downgrades, a fresh one installs.
-func planVerb(ip *plan.ItemPlan, lk *lock.Lock, resets map[string]bool) string {
-	if resets[ip.Key] {
-		return verbReset
-	}
-	if lk.Items[ip.Key] != nil {
-		if ip.Downgrade {
-			return verbDowngrade
-		}
-		return verbUpdate
-	}
-	return verbInstall
-}
-
-// summaryVersionText is the version text of a summary item line: the
-// installed and the kit version joined with an arrow when they differ.
-func summaryVersionText(ip *plan.ItemPlan, lk *lock.Lock, verb string) string {
-	if verb == verbInstall || verb == verbRemove {
-		return ip.Version
-	}
-	if rec := lk.Items[ip.Key]; rec != nil && rec.Version != ip.Version {
-		return rec.Version + " → " + ip.Version
-	}
-	return ip.Version
 }
 
 // summaryMajor reports whether an item's version change crosses the
@@ -187,116 +131,6 @@ func summaryMajor(ip *plan.ItemPlan, lk *lock.Lock) bool {
 		return false
 	}
 	return kit.MajorVersion(ip.Version) != kit.MajorVersion(rec.Version)
-}
-
-// installSummaryLines builds the path lines of one install-plan item:
-// the actions mark `+` where the target has not seen the content and
-// `~` where owned content is replaced; the content the lock records and
-// no action rewrites marks `=` — it stays as installed and remains
-// owned. A NoAction item writes nothing: its verdict reason explains its
-// first kept line.
-func installSummaryLines(ip *plan.ItemPlan, lk *lock.Lock, snap *target.Snapshot, resets map[string]bool) (string, []summaryLine) {
-	verb := planVerb(ip, lk, resets)
-	rec := lk.Items[ip.Key]
-	var lines []summaryLine
-	writtenFiles := map[string]bool{}
-	writtenShared := map[string]bool{}
-	for _, a := range ip.Actions {
-		switch a.Kind {
-		case plan.ActionFile:
-			writtenFiles[a.To] = true
-			m := markReplace
-			if !snap.File(a.To).Exists {
-				m = markCreate
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To})
-		case plan.ActionSection:
-			writtenShared[a.To] = true
-			m := markReplace
-			if _, present := snap.SharedFile(a.To).BlockHash(a.Block); !present {
-				m = markCreate
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To, note: "section " + a.Block})
-		case plan.ActionJSON:
-			writtenShared[a.To] = true
-			m := markCreate
-			if rec != nil && len(rec.JSON[a.To]) > 0 {
-				m = markReplace
-			}
-			lines = append(lines, summaryLine{mark: m, path: a.To})
-		}
-	}
-	lines = append(lines, keptSummaryLines(rec, writtenFiles, writtenShared)...)
-	if ip.Status == plan.StatusNoAction && ip.Reason != "" && len(lines) > 0 {
-		lines[0].note = "kept: " + ip.Reason
-	}
-	// JSON locations the item takes ownership of without a write — values
-	// found satisfied, or carried from the earlier install — mark `=` with
-	// their pointer: the lock records them, nothing is written.
-	for _, file := range sortedMapKeys(ip.JSONLocations) {
-		if writtenShared[file] || (rec != nil && len(rec.JSON[file]) > 0) {
-			continue
-		}
-		for _, loc := range ip.JSONLocations[file] {
-			lines = append(lines, summaryLine{mark: markKeep, path: file, note: loc.Pointer})
-		}
-	}
-	return verb, lines
-}
-
-// keptSummaryLines marks the content the lock records that no action
-// rewrites: it stays as installed and remains owned.
-func keptSummaryLines(rec *lock.Item, writtenFiles, writtenShared map[string]bool) []summaryLine {
-	if rec == nil {
-		return nil
-	}
-	var lines []summaryLine
-	for _, path := range sortedMapKeys(rec.Files) {
-		if writtenFiles[path] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: path})
-	}
-	for _, file := range sortedMapKeys(rec.Sections) {
-		if writtenShared[file] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: file, note: "section " + rec.Sections[file].Block})
-	}
-	for _, file := range sortedMapKeys(rec.JSON) {
-		if writtenShared[file] {
-			continue
-		}
-		lines = append(lines, summaryLine{mark: markKeep, path: file})
-	}
-	return lines
-}
-
-// removalSummaryLines builds the path lines of one removal plan: the
-// owned content taken away marks `-`, the content the user modified —
-// kept and released from the lock — marks `!`.
-func removalSummaryLines(ip *plan.ItemPlan) []summaryLine {
-	var lines []summaryLine
-	for _, a := range ip.Actions {
-		switch a.Kind {
-		case plan.ActionRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To})
-		case plan.ActionSectionRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To, note: "section " + a.Block})
-		case plan.ActionJSONRemove:
-			lines = append(lines, summaryLine{mark: markDelete, path: a.To})
-		}
-	}
-	seen := map[string]bool{}
-	for _, k := range ip.Kept {
-		id := k.Path + "\x00" + k.Reason
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		lines = append(lines, summaryLine{mark: markRelease, path: k.Path, note: "kept and released: " + k.Reason})
-	}
-	return lines
 }
 
 // exclusionCategoryOf maps an excluded item's verdict to the category its
@@ -369,9 +203,9 @@ func printSummary(w io.Writer, summ *summary) error {
 		}
 		body = append(body, line)
 		for _, ln := range it.lines {
-			row := "  " + ln.mark + " " + ln.path
-			if ln.note != "" {
-				row += "  " + ln.note
+			row := "  " + ln.Mark.Glyph() + " " + ln.Path
+			if ln.Note != "" {
+				row += "  " + ln.Note
 			}
 			body = append(body, row)
 		}
@@ -422,29 +256,12 @@ type runOutcome struct {
 	stateErr *Error
 }
 
-// pastVerb is the verb a finished step reports in the result.
-func pastVerb(verb string) string {
-	switch verb {
-	case verbInstall:
-		return "installed"
-	case verbUpdate:
-		return "updated"
-	case verbDowngrade:
-		return "downgraded"
-	case verbReset:
-		return "reset"
-	case verbRemove:
-		return "removed"
-	}
-	return verb
-}
-
 // resultVersion is the version text of a result row: the installed and
 // the reached version joined with an arrow for an update, the reached
 // version alone otherwise; a removal names none — what it took away is
 // gone.
 func resultVersion(ip *plan.ItemPlan, lk *lock.Lock, verb string) string {
-	if verb == verbRemove {
+	if verb == view.VerbRemove {
 		return ""
 	}
 	if rec := lk.Items[ip.Key]; rec != nil && rec.Version != ip.Version {
@@ -529,14 +346,4 @@ func printNotes(w io.Writer, notes []string) error {
 		lines[i] = "note  " + n
 	}
 	return printSections(w, [][]string{lines})
-}
-
-// sortedMapKeys lists a string-keyed map's keys, sorted.
-func sortedMapKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

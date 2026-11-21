@@ -281,3 +281,72 @@ func TestTargetForgetIsImmediate(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }
+
+// TestKitMoveRepointsTheKit pins the CLI form of the terminal UI's
+// "Edit kit path": the registered kit points at the directory that now
+// holds it, the name and the attachments survive, and the new path is
+// the whole output.
+func TestKitMoveRepointsTheKit(t *testing.T) {
+	e := newTestEnv(t)
+	dir := e.mutateKit("personal")
+	target := filepath.Join(e.base, "harness")
+	e.register("personal", dir)
+	e.attach("personal", target)
+	moved := e.mutateKit("personal")
+
+	stdout, stderr, code := execute(t, testBuild, "kit", "move", "personal", moved)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if want := moved + "\n"; stdout != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	reg := registryOf(e)
+	if got := reg.Kits["personal"].Dir; got != moved {
+		t.Errorf("the registry still points at %q, want %q", got, moved)
+	}
+	if _, ok := personalAttachment(e, target); !ok {
+		t.Error("the move dropped the attachment")
+	}
+}
+
+// TestKitMoveRefusesAnotherKitsDirectory pins the identity rule: a
+// directory holding a kit of another name is refused with both names,
+// and the registry keeps the old path.
+func TestKitMoveRefusesAnotherKitsDirectory(t *testing.T) {
+	e := newTestEnv(t)
+	dir := e.mutateKit("personal")
+	e.register("personal", dir)
+	other := e.mutateKit("other")
+
+	_, stderr, code := execute(t, testBuild, "kit", "move", "personal", other)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	want := "Error [conflict]: the directory " + other + " holds the kit \"other\", not \"personal\"\n"
+	if stderr != want {
+		t.Errorf("stderr =\n%s\nwant\n%s", stderr, want)
+	}
+	if got := registryOf(e).Kits["personal"].Dir; got != dir {
+		t.Errorf("the refused move rewrote the path to %q", got)
+	}
+}
+
+// TestKitMoveUnknownKit pins the not_found of a name nothing registered
+// carries.
+func TestKitMoveUnknownKit(t *testing.T) {
+	e := newTestEnv(t)
+	dir := e.mutateKit("personal")
+
+	_, stderr, code := execute(t, testBuild, "kit", "move", "ghost", dir)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	want := "Error [not_found]: kit \"ghost\" is not registered (run \"penates kit list\" to see what is)\n"
+	if stderr != want {
+		t.Errorf("stderr =\n%s\nwant\n%s", stderr, want)
+	}
+}

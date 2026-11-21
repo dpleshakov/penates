@@ -208,6 +208,43 @@ func (s *Store) DeferForgetTarget(target string) error {
 	})
 }
 
+// SettlePending folds a finished apply into the target's pending
+// actions: the applied selection stays remembered, the resets and the
+// completed removals are consumed, and an item left with no action and
+// no answers goes. The pending object dies with them when nothing is
+// left in it. Both clients call it after their apply, before
+// CompleteDeferred. The operation saves the registry.
+func (s *Store) SettlePending(target string, removed map[string]bool, selection []string) error {
+	return s.Update(func(reg *Registry) error {
+		p, ok := reg.Pending[target]
+		if !ok {
+			return nil
+		}
+		selected := make(map[string]bool, len(selection))
+		for _, key := range selection {
+			selected[key] = true
+		}
+		for key, item := range p.Items {
+			if removed[key] {
+				delete(p.Items, key)
+				continue
+			}
+			item.Reset = false
+			if !selected[key] {
+				item.Select = false
+				item.Answers = nil
+			}
+			if !item.Select && !item.Reset && !item.Remove && len(item.Answers) == 0 {
+				delete(p.Items, key)
+			}
+		}
+		if len(p.Items) == 0 && len(p.Deferred) == 0 {
+			delete(reg.Pending, target)
+		}
+		return nil
+	})
+}
+
 // CompleteDeferred finishes the deferred operations of the registered
 // target after an apply. installed holds the item keys of the target's
 // lock after the apply; locks deletes the lock of a completed forget. A

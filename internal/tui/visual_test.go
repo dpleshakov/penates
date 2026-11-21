@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/google/go-cmp/cmp"
 	"github.com/muesli/termenv"
+
+	"github.com/dpleshakov/penates/internal/view"
 )
 
 // forceVisual pins the color profile and the background of the default
@@ -131,11 +133,11 @@ func (p pathMark) Mark(set Set) string  { return p.m.rendered(set) }
 // pathSpec is the per-path mark table of 10.1, with the done mark of 10.2
 // and 10.3.
 var pathSpec = []markSpec{
-	{"create", pathMark{markCreate}, "+", "+", roleGreen},
-	{"replace", pathMark{markReplace}, "~", "~", roleYellow},
-	{"delete", pathMark{markDelete}, "-", "-", roleRed},
-	{"keep", pathMark{markKeep}, "=", "=", roleDim},
-	{"release", pathMark{markRelease}, "!", "!", roleYellow},
+	{"create", pathMark{pathMarks[view.MarkCreate]}, "+", "+", roleGreen},
+	{"replace", pathMark{pathMarks[view.MarkReplace]}, "~", "~", roleYellow},
+	{"delete", pathMark{pathMarks[view.MarkDelete]}, "-", "-", roleRed},
+	{"keep", pathMark{pathMarks[view.MarkKeep]}, "=", "=", roleDim},
+	{"release", pathMark{pathMarks[view.MarkRelease]}, "!", "!", roleYellow},
 	{"done", pathMark{doneMark}, "✓", "+", roleGreen},
 }
 

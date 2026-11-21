@@ -24,12 +24,12 @@ does.
 ### TASK-01 `require-target`
 **Description:** Make `--target` required for every command that acts on a target (status, show, install, update, remove, reset with an item, apply, pending clear, kit add/attach/detach); remove the last-active fallback from the CLI; add a pending count to `target list`; update concept 10.3, the reference and operating skills, README, and the unreleased CHANGELOG entries.
 **Definition of done:** No CLI command depends on or writes the TUI's active target; a missing `--target` is a usage error naming the flag; `target list` shows `pending N` for targets holding staged actions; `make check` passes.
-**Status:** Pending
+**Status:** Done — the CLI reads no TUI state at all; `target list` also dropped its `active` marker (a display read is a read).
 
 ### TASK-02 `setup-and-no-guard`
 **Description:** Remove the first-run guard and the `first-run` error category; add `penates setup [--target] [--dry-run] [--yes]` — attach the built-in kit to the target (registering it when new) and install its skills, idempotently; update concept §1, §10.1, §10.3, the reference and operating skills, README, CHANGELOG.
 **Definition of done:** `kit add` and `kit attach` work on a virgin machine; `setup` bootstraps a fresh target, re-runs as `already attached`/`already installed` with exit 0, and refuses under staged pending like any one-shot command; the category set is nine; `make check` passes.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `tui-deferred-apply`
 **Description:** The TUI's apply with only deferred operations staged completes or drops them with a report, mirroring the CLI's semantics, instead of showing an empty results screen; close the `tui-deferred-only-apply` backlog entry.

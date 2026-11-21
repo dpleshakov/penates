@@ -3,7 +3,7 @@ name: penates
 description: penates product reference — the model, ownership, item states, update and removal rules, common errors, keys, the CLI contract, and where the state lives. Answer questions about penates behavior from here.
 metadata:
   author: The penates project
-  version: 0.2.2
+  version: 0.3.0
 ---
 
 # penates reference
@@ -110,8 +110,10 @@ start it is unpacked into the data directory, registered under the reserved
 name `penates`, and kept in step with the binary's content. Its skills
 divide the addressing: `reference` (this document) specifies the behavior,
 `operating` teaches the agents to drive penates day to day through the CLI,
-and `kit-authoring` addresses kit authors. Attaching and
-installing is the user's choice. A locally modified built-in kit shows on
+and `kit-authoring` addresses kit authors. In the terminal UI attaching and
+installing is the user's choice; the CLI's first run is
+`penates setup --target <path>`, which attaches the kit to a target and
+installs the skills. A locally modified built-in kit shows on
 its row, blocks its own update, and is restored by the `Reset builtin kit`
 command after a confirmation.
 
@@ -119,10 +121,11 @@ command after a confirmation.
 
 The command line is for agents and automation; the stable skeleton of its
 output and failures is the contract below. `penates --help` names the
-commands; `--target <path>` scopes every target-bound command (the default
-is the last active target, which only the terminal UI changes), and flags
-always come after the command path, so permission rules can match the
-command text by its prefix.
+commands; `--target <path>` names the target the command acts on and is
+required wherever a command acts on one — the CLI neither reads nor writes
+which target the terminal UI opens, switching targets is the TUI's own
+state — and flags always come after the command path, so permission rules
+can match the command text by its prefix.
 
 Exit codes, a contract of exactly three values:
 
@@ -138,12 +141,11 @@ contract: never removed or renamed, new ones may be added.
 
 | Category | Covers |
 |---|---|
-| `usage` | A wrong or incomplete command line: unknown command or flag, misplaced flag, malformed `--set`, unknown variable id, required variable without a value |
-| `not_found` | A named thing does not exist: item, kit, target, no active target |
+| `usage` | A wrong or incomplete command line: unknown command or flag, misplaced flag, a required flag without a value, malformed `--set`, unknown variable id, required variable without a value |
+| `not_found` | A named thing does not exist: item, kit, target |
 | `conflict` | The planner refused a write under the ownership rules, and a registration that collides with the state — a kit already attached, a kit or target name already registered; the message carries the conflict's prose |
 | `kit` | The kit content is at fault: unreadable `kit.yaml`, broken declaration, unknown placeholder |
 | `staged` | A one-shot command refused: the target holds staged pending actions; apply, clear, or ask who staged them |
-| `first-run` | `kit add` on an empty registry: the first kit is registered by a person, in the terminal UI |
 | `busy` | Another penates process holds the state; close it or retry |
 | `confirmation` | An asking command without `--yes` and without a terminal |
 | `state` | penates' own state unreadable or of another format version; the message names the file to delete |

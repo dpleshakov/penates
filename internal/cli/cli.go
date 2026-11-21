@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -72,10 +73,28 @@ func Run(b Build, opts Options, args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &pinned) {
 			return pinned.code
 		}
+		err = typedUsage(root, args, err)
 		Print(err, stderr)
 		return ExitCode(err)
 	}
 	return 0
+}
+
+// typedUsage retypes the one refusal cobra reports untyped on its own
+// road around SetFlagErrorFunc: a required flag it finds missing after
+// the parse. It is a wrong command line like any other — the message
+// keeps cobra's wording and gains the command's help as the next step;
+// every other error passes unchanged.
+func typedUsage(root *cobra.Command, args []string, err error) error {
+	if !strings.HasPrefix(err.Error(), "required flag(s) ") {
+		return err
+	}
+	_, name, _ := findPath(root, args)
+	return &Error{
+		Category: CategoryUsage,
+		Message:  fmt.Sprintf("%s (run %q)", err.Error(), name+" --help"),
+		Cause:    err,
+	}
 }
 
 // newRoot builds the command tree: penates with no arguments is the TUI,
@@ -125,6 +144,7 @@ func newRoot(b Build, opts Options, stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newRemoveCmd(ask))
 	root.AddCommand(newResetCmd(ask))
 	root.AddCommand(newApplyCmd(ask))
+	root.AddCommand(newSetupCmd(ask))
 	pendingCmd := newPendingCmd()
 	pendingCmd.AddCommand(newPendingClearCmd(ask))
 	root.AddCommand(pendingCmd)

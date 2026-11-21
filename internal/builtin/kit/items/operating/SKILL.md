@@ -3,7 +3,7 @@ name: penates-operating
 description: Drive penates day to day through the CLI — read the state, change kit content in the kit rather than the target, answer for confirmations, and behave when penates refuses. For the behavior specification — the model, ownership, the state words, and the error categories — see the penates reference skill.
 metadata:
   author: The penates project
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # penates operating
@@ -13,6 +13,12 @@ terminal UI has a CLI twin, dialog-free. A bare `penates` opens the
 terminal UI — that is the human's door; yours is `penates --help` and the
 subcommands. Each command has exactly one form: no aliases, no
 abbreviations to guess.
+
+On a fresh machine you most likely appeared through
+`penates setup --target <path>`: it attaches the built-in kit to your
+harness's configuration directory and installs this very skill. The first
+run is usually the human's, in the terminal UI; this command is how you
+begin one alone.
 
 This skill teaches driving. The `penates` reference skill, installed
 beside it, is the behavior specification — the model, ownership, item
@@ -35,10 +41,11 @@ contract, and the reference explains what each means. Both commands are
 reading commands: they write nothing outside the penates data directory,
 so one permission rule covers them all.
 
-`--target <path>` scopes every target-bound command to one run; without
-it the command works on the last active target, and only the terminal UI
-changes which one that is. To work with another target, pass `--target` —
-do not try to switch the default.
+`--target <path>` is required wherever a command acts on a target — pass
+it every time. You know the configuration directory of your harness; name
+it. The active target is the human's terminal-UI state: the CLI neither
+reads nor writes which one it opens, and there is no default to fall back
+on.
 
 Every failure prints one line, `Error [category]: message`, and the
 message names the concrete next step — the command to run, the flag or
@@ -77,18 +84,18 @@ discards the user's modifications — that is the person's call, not yours.
 ## Confirmations
 
 A mutating command — `install`, `update`, `remove`, `reset`, `apply`,
-`pending clear` — prints the summary and asks once. `--dry-run` prints
-the summary and writes nothing; reach for it when the outcome is not
-obvious. `--yes` confirms in advance: use it when you have full right to
-the action — and note that without a terminal there is no asking at all,
-so a scripted run that would ask needs `--yes` anyway.
+`pending clear`, `setup` — prints the summary and asks once. `--dry-run`
+prints the summary and writes nothing; reach for it when the outcome is
+not obvious. `--yes` confirms in advance: use it when you have full right
+to the action — and note that without a terminal there is no asking at
+all, so a scripted run that would ask needs `--yes` anyway.
 
 A major update is marked in the summary with its changelog printed; read
 it before answering.
 
 ## When penates refuses
 
-Three refusals carry a rule of conduct:
+Two refusals carry a rule of conduct:
 
 - `staged` — the target holds pending actions someone staged, a person
   most likely, in the terminal UI; one-shot commands refuse until they
@@ -98,9 +105,6 @@ Three refusals carry a rule of conduct:
 - `busy` — another penates process holds the state: someone has the
   terminal UI open. Do not retry in a loop and do not look for
   workarounds; report and wait.
-- `first-run` — the registry is empty, and the first kit is registered
-  by a person in the terminal UI (a bare `penates`). Do not work around
-  the guard.
 
 Any other refusal comes with its next step in the message; follow it.
 The full table of error categories is in the reference.

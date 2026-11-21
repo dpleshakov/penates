@@ -6,7 +6,7 @@ This document describes what penates is and how it behaves: the concept, the mod
 
 penates is a small cross-platform application with two interfaces of equal capability: a terminal user interface (TUI) and a command-line interface (CLI). It installs, updates and removes harness content from one or more kit directories into the configuration directory of an agent harness, for example `~/.config/opencode`. Harness content includes skills, agent instructions, plugins and configuration fragments.
 
-The interfaces share one model and differ in audience: the CLI is the working interface for AI agents and automation, the TUI is the interface for humans. First use is deliberately human, because registering a kit and confirming its target is where trust in what penates will write is decided; daily operation may be delegated to an agent from then on. Who operates never changes the guarantees — recorded ownership decides what is written and deleted in either interface (10).
+The interfaces share one model and differ in audience: the CLI is the working interface for AI agents and automation, the TUI is the interface for humans. First use is usually a person's, in the terminal UI; an agent may begin alone — `penates setup` attaches the built-in kit, with its skills, to the target the command names (10.3). The trust is in recorded ownership, not in who ran first. Who operates never changes the guarantees — recorded ownership decides what is written and deleted in either interface (10).
 
 The design rests on four properties:
 
@@ -358,13 +358,15 @@ An installed item that no longer exists in its kit is an orphan. An orphan remai
 
 penates is operated through two interfaces of equal capability. Parity is a standing contract: every scenario — inspecting, installing, updating, resetting, removing, registering and managing kits and targets — is reachable from each interface, and neither is a wrapper over a subset of the other. Parity is about scenarios, not mechanics: the TUI stages selection, summary and apply as separate acts of a person; the CLI speaks in one-shot commands to an agent or a script. Both are views over the same state — registry, pending actions, locks — so what one interface stages, the other sees and can complete.
 
-The audiences split by interface. The CLI is the working interface for AI agents and automation — the daily way penates is meant to be driven once the first run is behind. The TUI is the interface a person reads: the first run, the inspection of state, the occasional manual act. First use goes through the TUI by design — registering the first kit and confirming its target is where the person decides what penates may write.
+The audiences split by interface. The CLI is the working interface for AI agents and automation — the daily way penates is meant to be driven once the first run is behind. The TUI is the interface a person reads: the first run, the inspection of state, the occasional manual act. First use is usually the person's, through the TUI — registering the first kit and confirming its target is where the person decides what penates may write; the CLI's `setup` is the way an agent begins alone (10.1, 10.3).
 
 ### 10.1 First run
 
 1. The user starts penates without arguments. With nothing registered, the screen explains what a kit is and offers `+ add kit`; with the built-in kit registered and no target yet, the screen also offers attaching it — one `enter` opens the target proposal of its `target_hint`, and once a target exists the offer never returns.
 2. The user enters the kit's directory; penates reads `kit.yaml` and proposes `target_hint` as the target.
 3. The user confirms or edits the target; the kit and target are registered.
+
+The CLI's form of the first run is `penates setup --target <path>` (10.3): an agent may begin a machine alone, and the trust it acts under is the same recorded ownership.
 
 ### 10.2 The TUI
 
@@ -418,11 +420,12 @@ The CLI is penates for agents, scripts and automation: equal in capability to th
 | `reset <kit/item>` | Reset to kit (7.6); `reset --builtin` resets the built-in kit's directory (6.2). |
 | `apply` | Apply the pending actions staged for the target — the bridge to the TUI's staging. |
 | `pending clear` | Drop the staged pending actions without applying them; asks once, like any mutating command. |
+| `setup` | The first run's CLI form: attach the built-in kit to `--target` and install its skills; idempotent. |
 | `kit …` | Registration and management of kits: `list`; `add`, `attach`, `detach`, `path`. |
 | `target …` | Registration and management of targets: `list`; `add`, `rename`, `forget`. |
 
-- Items are named `kit/item`. `--target` selects the target for the one run and defaults to the last active one; it never changes which target the TUI opens — only switching targets in the TUI does.
-- Registration is human: `kit add` refuses while no kit is registered, and the error names the first run's way in — a bare `penates` (10.1). `kit add <path>` registers the kit and attaches it to `--target`, or to the last active target when omitted; the `target_hint` flow belongs to the TUI (10.1). Past the first kit, the CLI registers freely.
+- Items are named `kit/item`. `--target` names the target the command acts on and is required wherever a command acts on one; the CLI neither reads nor writes which target the TUI opens — switching targets is the TUI's own state.
+- `setup --target <path>` is the first run's CLI form (10.1): it attaches the built-in kit to the target — registering the target when it is new — and installs the kit's skills, idempotently; a repeat is kept and reported, not an error. Past it the CLI registers freely: `kit add <path>` registers the kit and attaches it to `--target` (required), the `target_hint` flow belonging to the TUI (10.1).
 - A registration or management command takes the immediate variant of 6.7: `detach` detaches at once, the installed items staying installed and owned, listed for `remove`; `forget` forgets at once, deleting the lock and leaving the files. Waiting for the apply is the TUI's mechanics.
 - Variables: answers stored in the lock are reused; `--set id=value` is needed only for a variable that is new or whose answer is being changed. A required variable left without a value fails the command, naming the missing ids.
 - A mutating command prints the apply summary and asks once; `--yes` confirms in advance, `--dry-run` prints the summary and writes nothing. A major update is marked in the summary, with its `CHANGELOG.md` printed (8). Without a terminal there is no asking — a command that would ask requires `--yes`.

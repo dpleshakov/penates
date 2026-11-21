@@ -40,23 +40,24 @@ func TestHeldGuardRefusesEveryStateCommand(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"status", []string{"status"}},
-		{"show", []string{"show", "personal/writing"}},
+		{"status", []string{"status", "--target", target}},
+		{"show", []string{"show", "personal/writing", "--target", target}},
 		{"kit list", []string{"kit", "list"}},
-		{"kit add", []string{"kit", "add", kitDir}},
-		{"kit attach", []string{"kit", "attach", "personal"}},
-		{"kit detach", []string{"kit", "detach", "personal"}},
+		{"kit add", []string{"kit", "add", kitDir, "--target", target}},
+		{"kit attach", []string{"kit", "attach", "personal", "--target", target}},
+		{"kit detach", []string{"kit", "detach", "personal", "--target", target}},
 		{"kit path", []string{"kit", "path", "personal"}},
 		{"target list", []string{"target", "list"}},
 		{"target add", []string{"target", "add", target}},
 		{"target rename", []string{"target", "rename", target, "name"}},
 		{"target forget", []string{"target", "forget", target}},
-		{"install", []string{"install", "personal/writing", "--yes"}},
-		{"update", []string{"update", "--yes"}},
-		{"remove", []string{"remove", "personal/writing", "--yes"}},
-		{"reset", []string{"reset", "personal/writing", "--yes"}},
-		{"apply", []string{"apply", "--yes"}},
-		{"pending clear", []string{"pending", "clear", "--yes"}},
+		{"install", []string{"install", "personal/writing", "--target", target, "--yes"}},
+		{"update", []string{"update", "--target", target, "--yes"}},
+		{"remove", []string{"remove", "personal/writing", "--target", target, "--yes"}},
+		{"reset", []string{"reset", "personal/writing", "--target", target, "--yes"}},
+		{"apply", []string{"apply", "--target", target, "--yes"}},
+		{"pending clear", []string{"pending", "clear", "--target", target, "--yes"}},
+		{"setup", []string{"setup", "--target", target, "--yes"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,30 +76,13 @@ func TestHeldGuardRefusesEveryStateCommand(t *testing.T) {
 	}
 }
 
-// The refusal is the same on an empty registry: the run guard is taken
-// before the state is read, so a busy directory wins over the first-run
-// refusal kit add would otherwise raise.
-func TestHeldGuardWinsOverTheFirstRunRefusal(t *testing.T) {
-	e := newTestEnv(t)
-	heldRunGuard(t, e)
-
-	_, stderr, code := execute(t, testBuild, "kit", "add", e.kitFixture())
-
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
-	if !strings.HasPrefix(stderr, "Error [busy]: ") {
-		t.Errorf("stderr = %q, want a busy refusal", stderr)
-	}
-}
-
 // Releasing the guard lets the same command through, the way an ended
 // run does for the next one.
 func TestReleasedGuardLetsTheCommandThrough(t *testing.T) {
 	e := newTestEnv(t)
 	g := heldRunGuard(t, e)
 
-	_, stderr, code := execute(t, testBuild, "status")
+	_, stderr, code := execute(t, testBuild, "status", "--target", e.base)
 	if code != 1 || !strings.HasPrefix(stderr, "Error [busy]: ") {
 		t.Fatalf("with the guard held: exit code %d, stderr %q, want a busy refusal", code, stderr)
 	}
@@ -106,7 +90,7 @@ func TestReleasedGuardLetsTheCommandThrough(t *testing.T) {
 	if err := g.Release(); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
-	_, stderr, code = execute(t, testBuild, "status")
+	_, stderr, code = execute(t, testBuild, "status", "--target", e.base)
 	if code != 0 {
 		t.Fatalf("after the release: exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
@@ -139,7 +123,7 @@ func TestUnmakeableDataDirIsAStateError(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(blocker, "config"))
 
-	_, stderr, code := execute(t, testBuild, "status")
+	_, stderr, code := execute(t, testBuild, "status", "--target", "/somewhere")
 
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)

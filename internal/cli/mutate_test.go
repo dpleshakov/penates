@@ -55,15 +55,13 @@ func (e *testEnv) mutateKit(name string) string {
 }
 
 // readyKit registers the kit of that name, attaches it to a fresh target
-// and makes it the last active one — the surroundings every mutating
-// command assumes.
+// and hands both back — the surroundings every mutating command assumes.
 func (e *testEnv) readyKit(name string) (dir, target string) {
 	e.t.Helper()
 	dir = e.mutateKit(name)
 	target = filepath.Join(e.base, "harness")
 	e.register(name, dir)
 	e.attach(name, target)
-	e.activate(target)
 	return dir, target
 }
 
@@ -428,8 +426,8 @@ func TestResetBuiltin(t *testing.T) {
 	e := newTestEnv(t)
 	// The startup sync runs with the first command and unpacks the
 	// built-in kit in step.
-	if _, _, code := execute(t, testBuild, "status"); code != 0 {
-		t.Fatalf("status exited %d", code)
+	if _, _, code := execute(t, testBuild, "kit", "list"); code != 0 {
+		t.Fatalf("kit list exited %d", code)
 	}
 	kitYaml := filepath.Join(e.dataDir, "builtin-kit", "kit.yaml")
 

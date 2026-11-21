@@ -12,7 +12,7 @@ import (
 // registry alone; the forget is the immediate variant of the deferred
 // forget: the target's lock is deleted and its files are left alone —
 // what the lock recorded is no longer owned. None of these commands
-// asks, and none writes the last active target.
+// asks, and none touches which target the terminal UI opens.
 
 // newTargetAddCmd builds "penates target add <path>": register the
 // target directory without attaching a kit to it.

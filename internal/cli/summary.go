@@ -353,9 +353,9 @@ func changelogBlocks(s *session, installs []*plan.ItemPlan) [][]string {
 }
 
 // printSummary writes the summary out: the target line first — the CLI
-// never changes the active target, so every mutating run names the one
-// it acts on — then the verb groups with the excluded, the write count,
-// and the changelog of every major update.
+// neither reads nor writes which target the terminal UI opens, so every
+// mutating run names the one it acts on — then the verb groups with the
+// excluded, the write count, and the changelog of every major update.
 func printSummary(w io.Writer, summ *summary) error {
 	sections := [][]string{{"target " + summ.target}}
 	var body []string

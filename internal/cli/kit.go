@@ -7,34 +7,31 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dpleshakov/penates/internal/builtin"
 	"github.com/dpleshakov/penates/internal/kit"
-	"github.com/dpleshakov/penates/internal/lock"
-	"github.com/dpleshakov/penates/internal/state"
 )
 
-// The kit management commands. Registration is human for the first kit:
-// kit add refuses while the registry holds none, and the refusal names
-// the bare command as the first run's way in (concept 10.1). Past it the
-// CLI registers freely. The immediate variants of the deferred
+// The kit management commands. The CLI registers freely: kit add works on
+// an empty registry, and the trust a first run decides lives in recorded
+// ownership, not in who ran first — `penates setup` is the agent's own
+// way to begin a machine. The immediate variants of the deferred
 // operations are the CLI's only variants: detach detaches at once, the
 // installed items staying installed and owned, listed for remove. None
-// of these commands asks, and none writes the last active target.
+// of these commands asks, and none touches which target the terminal UI
+// opens.
 
 // newKitAddCmd builds "penates kit add <path>": read the kit at the path,
-// register it under its own name, attach it to the target — the explicit
-// --target, or the last active one; neither is a wrong command line.
+// register it under its own name, attach it to the target the required
+// --target names, registering the target when it is new.
 func newKitAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <path>",
 		Short: "Register the kit at the path and attach it to the target",
 		Long: "Register the kit directory at the path under the name its kit.yaml carries\n" +
-			"and attach it to the target: the one --target names, or the last active one.\n" +
-			"The first kit on a machine is registered by a person, through the terminal\n" +
-			"UI a bare \"penates\" opens.",
+			"and attach it to the target the --target flag names, registering the target\n" +
+			"when it is new.",
 		Args: exactArgs(1, "kit directory path"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, sessErr := openSessionForAdd()
+			s, sessErr := openSession()
 			if sessErr != nil {
 				return sessErr
 			}
@@ -45,11 +42,7 @@ func newKitAddCmd() *cobra.Command {
 			if err := s.state.RegisterKit(k.Name, k.Dir); err != nil {
 				return stateOpError(err)
 			}
-			explicit, _ := cmd.Flags().GetString("target")
-			targetPath, targetErr := targetOrLast(s, explicit)
-			if targetErr != nil {
-				return targetErr
-			}
+			targetPath, _ := cmd.Flags().GetString("target")
 			if err := s.state.AttachKit(k.Name, targetPath); err != nil {
 				return stateOpError(err)
 			}
@@ -65,68 +58,19 @@ func newKitAddCmd() *cobra.Command {
 	return cmd
 }
 
-// openSessionForAdd opens the state the way kit add needs it: the run
-// guard is taken before anything reads there, so a busy directory wins
-// over the first-run refusal. The registry is read before the built-in
-// kit's startup sync runs, because the guard of the first run checks
-// that no kit is registered at all — and the sync itself registers one
-// while the name is free. The guard judged before the sync is live;
-// judged after it, it is dead in the same process.
-func openSessionForAdd() (*session, *Error) {
-	dataDir, err := state.DefaultDir()
-	if err != nil {
-		return nil, &Error{Category: CategoryState, Message: fmt.Sprintf("cannot resolve the penates data directory: %v", err), Cause: err}
-	}
-	if sessErr := takeRunGuard(dataDir); sessErr != nil {
-		return nil, sessErr
-	}
-	st, err := state.Open(dataDir)
-	if err != nil {
-		return nil, &Error{Category: CategoryState, Message: err.Error(), Cause: err}
-	}
-	reg, err := st.LoadRegistry()
-	if err != nil {
-		return nil, &Error{Category: CategoryState, Message: err.Error(), Cause: err}
-	}
-	if len(reg.Kits) == 0 {
-		return nil, &Error{
-			Category: CategoryFirstRun,
-			Message:  fmt.Sprintf("no kit is registered yet (run %q — the first kit is registered through the terminal UI)", "penates"),
-		}
-	}
-	report, err := builtin.Sync(dataDir, st, builtin.Content)
-	if err != nil {
-		return nil, &Error{Category: CategoryIO, Message: fmt.Sprintf("cannot bring the built-in kit in step in %s: %v", dataDir, err), Cause: err}
-	}
-	reg, err = st.LoadRegistry()
-	if err != nil {
-		return nil, &Error{Category: CategoryState, Message: err.Error(), Cause: err}
-	}
-	return &session{
-		dataDir:  dataDir,
-		state:    st,
-		locks:    lock.NewStore(dataDir),
-		registry: reg,
-		builtin:  &report,
-	}, nil
-}
-
 // newKitAttachCmd builds "penates kit attach <kit>": attach the
-// registered kit to the target, registering the target when it is new.
+// registered kit to the target the required --target names, registering
+// the target when it is new.
 func newKitAttachCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "attach <kit>",
 		Short: "Attach a registered kit to the target",
 		Args:  exactArgs(1, "kit name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			explicit, _ := cmd.Flags().GetString("target")
+			targetPath, _ := cmd.Flags().GetString("target")
 			s, sessErr := openSession()
 			if sessErr != nil {
 				return sessErr
-			}
-			targetPath, targetErr := targetOrLast(s, explicit)
-			if targetErr != nil {
-				return targetErr
 			}
 			if err := s.state.AttachKit(args[0], targetPath); err != nil {
 				return stateOpError(err)
@@ -224,22 +168,6 @@ func newKitPathCmd() *cobra.Command {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), k.Dir)
 			return err
 		},
-	}
-}
-
-// targetOrLast resolves the target a kit management command attaches to:
-// the explicit --target, else the last active one. Neither is given —
-// the command line is incomplete, and the refusal says what to pass.
-func targetOrLast(s *session, explicit string) (string, *Error) {
-	if explicit != "" {
-		return explicit, nil
-	}
-	if s.registry.LastTarget != "" {
-		return s.registry.LastTarget, nil
-	}
-	return "", &Error{
-		Category: CategoryUsage,
-		Message:  "no target is given (pass --target <path>)",
 	}
 }
 

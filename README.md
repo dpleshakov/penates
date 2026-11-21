@@ -50,17 +50,22 @@ The subcommands are the second, equal interface — the one AI agents, scripts,
 and automation drive:
 
 ```
-penates status [--target]        # the target, its kits and items, staged actions
-penates show <kit/item>          # one item: status, variables, contributions, changelog
-penates install <kit/item>…      # plan and apply in one run
-penates update [<kit/item>…]     # every available update, or the named items
-penates remove <kit/item>…       # plan and apply the removal
+penates setup --target <path>     # the first run's CLI form: attach the built-in kit, install its skills
+penates status --target <path>    # the target, its kits and items, staged actions
+penates show <kit/item>           # one item: status, variables, contributions, changelog
+penates install <kit/item>…       # plan and apply in one run
+penates update [<kit/item>…]      # every available update, or the named items
+penates remove <kit/item>…        # plan and apply the removal
 penates reset <kit/item>|--builtin
-penates apply                    # apply what the terminal UI staged
-penates pending clear            # drop the staged actions without applying
+penates apply                     # apply what the terminal UI staged
+penates pending clear             # drop the staged actions without applying
 penates kit list|add|attach|detach|path …
 penates target list|add|rename|forget …
 ```
+
+`--target <path>` names the target the command acts on and is required
+wherever a command acts on one: the CLI neither reads nor writes which
+target the terminal UI opens — switching targets is the TUI's own state.
 
 A mutating command prints its summary — the target line first — and asks once;
 `--yes` confirms in advance, `--dry-run` prints the summary and writes nothing.
@@ -78,11 +83,14 @@ govern the CLI by the command text. The full contract is specified in
 [docs/concept.md](docs/concept.md) (§10.3) and carried to agents by the
 built-in kit's `operating` skill.
 
-Two guards hold across both interfaces: the first run is a person's — `kit add`
-refuses while no kit is registered and names the bare `penates` that opens the
-UI — and one penates process works on a data directory at a time: an overlapping
-run, any command while the UI is open included, is refused with `busy` rather
-than silently merging state.
+The first run has no guard: it is usually a person's — a bare `penates`
+opens the terminal UI, which explains what a kit is and offers adding one —
+and an agent begins alone with `penates setup`: the command attaches the
+built-in kit to the target it names and installs the kit's skills,
+idempotently. One guard holds across both interfaces: one penates process
+works on a data directory at a time — an overlapping run, any command while
+the UI is open included, is refused with `busy` rather than silently
+merging state.
 
 ## A minimal kit
 

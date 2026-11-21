@@ -259,6 +259,60 @@ func TestDetachDeferredDroppedByTheApply(t *testing.T) {
 	}
 }
 
+// TestApplyCompletesADeferredOnlyPending drives a staged detach with no
+// item action beside it through the model to the end: `a` shows the
+// deferred operation in the summary, and the confirmation completes it —
+// the twin of the CLI's deferred-only apply, instead of the empty
+// results screen it used to show.
+func TestApplyCompletesADeferredOnlyPending(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeTeamKit(t, target)
+
+	st, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerKitAt(t, st, "team", kitDir, target)
+	app := NewApp(st, lock.NewStore(dataDir))
+
+	// The deferred detach waits alone: no item action staged beside it.
+	if err := st.DeferDetachKit("team", target); err != nil {
+		t.Fatal(err)
+	}
+	m := resize(t, app.Initial(), 120, 30)
+
+	m = drive(t, m, "a")
+	lm := m.(*model)
+	if lm.screen != screenSummary {
+		t.Fatalf("screen after `a` = %v, want the summary", lm.screen)
+	}
+	view := lm.View()
+	if !strings.Contains(view, "deferred") || !strings.Contains(view, "detach team from "+target) {
+		t.Errorf("the summary misses the deferred operation:\n%s", view)
+	}
+	if !strings.Contains(lm.summaryFrame(120).Footer, "enter apply") {
+		t.Errorf("footer = %q, want the apply confirmation on a deferred-only summary", lm.summaryFrame(120).Footer)
+	}
+
+	// The confirmation completes the detach: the report is the result.
+	m = drive(t, m, "enter")
+	rm := m.(*model)
+	if rm.screen != screenResults {
+		t.Fatalf("screen after the confirmation = %v, want results", rm.screen)
+	}
+	if !strings.Contains(rm.resultText(), "completed the deferred detach of team from "+target) {
+		t.Errorf("results miss the completed detach:\n%s", rm.resultText())
+	}
+	reg := registryOf(t, st)
+	if names := reg.KitsFor(target); len(names) != 0 {
+		t.Errorf("kits attached after the apply = %v, want none", names)
+	}
+	if p := reg.Pending[target]; p != nil && len(p.Deferred) > 0 {
+		t.Errorf("the deferred operation survived the completion: %+v", p.Deferred)
+	}
+}
+
 // writeBareKit writes a minimal valid kit into dir.
 func writeBareKit(t *testing.T, dir, name, hint string) string {
 	t.Helper()

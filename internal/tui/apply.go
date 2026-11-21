@@ -34,15 +34,18 @@ type pendingApply struct {
 	selection   []string
 	removals    []string
 	resets      map[string]bool
+	deferred    []state.Deferred
 	paths       []string
 	sharedPaths []string
 }
 
 // beginApply collects what the target's pending actions would apply and
-// moves to the summary it waits on.
+// moves to the summary it waits on. A pending that holds no item actions
+// still reaches the summary when deferred operations wait — completing
+// them is what the apply is for (6.7).
 func (m *model) beginApply() {
 	p := m.collectApply()
-	if len(p.selection) == 0 && len(p.removals) == 0 {
+	if len(p.selection) == 0 && len(p.removals) == 0 && len(p.deferred) == 0 {
 		m.outcome = nil
 		m.screen = screenResults
 		return
@@ -61,6 +64,7 @@ func (m *model) beginApply() {
 func (m *model) collectApply() *pendingApply {
 	p := &pendingApply{resets: map[string]bool{}}
 	if pending := m.pendingActions(); pending != nil {
+		p.deferred = pending.Deferred
 		for key, item := range pending.Items {
 			switch {
 			case item.Remove:
@@ -186,10 +190,13 @@ type summaryExcluded struct {
 	reasons []string
 }
 
-// applySummary is the content the summary screen renders (10.1).
+// applySummary is the content the summary screen renders (10.1): the
+// verb groups, the excluded, and the deferred operations an apply with
+// no item actions completes or drops.
 type applySummary struct {
 	items    []summaryItem
 	excluded []summaryExcluded
+	deferred []string
 }
 
 // writes counts the path lines that write the target: the created, replaced
@@ -209,8 +216,9 @@ func (s applySummary) writes() int {
 
 // applicable reports whether the summary holds anything to confirm: a
 // summary whose every item is excluded cannot be applied, and its footer
-// reads "nothing to apply" (10.1).
-func (s applySummary) applicable() bool { return len(s.items) > 0 }
+// reads "nothing to apply" (10.1); a deferred-only apply is confirmable —
+// completing the deferred operations is what it exists for.
+func (s applySummary) applicable() bool { return len(s.items) > 0 || len(s.deferred) > 0 }
 
 // buildApplySummary plans the pending apply without writing anything and
 // shows what it would do (10.1). The apply runs only after the screen's
@@ -251,8 +259,24 @@ func (m *model) buildApplySummary(p *pendingApply) {
 		}).Items
 	}
 	s := summarize(installs, removals, m.lk, snap, p.resets)
+	s.deferred = deferredSummaryLines(m.target, p.deferred)
 	m.applySummary = &s
 	m.screen = screenSummary
+}
+
+// deferredSummaryLines names the deferred operations the apply completes
+// or drops (6.7), the lines the CLI's deferred-only apply confirms too.
+func deferredSummaryLines(target string, ops []state.Deferred) []string {
+	var lines []string
+	for _, d := range ops {
+		switch d.Kind {
+		case state.DeferredDetachKit:
+			lines = append(lines, "detach "+d.Kit+" from "+target)
+		case state.DeferredForgetTarget:
+			lines = append(lines, "forget "+target)
+		}
+	}
+	return lines
 }
 
 // summarize lays the planner's verdicts out into the summary (10.1): one
@@ -488,6 +512,15 @@ func renderSummary(s applySummary, width int, set Set) []string {
 			rows = append(rows, row)
 		}
 	}
+	if len(s.deferred) > 0 {
+		if len(rows) > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, "deferred")
+		for _, line := range s.deferred {
+			rows = append(rows, "  "+line)
+		}
+	}
 	if len(s.excluded) > 0 {
 		if len(rows) > 0 {
 			rows = append(rows, "")
@@ -530,6 +563,9 @@ func (m *model) summaryCounts() string {
 	}
 	if n := s.writes(); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", n, plural(n, "write", "writes")))
+	}
+	if n := len(s.deferred); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d deferred", n))
 	}
 	if n := len(s.excluded); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d excluded", n))
@@ -638,7 +674,10 @@ func tickProgress() tea.Cmd {
 // confirmApply leaves the summary for the progress view (10.2) and starts
 // the run: the apply executes outside the update loop, its events arrive
 // through the channel, and ctrl+c stays a plain quit — the next start
-// reconciles the interruption.
+// reconciles the interruption. An apply whose pending holds no item
+// actions completes the deferred operations directly (6.7): there are no
+// steps to follow, so the report becomes the result without a progress
+// view.
 func (m *model) confirmApply() tea.Cmd {
 	p := m.pending
 	m.pending = nil
@@ -646,6 +685,10 @@ func (m *model) confirmApply() tea.Cmd {
 	m.summaryOffset = 0
 	m.progress = nil
 	m.spinner = 0
+	if len(p.selection) == 0 && len(p.removals) == 0 {
+		m.finishApply(m.completeDeferredOnly())
+		return nil
+	}
 	m.screen = screenProgress
 	ch := make(chan any, 256)
 	m.applyCh = ch
@@ -655,6 +698,18 @@ func (m *model) confirmApply() tea.Cmd {
 		return applyDoneMsg{out}
 	}
 	return tea.Batch(run, m.listenApply(), tickProgress())
+}
+
+// completeDeferredOnly finishes a pending whose deferred operations wait
+// alone: the lock as it stands decides — a detach whose kit lost its last
+// installed item completes, one the apply cannot cover is dropped with
+// the reason in the report. It is the twin of the CLI's deferred-only
+// apply: nothing planned, the confirmation behind it, the report as the
+// whole outcome.
+func (m *model) completeDeferredOnly() *applyOutcome {
+	out := &applyOutcome{removed: map[string]bool{}}
+	out.lk, out.reg, out.deferred, out.errs = completeDeferred(m.app, m.target, nil)
+	return out
 }
 
 // listenApply waits for the next event of the running apply.
@@ -1069,8 +1124,13 @@ func keptNotes(st applyStep) []string {
 	return out
 }
 
-// resultCounts is the right side of the result header (10.3).
+// resultCounts is the right side of the result header (10.3). A run with
+// no item steps — a deferred-only completion — reports no counts: its
+// report lines are the whole story.
 func (m *model) resultCounts() string {
+	if len(m.outcome.steps) == 0 {
+		return ""
+	}
 	done, failed := 0, 0
 	for _, st := range m.outcome.steps {
 		switch {

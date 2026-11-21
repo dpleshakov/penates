@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/dpleshakov/penates/internal/apply"
 	"github.com/dpleshakov/penates/internal/builtin"
+	"github.com/dpleshakov/penates/internal/guard"
 	"github.com/dpleshakov/penates/internal/kit"
 	"github.com/dpleshakov/penates/internal/lock"
 	"github.com/dpleshakov/penates/internal/plan"
@@ -44,15 +46,57 @@ type session struct {
 	stagedRemoved []string
 }
 
+// runGuard is the guard the process holds over its data directory. A
+// real run takes it once, in the first session it opens, and keeps it
+// until the process ends — the process's death releases the hold. The
+// only caller that finds a guard already here is a test running many
+// command runs back to back in one process: the previous run's guard is
+// released the way its process ending would have.
+var runGuard *guard.Guard
+
+// takeRunGuard takes the process's run guard over the data directory,
+// before anything reads or writes there. A refusal means another penates
+// process holds the directory — an open terminal UI, most likely — and
+// says so under the busy category; every other failure is the state's:
+// the directory or its lock file cannot be made.
+func takeRunGuard(dataDir string) *Error {
+	if runGuard != nil {
+		_ = runGuard.Release()
+		runGuard = nil
+	}
+	g, err := guard.Acquire(dataDir)
+	if err != nil {
+		return guardError(err)
+	}
+	runGuard = g
+	return nil
+}
+
+// guardError maps what taking the run guard reported: the busy refusal
+// keeps its category, every other failure is the state's. The terminal
+// entry maps its own guard the same way.
+func guardError(err error) *Error {
+	var busy *guard.BusyError
+	if errors.As(err, &busy) {
+		return &Error{Category: CategoryBusy, Message: busy.Error(), Cause: busy}
+	}
+	return &Error{Category: CategoryState, Message: err.Error(), Cause: err}
+}
+
 // openSession resolves the data directory, opens the state, brings the
-// built-in kit in step and loads the registry. The state is read before
-// the sync, so a state file the store refuses is the state category and
-// nothing else runs; the sync registers the built-in kit while the name is
-// free, and the registry the commands see is the one it left behind.
+// built-in kit in step and loads the registry. The run guard is taken
+// before the state opens, so a busy directory refuses before anything
+// reads there. The state is read before the sync, so a state file the
+// store refuses is the state category and nothing else runs; the sync
+// registers the built-in kit while the name is free, and the registry
+// the commands see is the one it left behind.
 func openSession() (*session, *Error) {
 	dataDir, err := state.DefaultDir()
 	if err != nil {
 		return nil, &Error{Category: CategoryState, Message: fmt.Sprintf("cannot resolve the penates data directory: %v", err), Cause: err}
+	}
+	if sessErr := takeRunGuard(dataDir); sessErr != nil {
+		return nil, sessErr
 	}
 	st, err := state.Open(dataDir)
 	if err != nil {

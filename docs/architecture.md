@@ -38,10 +38,15 @@ Known risks:
 - `to` paths are slash-separated data (concept: items). They are converted to platform paths
   only at the file-system boundary, in `internal/target` and `internal/apply`; the
   Windows leg of the CI matrix guards the conversion.
-- Concurrent runs over the one state file are not guarded beyond whole-file
-  writes; the concept leaves overlapping runs to the architecture, and the guard
-  is specified together with the CLI client, before a second process can mutate
-  the state.
+- Concurrent runs over the one state file were the last open risk: the run guard
+  (`internal/guard`) closed it — a second penates process is refused before it can
+  touch the state, and a process's death releases the hold on its own. The residual
+  limitation is deliberate: every command that opens the state refuses while the
+  terminal UI is open, the reading ones included — the reading path writes too (the
+  startup sync, the registry's prune-save), and a shorter hold (shared locks for
+  readers, or the guard only around mutations with the lock re-read before each apply)
+  means rewriting the terminal client's threading. That stays the direction for after
+  the TUI rewrite.
 
 ### Dependency register
 
@@ -79,6 +84,7 @@ humans.
 | `internal/builtin` | The documentation kit penates ships inside the binary: the kit files embedded under `kit/`, and the startup sync that unpacks them into the data directory, keeps the copy in step with the embedded content by the three-state model (concept: the built-in kit), and registers the kit under its reserved name while it is free. The package knows no harness — the kit's own data carries the target hint and the install destinations. |
 | `internal/kit` | Reads kit directories — `kit.yaml`, items, `item.yaml`, contribution declarations — and validates everything the concept requires of kit data: id syntax, version, source and target path rules, shared-file targets. Emits validation errors with positions. Read is tolerant: an item whose declaration has problems stays in the kit with its problems attached, and planning skips it; Load keeps the strict contract on top. |
 | `internal/state` | Application state (concept: application state): the registry — kits, targets, the attachments between them, the last active target — and the per-target pending actions with their deferred operations and variable answers. The operations over the registry — attach, detach, edit kit path, forget target — keep its invariants, and every mutation saves; a state file of another format version is refused with the path to delete. The operations receive the lock facts they need — the item keys of a target's lock — as values and delete a lock through a one-method interface, so the package keeps no dependency on internal/lock. Persists under `~/.config/penates`, honoring `XDG_CONFIG_HOME`. Until the TUI rewrite, the current TUI reads the registry through a compatibility view. |
+| `internal/guard` | The run guard: one exclusive lock per penates process over the penates data directory, held on the file `<dataDir>/penates.lock` — `flock` on Unix, `LockFileEx` on Windows, only the standard library. The clients take it before the first access to the directory and keep it until the process ends; an overlapping run is refused at once, under the CLI's `busy` category. The hold spans the whole run because the clients keep their lock objects in memory across it, so short locks cannot stop two runs that each saved a "whole" file from merging silently (concept: application state). Refuse, not wait: the hold spans an interactive session, and a waiting script would block for as long as a person keeps the interface open. |
 | `internal/lock` | The per-target lock (concept: application state): reading, writing, and deleting the lock, and ownership queries over files, directories, sections, JSON locations, and shared files created by penates. |
 | `internal/relpath` | The shared validity rule for the relative slash-separated paths of the domain — kit-declared contribution paths and paths inside the target — as one `Valid` predicate. Knows no file system. |
 | `internal/target` | Reads the target directory into a snapshot: file existence, content hashes, and the structure of shared files — Markdown block layout and JSONC trees. All target I/O lives here. |
@@ -94,7 +100,10 @@ humans.
 
 ```mermaid
 flowchart LR
-    CLI["internal/cli"] --> VIEW["internal/view"]
+    ENTRY["cmd/penates"] --> CLI["internal/cli"]
+    ENTRY --> GUARD["internal/guard"]
+    CLI --> GUARD
+    CLI --> VIEW["internal/view"]
     CLI --> ST["internal/state"]
     CLI --> BI["internal/builtin"]
     CLI --> KIT["internal/kit"]
@@ -128,15 +137,19 @@ Rules:
 - `internal/plan` imports no package that performs I/O; it receives kits, lock content,
   and the snapshot as values. Both clients reuse the core unchanged.
 - No package knows any harness (a concept principle): destination paths come from kit data only.
+- `internal/state` knows nothing of the run guard: it stays a pure persistence layer,
+  and the clients take the guard through `internal/guard` before they open the store.
 - `internal/tui` is imported by nothing.
 - `internal/cli` is imported by nothing but `cmd/penates`; the runner of the TUI is
   injected into it, so the two clients never import each other.
 
 ### Data flow
 
-1. **Startup sync.** Before any screen opens, `internal/builtin` brings the
-   unpacked built-in kit in step with the binary (concept: the built-in kit)
-   and registers it while the name is free; the report rides into the model.
+1. **Startup sync.** Before any of it runs, the client takes the run guard —
+   one penates process at a time works on a data directory. Then
+   `internal/builtin` brings the unpacked built-in kit in step with the binary
+   (concept: the built-in kit) and registers it while the name is free; the
+   report rides into the model.
 2. **Load.** The state names the registered kits; `internal/kit` reads them;
    `internal/target` reads the snapshot; `internal/lock` reads the lock.
 3. **Plan.** The lock is reconciled with the target by recorded hashes first
@@ -169,7 +182,7 @@ Rules:
 ```
 penates/
 ├── cmd/penates/          # main package
-├── internal/             # one package per module: kit, state, lock, target, relpath, plan, apply, view, tui, cli, licenses, builtin
+├── internal/             # one package per module: kit, state, guard, lock, target, relpath, plan, apply, view, tui, cli, licenses, builtin
 ├── docs/                 # the concept, this document, and the archive
 └── .github/workflows/    # CI
 ```

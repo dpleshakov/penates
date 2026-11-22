@@ -335,12 +335,14 @@ func TestRescanNoticeDiff(t *testing.T) {
 	registerKitAt(t, st, "ex", kitDir, target)
 	app := NewApp(st, lock.NewStore(t.TempDir()))
 
-	// Install both items, then unselect beta: the held selection of alpha
-	// alone remains, made against 1.0.0.
+	// Install both items — their applies consume the selections. The held
+	// selection of alpha is staged through the store, made against 1.0.0:
+	// space on the installed rows stages nothing.
 	lm := driveAll(t, resize(t, app.Initial(), 100, 30),
 		"down", "space", "a", "enter", "enter",
-		"down", "down", "space", "a", "enter", "enter",
-		"down", "down", "space").(*model)
+		"down", "down", "space", "a", "enter", "enter").(*model)
+	stageSelection(t, st, target, "ex/alpha", "1.0.0")
+	lm.enterTarget(lm.target)
 	if lm.pendingCount() != 1 {
 		t.Fatalf("pending = %d, want the held selection of alpha alone", lm.pendingCount())
 	}
@@ -363,9 +365,9 @@ func TestRescanNoticeDiff(t *testing.T) {
 	}
 
 	// The rescan: alpha publishes 2.0.0, beta leaves the kit — the
-	// installed one turns into an orphan — and gamma joins it. The held
-	// selection was made against 1.0.0, so the rescan drops it together
-	// with the one the kit stopped providing (11.2).
+	// installed one turns into an orphan — and gamma joins it. The staged
+	// selection of alpha went stale against 2.0.0, and ex/gone was never
+	// provided: the rescan drops both (11.2).
 	rewritePlainKit(t, kitDir)
 	lm = drive(t, lm, "R").(*model)
 	want := "Rescanned 1 kit: 1 new item, 1 update, 1 orphan, 2 pending actions dropped."

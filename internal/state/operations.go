@@ -209,33 +209,32 @@ func (s *Store) DeferForgetTarget(target string) error {
 }
 
 // SettlePending folds a finished apply into the target's pending
-// actions: the applied selection stays remembered, the resets and the
-// completed removals are consumed, and an item left with no action and
-// no answers goes. The pending object dies with them when nothing is
-// left in it. Both clients call it after their apply, before
-// CompleteDeferred. The operation saves the registry.
-func (s *Store) SettlePending(target string, removed map[string]bool, selection []string) error {
+// actions. The outcome per key decides what the apply consumes: a key
+// whose step landed, or whose plan kept the item as it is (satisfied),
+// loses its select with the answers given and its reset; a key whose
+// removal succeeded (removed) loses the whole pending item. A key that
+// failed, was excluded by the plan, or never reached it holds no
+// outcome and keeps its actions, repeatable by the next apply. The
+// pending object dies with them when nothing is left in it. Both
+// clients call it after their apply, before CompleteDeferred. The
+// operation saves the registry.
+func (s *Store) SettlePending(target string, satisfied map[string]bool, removed map[string]bool) error {
 	return s.Update(func(reg *Registry) error {
 		p, ok := reg.Pending[target]
 		if !ok {
 			return nil
 		}
-		selected := make(map[string]bool, len(selection))
-		for _, key := range selection {
-			selected[key] = true
-		}
 		for key, item := range p.Items {
-			if removed[key] {
+			switch {
+			case removed[key]:
 				delete(p.Items, key)
-				continue
-			}
-			item.Reset = false
-			if !selected[key] {
+			case satisfied[key]:
+				item.Reset = false
 				item.Select = false
 				item.Answers = nil
-			}
-			if !item.Select && !item.Reset && !item.Remove && len(item.Answers) == 0 {
-				delete(p.Items, key)
+				if !item.Remove {
+					delete(p.Items, key)
+				}
 			}
 		}
 		if len(p.Items) == 0 && len(p.Deferred) == 0 {

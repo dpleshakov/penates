@@ -128,8 +128,8 @@ func TestDetachDialogAsksAboutInstalledItems(t *testing.T) {
 		}
 	}
 
-	// esc cancels: nothing changed — the kit stays attached, and the only
-	// pending action is the selection the install left.
+	// esc cancels: nothing changed — the kit stays attached, and no
+	// pending action is left: the apply consumed the install's selection.
 	m = drive(t, m, "esc")
 	lm = m.(*model)
 	if lm.dialog != nil {
@@ -240,11 +240,15 @@ func TestDetachDeferredDroppedByTheApply(t *testing.T) {
 	m := installFirst(t, resize(t, app.Initial(), 120, 30))
 
 	// A deferred detach whose removals the apply does not carry is dropped
-	// with its reason: the item stays installed, so the detach cannot.
+	// with its reason: the item stays installed, so the detach cannot. The
+	// queued detach is picked up on re-entering the target; the apply
+	// carries no item actions, and the drop is its whole report.
 	if err := st.DeferDetachKit("team", target); err != nil {
 		t.Fatal(err)
 	}
-	m = driveAll(t, m, "a", "enter")
+	lm := m.(*model)
+	lm.enterTarget(lm.target)
+	m = driveAll(t, lm, "a", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "dropped the deferred detach of team from "+target) ||
 		!strings.Contains(rm.resultText(), "installed items remain: team/titem") {

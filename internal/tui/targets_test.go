@@ -407,14 +407,14 @@ func TestTargetRestoreDialogWording(t *testing.T) {
 	}
 	app := NewApp(st, lock.NewStore(dataDir))
 
-	// Install the first item, then let the kit publish 1.1.0: the held
-	// selection was made against 1.0.0, so the restart drops it with the
-	// report of 11.1, and the update is selected against the new version.
-	// Selecting the other kit's item adds the install: two pending
-	// actions. Both kits attach to the same target, so one dialog can
-	// offer both.
+	// Install the first item; its apply consumes the selection, and the
+	// stale one the restart drops below is staged through the store, made
+	// against 1.0.0. Selecting the other kit's item adds the install: two
+	// pending actions. Both kits attach to the same target, so one dialog
+	// can offer both.
 	driveAll(t, resize(t, app.Initial(), 120, 30), "down", "space", "a", "enter", "enter")
 	bumpKit(t, kitA, "1.1.0", "good skill v2\n")
+	stageSelection(t, st, targetA, "ex/good", "1.0.0")
 	lm := acceptRestore(t, resize(t, app.Initial(), 120, 30))
 	if got := lm.notice.Text(); got != "Dropped 1 invalid pending action." {
 		t.Fatalf("restore notice = %q, want the stale selection dropped", got)

@@ -167,11 +167,19 @@ func TestSelectionFormView(t *testing.T) {
 		t.Errorf("templated file = %q, %v; want the substituted content", data, err)
 	}
 
-	// The answers the apply wrote into the lock stay with the held selection
-	// after it settles; the update flow checks the form they prefill.
-	drive(t, m, "enter", "enter", "down", "down")
-	if answers := pendingAnswers(t, stateStore, target, "ex/varitem"); len(answers) != 2 || answers["p"] != "answered" {
-		t.Fatalf("settled pending answers = %v; want the answers kept", answers)
+	// The apply consumed the selection with its answers; the lock keeps
+	// them. The kit publishes an update, and its form prefills from the
+	// lock (7.3).
+	if answers := pendingAnswers(t, stateStore, target, "ex/varitem"); answers != nil {
+		t.Fatalf("settled pending answers = %v; want the selection consumed with its answers", answers)
+	}
+	bumpFormKit(t, kitDir, "1.1.0", "")
+	m = drive(t, acceptRestore(t, resize(t, app.Initial(), 100, 30)), "down", "down", "space").(*model)
+	if !m.formOpen {
+		t.Fatal("the update selection opened no form")
+	}
+	if m.formAnswers["p"] != "answered" || m.formAnswers["b"] != "dev" {
+		t.Fatalf("form prefill = %v; want the answers the apply wrote into the lock", m.formAnswers)
 	}
 }
 
@@ -293,8 +301,13 @@ func TestUpdateIntroducesVariable(t *testing.T) {
 		t.Fatalf("install:\n%s", m.resultText())
 	}
 
+	// The apply consumed the install selection. The stale selection the
+	// restore drops below is staged through the store — space on the
+	// installed item stages nothing until the update is selected.
+
 	// The kit publishes 1.1.0 introducing a third, required variable.
 	bumpFormKit(t, kitDir, "1.1.0", "q")
+	stageSelection(t, stateStore, target, "ex/varitem", "1.0.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	if r := itemRow(m, "ex/varitem"); r.Status != StatusUpdate {
 		t.Fatalf("update row = %+v", r)

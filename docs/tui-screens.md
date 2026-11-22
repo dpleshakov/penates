@@ -617,6 +617,8 @@ The view cannot be left by navigation while items are being applied; the double 
 
 An item that failed during application is listed with `✗` and the reason. Its changes are not recorded, consistent with item-level atomicity (RFC 7.7).
 
+The apply consumes the actions it satisfied: back on the list, the applied rows carry no pending marks, and the target opens next time without the restore dialog for them. An action that failed or was excluded stays staged and repeatable.
+
 ### 10.4 Record on exit
 
 When penates exits, it prints the changes applied during the session to the regular terminal output, so that a record remains in the terminal history:

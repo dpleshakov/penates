@@ -7,6 +7,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- An apply now consumes what it satisfied: a staged selection that landed — or that the plan kept as already installed — leaves the pending actions together with its answers. In the terminal UI the applied rows stop carrying the pending mark and the target stops offering the restore dialog for what was already applied; in the CLI a staged already-installed selection no longer deadlocks the one-shot commands behind the staged refusal. What the apply did not satisfy — a failed step, an excluded item — stays staged and repeatable as before.
+- A reset whose step failed at apply time now stays staged and repeatable, like selections and removals, instead of being consumed unconditionally.
+
 ## [0.1.2] - 2026-11-22
 
 ### Added

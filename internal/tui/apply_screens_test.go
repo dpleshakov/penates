@@ -563,9 +563,10 @@ func TestRecordOnExit(t *testing.T) {
 	}
 
 	// One session, three applies: install the good item, publish an update
-	// and apply it, then remove the item over a user modification. The
-	// record keeps every change of the session; entering the target again
-	// reloads the kits without touching it.
+	// and apply it over a selection staged without an apply, then remove
+	// the item over a user modification. The record keeps every change of
+	// the session; entering the target again reloads the kits without
+	// touching it.
 	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter", "enter")
 	lm := m.(*model)
 	if !strings.Contains(lm.resultText(), "installed  good 1.0.0") {
@@ -573,7 +574,7 @@ func TestRecordOnExit(t *testing.T) {
 	}
 	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
 	lm.enterTarget(lm.target)
-	m = driveAll(t, lm, "a", "enter", "enter")
+	m = driveAll(t, lm, "down", "space", "a", "enter", "enter")
 	if !strings.Contains(lm.resultText(), "updated    good 1.1.0") {
 		t.Fatalf("update:\n%s", lm.resultText())
 	}

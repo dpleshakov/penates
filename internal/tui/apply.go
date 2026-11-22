@@ -641,11 +641,11 @@ func (m *model) runApply(p *pendingApply, events chan<- any) *applyOutcome {
 		out.steps = append(out.steps, runInstalls(m.target, planned.Items, lk, m.app.Locks, on, p.resets)...)
 	}
 
-	// The selection as applied — the removed items dropped out of it —
-	// replaces the remembered one, so a removed item is not offered selected
-	// again; the resets and removals that ran are consumed. The settle is
-	// the state operation the CLI's apply runs too.
-	if err := m.app.State.SettlePending(m.target, out.removed, p.selection); err != nil {
+	// The settle is the state operation the CLI's apply runs too: what the
+	// run satisfied is consumed — the selection with its answers, the
+	// reset, the successful removal — while a failed step and an excluded
+	// item keep their actions for the next apply.
+	if err := m.app.State.SettlePending(m.target, satisfiedKeys(out.steps), out.removed); err != nil {
 		out.errs = append(out.errs, "could not save the state: "+err.Error())
 	}
 
@@ -655,6 +655,21 @@ func (m *model) runApply(p *pendingApply, events chan<- any) *applyOutcome {
 	out.lk, out.reg, out.deferred, out.errs = completeDeferred(m.app, m.target, out.errs)
 
 	return out
+}
+
+// satisfiedKeys names the keys whose outcome satisfies their intent, the
+// input the settle consumes: a done step landed and a kept step without
+// exclusion lines kept the item as it is; a failed step and a kept step
+// the perform-time planning excluded hold no outcome and keep their
+// staged actions.
+func satisfiedKeys(steps []applyStep) map[string]bool {
+	satisfied := map[string]bool{}
+	for _, st := range steps {
+		if st.state == stepDone || (st.state == stepKept && st.excluded == nil) {
+			satisfied[st.key] = true
+		}
+	}
+	return satisfied
 }
 
 // runRemovals executes the removal steps of one apply and builds their

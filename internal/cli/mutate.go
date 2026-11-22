@@ -394,13 +394,12 @@ func newApplyCmd(ask *confirmer) *cobra.Command {
 				s: s, out: out, errOut: errOut, conf: ask,
 				dry: dry, yes: yes,
 				installs: installs, removals: removals, resets: staged.resets,
-				selection: staged.selection, answers: staged.answers,
 				notes: staged.dropped,
 				replan: func() ([]*plan.ItemPlan, *Error) {
 					return replanInstalls(s, staged.selection, staged.answers, staged.resets)
 				},
-				after: func(removed map[string]bool, selection []string) ([]string, *Error) {
-					return settleAndComplete(s, removed, selection)
+				after: func(satisfied, removed map[string]bool) ([]string, *Error) {
+					return settleAndComplete(s, satisfied, removed)
 				},
 			}
 			return m.run()
@@ -975,8 +974,8 @@ func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bo
 // operation both clients share, and the deferred detach or forget
 // completes when the apply removed what it waited for — or is dropped
 // with the reason in the report.
-func settleAndComplete(s *session, removed map[string]bool, selection []string) ([]string, *Error) {
-	if err := s.state.SettlePending(s.target, removed, selection); err != nil {
+func settleAndComplete(s *session, satisfied, removed map[string]bool) ([]string, *Error) {
+	if err := s.state.SettlePending(s.target, satisfied, removed); err != nil {
 		return nil, &Error{Category: CategoryState, Message: "could not save the state: " + err.Error(), Cause: err}
 	}
 	lk, err := s.locks.Load(s.target)
@@ -1013,16 +1012,13 @@ type mutation struct {
 	removals []*plan.ItemPlan
 	resets   map[string]bool
 
-	// selection and answers ride to the re-planning after the removals;
-	// replan builds the install plans afresh, nil when the run installs
-	// nothing or plans nothing after removals.
-	selection []string
-	answers   map[string]map[string]string
-	replan    func() ([]*plan.ItemPlan, *Error)
+	// replan builds the install plans afresh after the removals, nil
+	// when the run installs nothing or plans nothing after removals.
+	replan func() ([]*plan.ItemPlan, *Error)
 
 	// after runs once the apply has landed: staged actions settle,
 	// deferred operations complete, the report comes back.
-	after func(removed map[string]bool, selection []string) ([]string, *Error)
+	after func(satisfied, removed map[string]bool) ([]string, *Error)
 
 	// notes are the plain lines the run reports behind the result: the
 	// staged actions the restore-time check dropped, the staged temp
@@ -1149,7 +1145,7 @@ func (m *mutation) execute() *runOutcome {
 	}
 	oc.rows, oc.applied, oc.kept, oc.failed = rows, applied, kept, failed
 	if m.after != nil {
-		report, err := m.after(removed, m.selection)
+		report, err := m.after(satisfiedKeys(rows, errs), removed)
 		if err != nil {
 			oc.stateErr = err
 		}
@@ -1166,6 +1162,21 @@ func (m *mutation) wasRemoval(key string) bool {
 		}
 	}
 	return false
+}
+
+// satisfiedKeys names the keys whose outcome satisfies their intent, the
+// input the settle consumes: the rows the run applied or kept, with the
+// error map excepted — a key whose step failed and one the planning
+// excluded hold no outcome and keep their staged actions.
+func satisfiedKeys(rows []resultRow, errs map[string]error) map[string]bool {
+	satisfied := map[string]bool{}
+	for _, r := range rows {
+		if r.verb == "excluded" || errs[r.key] != nil {
+			continue
+		}
+		satisfied[r.key] = true
+	}
+	return satisfied
 }
 
 // buildRows lays the planned items out into result rows, before the

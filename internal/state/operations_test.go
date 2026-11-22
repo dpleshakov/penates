@@ -430,6 +430,288 @@ func TestDeferForgetTarget(t *testing.T) {
 	}
 }
 
+func TestSettlePending(t *testing.T) {
+	t.Run("a satisfied selection is consumed with its answers", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "example", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Select: true, Answers: map[string]string{"src": "/src"}},
+				},
+			}
+		})
+
+		// The apply landed the selection: the pending item goes with the
+		// answers given, and the pending object, holding nothing else,
+		// dies with it.
+		if err := store.SettlePending("/targets/main", map[string]bool{"example/writing": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		if _, ok := reg.Pending["/targets/main"]; ok {
+			t.Errorf("the pending object = %+v, want it gone", reg.Pending["/targets/main"])
+		}
+	})
+
+	t.Run("a satisfied reset is consumed", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "example", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Reset: true},
+				},
+			}
+		})
+
+		// The reset landed: the pending item goes with it.
+		if err := store.SettlePending("/targets/main", map[string]bool{"example/writing": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		if _, ok := reg.Pending["/targets/main"]; ok {
+			t.Errorf("the pending object = %+v, want it gone", reg.Pending["/targets/main"])
+		}
+	})
+
+	t.Run("a satisfied selection with its reset is consumed", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "example", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Select: true, Reset: true, Answers: map[string]string{"src": "/src"}},
+				},
+			}
+		})
+
+		// The step the reset rides on landed: the whole pending item goes.
+		if err := store.SettlePending("/targets/main", map[string]bool{"example/writing": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		if _, ok := reg.Pending["/targets/main"]; ok {
+			t.Errorf("the pending object = %+v, want it gone", reg.Pending["/targets/main"])
+		}
+	})
+
+	t.Run("a failed key keeps its actions", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Kits["team"] = Kit{Dir: "/kits/team"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{
+				{Kit: "example", Target: "/targets/main"},
+				{Kit: "team", Target: "/targets/main"},
+			}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Select: true, Answers: map[string]string{"src": "/src"}},
+					"team/review":     {Reset: true},
+				},
+			}
+		})
+
+		// The step of the selection failed at apply time, so no outcome
+		// comes for it: the selection with its answers stays staged and
+		// repeatable. The reset next to it landed and goes.
+		if err := store.SettlePending("/targets/main", map[string]bool{"team/review": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		want := &ItemPending{Select: true, Answers: map[string]string{"src": "/src"}}
+		if diff := cmp.Diff(want, reg.Pending["/targets/main"].Items["example/writing"]); diff != "" {
+			t.Errorf("the staged selection of the failed key (-want +got):\n%s", diff)
+		}
+		if _, ok := reg.Pending["/targets/main"].Items["team/review"]; ok {
+			t.Error("the satisfied reset survived the settle")
+		}
+	})
+
+	t.Run("an excluded key keeps its actions", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "example", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Reset: true},
+				},
+			}
+		})
+
+		// The plan excluded the item, so the apply ran no step for it: no
+		// outcome, the staged reset stays for the next apply.
+		if err := store.SettlePending("/targets/main", nil, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		want := &ItemPending{Reset: true}
+		if diff := cmp.Diff(want, reg.Pending["/targets/main"].Items["example/writing"]); diff != "" {
+			t.Errorf("the staged reset of the excluded key (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("an absent key keeps its actions", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Kits["team"] = Kit{Dir: "/kits/team"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{
+				{Kit: "example", Target: "/targets/main"},
+				{Kit: "team", Target: "/targets/main"},
+			}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Reset: true},
+					"team/review":     {Select: true},
+				},
+			}
+		})
+
+		// The apply never reached the bare reset — the kit does not
+		// provide the item any more, so no step was planned for it. The
+		// reset stays for the load-time validity check to drop with a
+		// report, while the selection next to it is consumed.
+		if err := store.SettlePending("/targets/main", map[string]bool{"team/review": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		want := &ItemPending{Reset: true}
+		if diff := cmp.Diff(want, reg.Pending["/targets/main"].Items["example/writing"]); diff != "" {
+			t.Errorf("the staged reset of the absent key (-want +got):\n%s", diff)
+		}
+		if _, ok := reg.Pending["/targets/main"].Items["team/review"]; ok {
+			t.Error("the satisfied selection survived the settle")
+		}
+	})
+
+	t.Run("a successful removal is consumed", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Kits["team"] = Kit{Dir: "/kits/team"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{
+				{Kit: "example", Target: "/targets/main"},
+				{Kit: "team", Target: "/targets/main"},
+			}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Remove: true},
+					"team/review":     {Select: true, Answers: map[string]string{"src": "/src"}},
+				},
+			}
+		})
+
+		// Both removals ran: the whole pending item goes with a
+		// successful removal, whatever else is staged on it. Nothing is
+		// left, so the pending object dies.
+		if err := store.SettlePending("/targets/main", nil, map[string]bool{"example/writing": true, "team/review": true}); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		if _, ok := reg.Pending["/targets/main"]; ok {
+			t.Errorf("the pending object = %+v, want it gone", reg.Pending["/targets/main"])
+		}
+	})
+
+	t.Run("a satisfied outcome leaves a removal staged", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["team"] = Kit{Dir: "/kits/team"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "team", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"team/review": {Remove: true},
+				},
+			}
+		})
+
+		// A removal is consumed by its success alone: an outcome that
+		// merely satisfies the item — a plan that kept it, say — leaves
+		// the staged removal standing.
+		if err := store.SettlePending("/targets/main", map[string]bool{"team/review": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		want := &ItemPending{Remove: true}
+		if diff := cmp.Diff(want, reg.Pending["/targets/main"].Items["team/review"]); diff != "" {
+			t.Errorf("the staged removal (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("a pending object with deferred operations stays", func(t *testing.T) {
+		store, err := Open(t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		seedRegistry(t, store, func(reg *Registry) {
+			reg.Kits["example"] = Kit{Dir: "/kits/example"}
+			reg.Targets["/targets/main"] = Target{}
+			reg.Attachments = []Attachment{{Kit: "example", Target: "/targets/main"}}
+			reg.Pending["/targets/main"] = &Pending{
+				Items: map[string]*ItemPending{
+					"example/writing": {Select: true},
+				},
+				Deferred: []Deferred{{Kind: DeferredDetachKit, Kit: "example"}},
+			}
+		})
+
+		// The landed selection is consumed, but the deferred detach still
+		// waits for CompleteDeferred: the pending object stays for it.
+		if err := store.SettlePending("/targets/main", map[string]bool{"example/writing": true}, nil); err != nil {
+			t.Fatalf("SettlePending: %v", err)
+		}
+		reg := loadRegistry(t, store)
+		p := reg.Pending["/targets/main"]
+		if p == nil {
+			t.Fatal("the pending object died with its deferred operation still waiting")
+		}
+		if len(p.Items) != 0 {
+			t.Errorf("items = %v, want none", p.Items)
+		}
+		if diff := cmp.Diff([]Deferred{{Kind: DeferredDetachKit, Kit: "example"}}, p.Deferred); diff != "" {
+			t.Errorf("deferred operations (-want +got):\n%s", diff)
+		}
+	})
+}
+
 func TestCompleteDeferred(t *testing.T) {
 	locks := &fakeLocks{}
 

@@ -171,6 +171,29 @@ func itemRow(m *model, key string) ItemRow {
 // writeFixtureKit writes a kit with one installable item — tagged, with a
 // changelog — and one that uses a required variable in a templated file,
 // proposing target as its target hint.
+// stageSelection stages an item's selection for target directly in the
+// state store, made against the given version: the scaffolding the
+// restore-time and rescan checks work on, for the cases space cannot
+// stage — an installed item at the kit's version has no default action
+// (7.1), and a broken row stages a reset.
+func stageSelection(t *testing.T, st *state.Store, target, key, version string) {
+	t.Helper()
+	if err := st.Update(func(reg *state.Registry) error {
+		p := reg.Pending[target]
+		if p == nil {
+			p = &state.Pending{}
+			reg.Pending[target] = p
+		}
+		if p.Items == nil {
+			p.Items = map[string]*state.ItemPending{}
+		}
+		p.Items[key] = &state.ItemPending{Select: true, Version: version}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeFixtureKit(t *testing.T, target string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -415,29 +438,22 @@ func TestRegisterListApplyFlow(t *testing.T) {
 		t.Errorf("recorded answers (-want +got):\n%s", diff)
 	}
 
-	// Back to the list: the applied items hold their selection, and applying
-	// the same selection again reuses the recorded answers — no form, straight
-	// to the summary that keeps everything, then the results.
+	// Back to the list: the apply consumed the selections with their
+	// answers — the rows hold no pending marks, and applying again offers
+	// nothing: the applied selection is not held any more.
 	m = driveAll(t, m, "enter")
 	lm = m.(*model)
 	good, varitem := itemRow(lm, "ex/good"), itemRow(lm, "ex/varitem")
-	if !good.Installed || good.Pending == nil || *good.Pending != PendingApply || !varitem.Installed {
+	if !good.Installed || good.Pending != nil || !varitem.Installed || varitem.Pending != nil {
 		t.Errorf("after apply: good %+v varitem %+v", good, varitem)
 	}
-	if n := lm.pendingCount(); n != 2 {
-		t.Errorf("pending count = %d, want 2", n)
+	if n := lm.pendingCount(); n != 0 {
+		t.Errorf("pending count = %d, want none: the satisfied selections went", n)
 	}
 	m = driveAll(t, m, "a")
-	if m.(*model).screen != screenSummary {
-		t.Fatalf("re-apply screen = %v, want summary without a form", m.(*model).screen)
-	}
-	m = driveAll(t, m, "enter")
 	rm = m.(*model)
-	if rm.screen != screenResults {
-		t.Fatalf("re-apply screen = %v, want results without a form", rm.screen)
-	}
-	if !strings.Contains(rm.resultText(), "kept       good 1.0.0  already installed") || !strings.Contains(rm.resultText(), "kept       varitem 0.1.0  already installed") {
-		t.Errorf("re-apply results:\n%s", rm.resultText())
+	if rm.screen != screenResults || !strings.Contains(rm.resultText(), "nothing selected") {
+		t.Fatalf("re-apply = %v:\n%s", rm.screen, rm.resultText())
 	}
 }
 
@@ -488,14 +504,17 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := startWithKit(t, app, kitDir, 100, 30)
-	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter", "enter")
 	rm := m.(*model)
 	if !strings.Contains(rm.resultText(), "installed  good 1.0.0") {
 		t.Fatalf("first apply:\n%s", rm.resultText())
 	}
 
-	// The kit publishes 1.1.0 with new content: the tree shows the update.
+	// The apply consumed the install selection; the stale one the restart
+	// drops below is staged through the store. The kit publishes 1.1.0
+	// with new content: the tree shows the update.
 	bumpKit(t, kitDir, "1.1.0", "good skill v2\n")
+	stageSelection(t, stateStore, target, "ex/good", "1.0.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	r := itemRow(lm, "ex/good")
@@ -514,7 +533,7 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	if lm.pendingCount() != 0 {
 		t.Fatalf("pending = %d, want none: the stale selection went", lm.pendingCount())
 	}
-	m = driveAll(t, m, "down", "space", "a", "enter")
+	m = driveAll(t, m, "down", "space", "a", "enter", "enter")
 	rm = m.(*model)
 	if !strings.Contains(rm.resultText(), "updated    good 1.1.0") {
 		t.Fatalf("update apply:\n%s", rm.resultText())
@@ -524,8 +543,11 @@ func TestUpdateAndResetFlow(t *testing.T) {
 		t.Fatalf("updated file = %q, %v", data, err)
 	}
 
-	// The kit publishes 0.9.0: shown as a downgrade.
+	// The update apply consumed its selection; the stale one the restart
+	// drops below is staged through the store. The kit publishes 0.9.0:
+	// shown as a downgrade.
 	bumpKit(t, kitDir, "0.9.0", "good skill v2\n")
+	stageSelection(t, stateStore, target, "ex/good", "1.1.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusDowngrade {
@@ -549,10 +571,12 @@ func TestUpdateAndResetFlow(t *testing.T) {
 	// The user modifies the installed file while the kit content is
 	// unchanged; the held selection, made against the version the item
 	// still holds, survives the restart, and a fresh run applies nothing
-	// and keeps the modification.
+	// and keeps the modification. The downgrade apply consumed its
+	// selection, so this one is staged through the store.
 	if err := os.WriteFile(filepath.Join(target, "skills", "good", "SKILL.md"), []byte("user change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stageSelection(t, stateStore, target, "ex/good", "0.9.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified || r.Pending == nil {
@@ -1303,6 +1327,11 @@ func TestReconciliationFlow(t *testing.T) {
 	if err := os.Remove(filepath.Join(targetDir, "skills", "good", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
+	// The apply consumed the install selection; the repair rides a
+	// selection staged through the store — space on a broken row stages a
+	// reset, not a selection — made against the version the item holds,
+	// so the restart keeps it.
+	stageSelection(t, stateStore, targetDir, "ex/good", "1.0.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusBroken {
@@ -1324,10 +1353,13 @@ func TestReconciliationFlow(t *testing.T) {
 	}
 
 	// The user modifies the installed file: the tree shows modified, and the
-	// apply keeps the content.
+	// apply keeps the content. The repair apply consumed its selection; the
+	// one this run applies is staged through the store, made against the
+	// version the item still holds.
 	if err := os.WriteFile(filepath.Join(targetDir, "skills", "good", "SKILL.md"), []byte("user edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stageSelection(t, stateStore, targetDir, "ex/good", "1.0.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm = m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusModified {
@@ -1601,14 +1633,17 @@ func TestMajorGate(t *testing.T) {
 	app := NewApp(stateStore, lock.NewStore(dataDir))
 
 	m := startWithKit(t, app, kitDir, 100, 30)
-	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter")
+	m = driveAll(t, m, "enter", "enter", "down", "space", "a", "enter", "enter")
 	if !strings.Contains(m.(*model).resultText(), "installed  good 1.0.0") {
 		t.Fatalf("install:\n%s", m.(*model).resultText())
 	}
 
-	// The kit publishes 2.0.0: a major update (7.2). The selection made
-	// against 1.0.0 went at the restore (11.1), so the row is unselected.
+	// The apply consumed the install selection; the stale one the restore
+	// drops below is staged through the store. The kit publishes 2.0.0: a
+	// major update (7.2). The selection made against 1.0.0 went at the
+	// restore (11.1), so the row is unselected.
 	bumpKit(t, kitDir, "2.0.0", "good skill v2\n")
+	stageSelection(t, stateStore, target, "ex/good", "1.0.0")
 	m = acceptRestore(t, resize(t, app.Initial(), 100, 30))
 	lm := m.(*model)
 	if r := itemRow(lm, "ex/good"); r.Status != StatusUpdate || !r.Major {

@@ -427,6 +427,86 @@ func TestApplyExcludesAtPerformTime(t *testing.T) {
 	}
 }
 
+// TestMixedApplyKeepsUnsatisfiedStaged pins the settle of a mixed run
+// (10.3): the item the run did not satisfy keeps its pending action while
+// the satisfied one is consumed — the tree marks the staged one, and a
+// retry after the block is gone lands it.
+func TestMixedApplyKeepsUnsatisfiedStaged(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	kitDir := writeFixtureKit(t, target)
+
+	stateStore, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(stateStore, lock.NewStore(dataDir))
+
+	m := startWithKit(t, app, kitDir, 100, 30)
+	m = driveAll(t, m, "enter", "enter", "down", "space", "down", "space", "answered", "enter", "a")
+	lm, cmd := confirmAll(t, m)
+
+	// The destination of the good item's write is occupied by a directory:
+	// the run's planning excludes the item, and the varitem lands around it.
+	if err := os.MkdirAll(filepath.Join(target, "skills", "good", "SKILL.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runApplyCmd(t, lm, cmd, func(m *model, msg tea.Msg) {
+		if _, ok := msg.(applyDoneMsg); !ok {
+			return
+		}
+		text := m.resultText()
+		for _, want := range []string{
+			"excluded   good",
+			"is a directory",
+			"✓ installed  varitem 0.1.0",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("the results miss %q:\n%s", want, text)
+			}
+		}
+		if header := m.resultsFrame(100).Header; !strings.Contains(header, "1 done · 1 failed") {
+			t.Errorf("the header = %q, want one done and one failed", header)
+		}
+	})
+
+	// Back on the list: the excluded item keeps its pending mark, the
+	// satisfied one is clean (10.3).
+	m = driveAll(t, m, "enter")
+	lm = m.(*model)
+	if r := itemRow(lm, "ex/good"); r.Pending == nil || *r.Pending != PendingApply {
+		t.Errorf("good row = %+v, want its selection still pending", r)
+	}
+	if r := itemRow(lm, "ex/varitem"); r.Pending != nil {
+		t.Errorf("varitem row = %+v, want the satisfied selection consumed", r)
+	}
+	if n := lm.pendingCount(); n != 1 {
+		t.Errorf("pending = %d, want the unsatisfied selection alone", n)
+	}
+	p := registryOf(t, stateStore).Pending[target]
+	if p == nil || p.Items["ex/good"] == nil || !p.Items["ex/good"].Select || p.Items["ex/good"].Version != "1.0.0" {
+		t.Fatalf("pending = %+v, want the excluded selection whole", p)
+	}
+	if _, ok := p.Items["ex/varitem"]; ok {
+		t.Errorf("the satisfied selection stayed staged: %+v", p.Items["ex/varitem"])
+	}
+
+	// The staged action is repeatable (10.3): the block goes, the retry
+	// lands the good item, and the pending dies.
+	if err := os.Remove(filepath.Join(target, "skills", "good", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	m = driveAll(t, m, "a", "enter", "enter")
+	lm = m.(*model)
+	if !strings.Contains(lm.resultText(), "✓ installed  good 1.0.0") {
+		t.Fatalf("the retry did not land:\n%s", lm.resultText())
+	}
+	if p := registryOf(t, stateStore).Pending[target]; p != nil {
+		t.Errorf("pending after the retry = %+v, want none", p)
+	}
+}
+
 // TestApplyFailsBeforeTheSteps pins the failure that stops the run whole:
 // the results show the failure instead of the counts, and nothing landed.
 func TestApplyFailsBeforeTheSteps(t *testing.T) {
@@ -490,6 +570,23 @@ func TestStepEventFailsTheStep(t *testing.T) {
 	}
 	if view := lm.View(); !strings.Contains(view, "✗ install  good 1.0.0") {
 		t.Errorf("the progress view misses the cross:\n%s", view)
+	}
+}
+
+// TestSatisfiedKeys pins the settle input a run derives from its steps
+// (10.3): a landed step and a kept item without exclusions satisfy their
+// intent, a failed step and an excluded one hold no outcome and keep
+// their staged actions.
+func TestSatisfiedKeys(t *testing.T) {
+	steps := []applyStep{
+		{key: "ex/done", state: stepDone},
+		{key: "ex/failed", state: stepFailed, err: "write failed"},
+		{key: "ex/kept", state: stepKept, note: "already installed"},
+		{key: "ex/excluded", state: stepKept, excluded: []string{"conflict"}},
+	}
+	got := satisfiedKeys(steps)
+	if len(got) != 2 || !got["ex/done"] || !got["ex/kept"] {
+		t.Errorf("satisfiedKeys = %v, want the done and the kept-clean keys", got)
 	}
 }
 

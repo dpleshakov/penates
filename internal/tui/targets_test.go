@@ -388,6 +388,67 @@ func TestTargetSwitchKeepsPendingAndOffersRestore(t *testing.T) {
 	}
 }
 
+// TestTargetOpensWithoutRestoreAfterTheApply pins the reopen side of the
+// settle (10.3): an apply that landed consumes what it satisfied, so the
+// target reopens — by switching back (8.2) and at startup (11.1) — without
+// the restore dialog, and the tree carries no pending marks.
+func TestTargetOpensWithoutRestoreAfterTheApply(t *testing.T) {
+	dataDir := t.TempDir()
+	targetA := filepath.Join(t.TempDir(), "alpha")
+	targetB := filepath.Join(t.TempDir(), "beta")
+	kitA := writeFixtureKit(t, targetA)
+	kitB := writeTeamKit(t, targetB)
+
+	st, err := state.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerKitAt(t, st, "ex", kitA, targetA)
+	registerKitAt(t, st, "team", kitB, targetB)
+	app := NewApp(st, lock.NewStore(dataDir))
+
+	// B opens; its item installs, and the apply consumes the selection.
+	lm := driveAll(t, resize(t, app.Initial(), 120, 30), "down", "space", "a", "enter", "enter").(*model)
+	if !strings.Contains(lm.resultText(), "installed  titem 1.0.0") {
+		t.Fatalf("the apply did not land:\n%s", lm.resultText())
+	}
+	if p := registryOf(t, st).Pending[targetB]; p != nil {
+		t.Fatalf("pending of B = %+v, want none: the apply consumed the selection", p)
+	}
+
+	// Switching to the bare A asks nothing (8.2).
+	lm = drive(t, lm, "t").(*model)
+	lm.list.cursor = targetIndex(t, lm, targetA)
+	lm = drive(t, lm, "enter").(*model)
+	if lm.target != targetA || lm.dialog != nil {
+		t.Fatalf("target %q dialog %v; want A without a question", lm.target, lm.dialog)
+	}
+
+	// Back to B: the landed apply left nothing to offer — no dialog, no
+	// pending marks (11.1, 10.3).
+	lm = drive(t, lm, "t").(*model)
+	lm.list.cursor = targetIndex(t, lm, targetB)
+	lm = drive(t, lm, "enter").(*model)
+	if lm.dialog != nil {
+		t.Fatalf("restore dialog after a landed apply:\n%s", strings.Join(lm.dialog.lines(120, lm.set), "\n"))
+	}
+	if lm.pendingCount() != 0 {
+		t.Fatalf("pending = %d, want none", lm.pendingCount())
+	}
+	if r := itemRow(lm, "team/titem"); !r.Installed || r.Pending != nil {
+		t.Fatalf("reopened row = %+v, want installed with no pending mark", r)
+	}
+
+	// The next start opens B without the offer either (11.1).
+	lm = resize(t, app.Initial(), 120, 30).(*model)
+	if lm.dialog != nil {
+		t.Fatalf("restore dialog at startup after a landed apply:\n%s", strings.Join(lm.dialog.lines(120, lm.set), "\n"))
+	}
+	if lm.pendingCount() != 0 {
+		t.Fatalf("pending at startup = %d, want none", lm.pendingCount())
+	}
+}
+
 func TestTargetRestoreDialogWording(t *testing.T) {
 	dataDir := t.TempDir()
 	targetA := filepath.Join(t.TempDir(), "alpha")

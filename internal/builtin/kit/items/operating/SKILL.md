@@ -42,12 +42,12 @@ contract, and the reference explains what each means. All three are
 reading commands: they write nothing outside the penates data directory,
 so one permission rule covers them all.
 
-`--target <path>` is required wherever a command acts on a target — pass
-it every time; `pending list` is the one command that takes none, because
-it acts on no single target. You know the configuration directory of your
-harness; name it. The active target is the human's terminal-UI state: the
-CLI neither reads nor writes which one it opens, and there is no default
-to fall back on.
+`--target <path>` is required wherever a command acts on a target — of
+the commands above, pass it to `status` and `show` every time; `pending
+list` takes none, because it acts on no single target. You know the
+configuration directory of your harness; name it. The active target is
+the human's terminal-UI state: the CLI neither reads nor writes which one
+it opens, and there is no default to fall back on.
 
 Every failure prints one line, `Error [category]: message`, and the
 message names the concrete next step — the command to run, the flag or

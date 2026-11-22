@@ -57,6 +57,7 @@ func TestHeldGuardRefusesEveryStateCommand(t *testing.T) {
 		{"reset", []string{"reset", "personal/writing", "--target", target, "--yes"}},
 		{"apply", []string{"apply", "--target", target, "--yes"}},
 		{"pending clear", []string{"pending", "clear", "--target", target, "--yes"}},
+		{"pending list", []string{"pending", "list"}},
 		{"setup", []string{"setup", "--target", target, "--yes"}},
 	}
 	for _, tt := range tests {

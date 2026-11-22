@@ -122,6 +122,29 @@ func newTargetListCmd() *cobra.Command {
 	}
 }
 
+// newPendingListCmd builds "penates pending list": the staged pending
+// actions of every registered target — the audit of where something
+// waits for an apply. It takes no --target: the command acts on no
+// single target, and the flag names one.
+func newPendingListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the staged pending actions across the registered targets",
+		Args:  rejectArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := openSession()
+			if err != nil {
+				return err
+			}
+			if len(s.registry.Targets) == 0 {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), noTargetRegistered)
+				return err
+			}
+			return printPendingList(cmd.OutOrStdout(), s)
+		},
+	}
+}
+
 // targetFlag adds the --target flag of a target-scoped command and marks
 // it required: the command line names the target it acts on. There is no
 // default — the CLI neither reads nor writes which target the terminal UI
@@ -144,11 +167,7 @@ func flagTarget(cmd *cobra.Command) {
 // and the notes of what the state load dropped.
 func printStatus(w io.Writer, s *session) error {
 	var sections [][]string
-	header := "target " + s.target
-	if s.name != "" {
-		header = "target " + s.name + " (" + s.target + ")"
-	}
-	sections = append(sections, []string{header})
+	sections = append(sections, []string{targetHeader(s)})
 
 	names := s.registry.KitsFor(s.target)
 	covered := map[string]bool{}
@@ -205,6 +224,15 @@ func printStatus(w io.Writer, s *session) error {
 		sections = append(sections, []string{"note  " + note})
 	}
 	return printSections(w, sections)
+}
+
+// targetHeader is the target's opening line: the display name when one is
+// set, the path beside it.
+func targetHeader(s *session) string {
+	if s.name != "" {
+		return "target " + s.name + " (" + s.target + ")"
+	}
+	return "target " + s.target
 }
 
 // kitItemKey is the identity a status line keys an item by: the kit name
@@ -499,6 +527,35 @@ func registryPendingCount(p *state.Pending) int {
 		return 0
 	}
 	return len(p.Items) + len(p.Deferred)
+}
+
+// printPendingList lays the staged pending actions out across the
+// registered targets, in the registry's order, one block per target that
+// holds any: the target header, the count, the lines the status section
+// shows. A target without staged actions prints nothing — the audit
+// reads signals, and a clean target is silence; when no target holds
+// any, the answer is one line. Only the reported targets are loaded.
+func printPendingList(w io.Writer, s *session) error {
+	var sections [][]string
+	for _, path := range s.registry.TargetPaths() {
+		if registryPendingCount(s.registry.Pending[path]) == 0 {
+			continue
+		}
+		if err := s.focusTarget(path); err != nil {
+			return err
+		}
+		if err := s.loadTarget(); err != nil {
+			return err
+		}
+		sections = append(sections, append([]string{targetHeader(s)}, statusPendingLines(s)...))
+	}
+	if len(sections) == 0 {
+		// The same word pending clear answers with: nothing is waiting
+		// anywhere.
+		_, err := fmt.Fprintln(w, "nothing staged")
+		return err
+	}
+	return printSections(w, sections)
 }
 
 // printSections writes the sections separated by blank lines.

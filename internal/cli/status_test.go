@@ -545,3 +545,96 @@ func TestTargetListNames(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+// pending list lays the staged pending actions out across the registered
+// targets, one block per target that holds any, the same lines the
+// status section shows. A target without staged actions prints nothing —
+// the audit reads signals, and a clean target is silence. No --target:
+// the command acts on no single target.
+func TestPendingList(t *testing.T) {
+	e := newTestEnv(t)
+	clean := filepath.Join(e.base, "clean")
+	quiet := filepath.Join(e.base, "quiet")
+	staged := filepath.Join(e.base, "staged")
+	dir := e.kitFixture()
+	e.register("personal", dir)
+	e.attach("personal", clean)
+	e.attach("personal", quiet)
+	e.attach("personal", staged)
+	e.saveLock(quiet, map[string]*lock.Item{
+		"personal/writing": {Version: "1.0.0"},
+	})
+	e.nameTarget(staged, "the staged one")
+	stage(e, quiet, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Reset: true},
+		},
+	})
+	stage(e, staged, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/greeting": {Select: true},
+		},
+		Deferred: []state.Deferred{{Kind: state.DeferredForgetTarget}},
+	})
+
+	stdout, stderr, code := execute(t, testBuild, "pending", "list")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	// The clean target prints nothing; the staged ones follow the
+	// registry's ascending order, the display name riding in the header.
+	want := strings.Join([]string{
+		"target " + quiet,
+		"pending 1",
+		"  reset  personal/writing",
+		"",
+		"target the staged one (" + staged + ")",
+		"pending 1",
+		"  install  personal/greeting  2.0.0",
+		"  deferred  forget " + staged,
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+}
+
+// The empty answer: targets are registered, none of them holds a staged
+// action — the word pending clear answers with.
+func TestPendingListNothingStaged(t *testing.T) {
+	e := newTestEnv(t)
+	e.register("personal", e.kitFixture())
+	e.attach("personal", filepath.Join(e.base, "harness"))
+
+	stdout, stderr, code := execute(t, testBuild, "pending", "list")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	if want := "nothing staged\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+// No target is registered at all: the reading commands' empty-state line.
+func TestPendingListWithoutTargets(t *testing.T) {
+	newTestEnv(t)
+
+	stdout, stderr, code := execute(t, testBuild, "pending", "list")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	if want := noTargetRegistered + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}

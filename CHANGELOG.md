@@ -8,6 +8,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `penates pending list` names every staged pending action across the registered targets — the cross-target audit of where something waits for an apply. The lines are the ones `status` shows for a target, one block per target that holds staged actions; a target without any prints nothing, and with nothing staged anywhere the answer is one `nothing staged` line. The command takes no `--target`: it acts on no single target, and needs no new permission rule — the reading commands' one allow rule covers it.
 - An apply that leaves staged actions behind — an excluded item, a failed step — now names them in its own output: a note after the result carries the count, the actions one line each, and the two ways out, applying again or `penates pending clear`. The terminal UI reports the same on its notice line after the results screen. A `--dry-run` settles nothing and prints no note.
 
 ### Changed

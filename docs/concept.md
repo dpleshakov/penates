@@ -420,6 +420,7 @@ The CLI is penates for agents, scripts and automation: equal in capability to th
 | `reset <kit/item>` | Reset to kit (7.6); `reset --builtin` resets the built-in kit's directory (6.2). |
 | `apply` | Apply the pending actions staged for the target — the bridge to the TUI's staging. |
 | `pending clear` | Drop the staged pending actions without applying them; asks once, like any mutating command. |
+| `pending list` | The staged pending actions of every registered target that holds any — where something waits for an apply; a target without staged actions is left out. |
 | `setup` | The first run's CLI form: attach the built-in kit to `--target` and install its skills; idempotent. |
 | `kit …` | Registration and management of kits: `list`; `add`, `attach`, `detach`, `path`, `move` — `move <kit> <dir>` points a registered kit at the directory that now holds it, the directory holding a kit of the same name. |
 | `target …` | Registration and management of targets: `list`; `add`, `rename`, `forget`. |

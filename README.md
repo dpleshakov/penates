@@ -59,6 +59,7 @@ penates remove <kit/item>…        # plan and apply the removal
 penates reset <kit/item>|--builtin
 penates apply                     # apply what the terminal UI staged
 penates pending clear             # drop the staged actions without applying
+penates pending list              # the staged actions across all targets — where something waits
 penates kit list|add|attach|detach|path|move …
 penates target list|add|rename|forget …
 ```

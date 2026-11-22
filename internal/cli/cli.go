@@ -154,6 +154,7 @@ func newRoot(b Build, opts Options, stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newApplyCmd(ask))
 	root.AddCommand(newSetupCmd(ask))
 	pendingCmd := newPendingCmd()
+	pendingCmd.AddCommand(newPendingListCmd())
 	pendingCmd.AddCommand(newPendingClearCmd(ask))
 	root.AddCommand(pendingCmd)
 	kitCmd := newKitCmd()

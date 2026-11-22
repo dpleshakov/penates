@@ -136,8 +136,7 @@ func openSession() (*session, *Error) {
 // self-describing. An unregistered path is refused with the way to
 // register it.
 func (s *session) resolveTarget(explicit string) *Error {
-	path := explicit
-	if path == "" {
+	if explicit == "" {
 		// Unreachable while every caller's command requires the flag;
 		// kept so a command that stops requiring it fails the contract
 		// loudly instead of acting on a guess.
@@ -146,6 +145,15 @@ func (s *session) resolveTarget(explicit string) *Error {
 			Message:  `required flag(s) "target" not set (run "penates --help")`,
 		}
 	}
+	return s.focusTarget(explicit)
+}
+
+// focusTarget points the session at the named registered target and drops
+// the per-target values a previous focus loaded, so the next load reads
+// that target alone — the shape of the walk over the registry that
+// pending list makes. An unregistered path is refused the way
+// resolveTarget refuses one.
+func (s *session) focusTarget(path string) *Error {
 	t, ok := s.registry.Targets[path]
 	if !ok {
 		// The suggestion quotes the path plainly: %q would double the
@@ -157,6 +165,7 @@ func (s *session) resolveTarget(explicit string) *Error {
 	}
 	s.target, s.name = path, t.Name
 	s.pending = s.registry.Pending[path]
+	s.lock, s.kits, s.snap, s.reconcil, s.plans = nil, nil, nil, nil, nil
 	return nil
 }
 

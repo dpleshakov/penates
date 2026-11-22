@@ -51,7 +51,7 @@ session; the lead (alpha) reviews, commits, and owns the overall solution.
 ### TASK-02 `cli-deadlock-and-staged-tests`
 **Description:** internal/cli end-to-end tests. (1) The deadlock loop: install an item, stage `{select: true, version: <installed>}` exactly as the TUI leaves it after its apply, run `penates apply` — it answers kept, the pending actions are empty afterwards, and a one-shot command no longer refuses; this is also the self-heal pin for old registries. (2) A staged selection whose step fails at apply time (io injection, as `TestFailedStepPrintsIOCategory` does) stays staged, and a second apply retries it. (3) An item excluded at plan time (a missing answer, a conflict) stays staged after the apply. Fix what the tests expose in the settle threading.
 **Definition of done:** the three scenarios are pinned by named tests in internal/cli; `go test ./internal/cli/...` passes together with the existing suite.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-03 `tui-clean-tree-after-apply`
 **Description:** internal/tui tests. After an apply that lands: the applied rows show no pending action in the tree, and opening the target again (switch away and back) offers no restore dialog (11.1); a mixed apply with one failed item keeps that item's pending action marked while the satisfied ones clean up; the save and restore of unapplied selections across target switches (8.2, 11.1 — targets_test.go) stays green. Fix what the tests expose.

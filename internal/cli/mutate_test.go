@@ -1116,6 +1116,13 @@ func TestApplyKeepsFailedSelectionStaged(t *testing.T) {
 	if !strings.Contains(stderr, "Error [io]: personal/writing: ") {
 		t.Errorf("stderr lacks the io Error line:\n%s", stderr)
 	}
+	wantNote := `note  1 pending action remains staged for ` + target + ` (apply it again with "penates apply", or clear it with "penates pending clear")`
+	if !strings.Contains(stdout, wantNote) {
+		t.Errorf("stdout lacks the remaining-pending note:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "  install  personal/writing  1.0.0") {
+		t.Errorf("stdout lacks the staged action under the note:\n%s", stdout)
+	}
 	p := registryOf(e).Pending[target]
 	if p == nil || p.Items["personal/writing"] == nil {
 		t.Fatalf("the failed selection did not stay staged: %+v", p)
@@ -1146,6 +1153,9 @@ func TestApplyKeepsFailedSelectionStaged(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "installed  personal/writing  1.0.0") {
 		t.Errorf("the retry stdout lacks the installed row:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "remain staged") {
+		t.Errorf("the retry printed the remaining-pending note with nothing remaining:\n%s", stdout)
 	}
 	if stderr != "" {
 		t.Errorf("the retry stderr = %q, want nothing", stderr)
@@ -1195,6 +1205,9 @@ func TestApplyKeepsExcludedSelectionStaged(t *testing.T) {
 		if p == nil || p.Items["personal/templated"] == nil || !p.Items["personal/templated"].Select {
 			t.Errorf("the excluded selection did not stay staged: %+v", p)
 		}
+		if strings.Contains(stdout, "remain staged") {
+			t.Errorf("a run that settled nothing printed the remaining-pending note:\n%s", stdout)
+		}
 	})
 
 	t.Run("a conflict beside a satisfied item", func(t *testing.T) {
@@ -1225,6 +1238,13 @@ func TestApplyKeepsExcludedSelectionStaged(t *testing.T) {
 		if stderr != want {
 			t.Errorf("stderr = %q, want %q", stderr, want)
 		}
+		wantNote := `note  1 pending action remains staged for ` + target + ` (apply it again with "penates apply", or clear it with "penates pending clear")`
+		if !strings.Contains(stdout, wantNote) {
+			t.Errorf("stdout lacks the remaining-pending note:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "  apply  personal/writing") {
+			t.Errorf("stdout lacks the staged action under the note:\n%s", stdout)
+		}
 		p := registryOf(e).Pending[target]
 		if p == nil || p.Items["personal/writing"] == nil || !p.Items["personal/writing"].Select {
 			t.Errorf("the excluded selection did not stay staged: %+v", p)
@@ -1250,6 +1270,34 @@ func TestApplyNothingStaged(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+}
+
+// TestApplyDryRunNotesNothing pins the dry-run's silence about the staged
+// actions: a preview settles nothing, so the note naming what remains
+// belongs to the real run alone — and the staged actions wait on behind it.
+func TestApplyDryRunNotesNothing(t *testing.T) {
+	e := newTestEnv(t)
+	_, target := e.readyKit("personal")
+	stage(e, target, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Select: true, Version: "1.0.0"},
+		},
+	})
+
+	stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--dry-run")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "install  personal/writing  1.0.0") {
+		t.Errorf("stdout lacks the summary:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "remain staged") {
+		t.Errorf("the dry-run printed the remaining-pending note:\n%s", stdout)
+	}
+	if p := registryOf(e).Pending[target]; p == nil || p.Items["personal/writing"] == nil {
+		t.Errorf("the dry-run settled the staged actions: %+v", p)
 	}
 }
 

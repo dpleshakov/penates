@@ -301,6 +301,19 @@ func statusPendingLines(s *session) []string {
 	return append(lines, pendingActionLines(s)...)
 }
 
+// printRemainingPending writes the note an apply that leaves staged
+// actions behind prints after its result: the sentence naming the count
+// and the two ways out, the staged actions one line each under it. It
+// prints nothing when the settle left nothing behind.
+func printRemainingPending(w io.Writer, s *session) error {
+	note := s.pending.RemainingNote(s.target)
+	if note == "" {
+		return nil
+	}
+	lines := append([]string{"note  " + note}, pendingActionLines(s)...)
+	return printSections(w, [][]string{lines})
+}
+
 // pendingActionCount counts everything the target's pending actions
 // hold: the item actions and the deferred operations together — the
 // number a pending clear reports as cleared.

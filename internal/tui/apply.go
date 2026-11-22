@@ -751,7 +751,8 @@ func runInstalls(target string, items []*plan.ItemPlan, lk *lock.Lock, store *lo
 // apply (6.7): the lock as the apply left it decides — a deferred detach
 // whose kit lost its last installed item completes, one the apply did not
 // finish is dropped with its reason. It returns the lock and the registry
-// as the run left them, the report, and the errors to show.
+// as the run left them — the registry reloaded, so the readers behind the
+// run see what the settle left — the report, and the errors to show.
 func completeDeferred(app *App, target string, errs []string) (*lock.Lock, *state.Registry, []string, []string) {
 	lk, err := app.Locks.Load(target)
 	if err != nil {
@@ -767,19 +768,19 @@ func completeDeferred(app *App, target string, errs []string) (*lock.Lock, *stat
 		return lk, nil, nil, append(errs, "could not complete the deferred operations: "+err.Error())
 	}
 	var reg *state.Registry
-	if len(report) > 0 {
-		if r, err := app.State.LoadRegistry(); err == nil {
-			reg = r
-		} else {
-			errs = append(errs, "could not reload the state: "+err.Error())
-		}
+	if r, err := app.State.LoadRegistry(); err == nil {
+		reg = r
+	} else {
+		errs = append(errs, "could not reload the state: "+err.Error())
 	}
 	return lk, reg, report, errs
 }
 
 // finishApply settles the model after one run: the outcome becomes the
-// result screen (10.3), the record of 10.4 takes the successful steps, and
-// the lock and the registry come back as the run left them.
+// result screen (10.3), the record of 10.4 takes the successful steps, the
+// lock and the registry come back as the run left them, and an apply that
+// left staged actions behind names them on the notice line — the same
+// sentence the CLI's note prints.
 func (m *model) finishApply(out *applyOutcome) {
 	m.applyCh = nil
 	m.progress = nil
@@ -790,6 +791,9 @@ func (m *model) finishApply(out *applyOutcome) {
 	}
 	if out.reg != nil {
 		m.reg = out.reg
+	}
+	if note := m.pendingActions().RemainingNote(m.target); note != "" {
+		m.showNotice(note)
 	}
 	m.screen = screenResults
 }

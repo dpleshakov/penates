@@ -7,6 +7,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- An apply that leaves staged actions behind — an excluded item, a failed step — now names them in its own output: a note after the result carries the count, the actions one line each, and the two ways out, applying again or `penates pending clear`. The terminal UI reports the same on its notice line after the results screen. A `--dry-run` settles nothing and prints no note.
+
 ### Changed
 - The `pending` group's Short reads "The staged pending actions of a target": the line names what the group holds instead of promising a show form it does not have; bare `pending` prints help as before, and `pending clear` is unchanged.
 

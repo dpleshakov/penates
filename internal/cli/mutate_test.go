@@ -836,6 +836,9 @@ func TestPendingClearDropsStaged(t *testing.T) {
 		},
 		Deferred: []state.Deferred{{Kind: state.DeferredForgetTarget}},
 	})
+	// A named target carries its name in the header, the vocabulary
+	// status and pending list print.
+	execute(t, testBuild, "target", "rename", target, "the named one")
 
 	stdout, stderr, code := execute(t, testBuild, "pending", "clear", "--target", target, "--yes")
 
@@ -843,7 +846,7 @@ func TestPendingClearDropsStaged(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	for _, want := range []string{
-		"target " + target,
+		"target the named one (" + target + ")",
 		"pending 1",
 		"  remove  personal/writing",
 		"  deferred  forget " + target,

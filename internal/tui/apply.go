@@ -780,7 +780,9 @@ func completeDeferred(app *App, target string, errs []string) (*lock.Lock, *stat
 // lock and the registry come back as the run left them, and an apply that
 // left staged actions behind names them on the notice line — the same
 // sentence the CLI's note prints. The returned command ages that notice
-// out: dropped on the floor here, it would never clear on its own.
+// out: dropped on the floor here, it would never clear on its own. A
+// registry the run failed to reload leaves what remains unknown, so the
+// note and its command stay silent and the error lines speak.
 func (m *model) finishApply(out *applyOutcome) tea.Cmd {
 	m.applyCh = nil
 	m.progress = nil
@@ -793,8 +795,13 @@ func (m *model) finishApply(out *applyOutcome) tea.Cmd {
 		m.reg = out.reg
 	}
 	var cmd tea.Cmd
-	if note := m.pendingActions().RemainingNote(m.target); note != "" {
-		cmd = m.showNotice(note)
+	// A registry the run failed to reload leaves what remains unknown:
+	// the outcome's error lines speak, and the note stays silent — the
+	// CLI's Error line speaks in the same corner.
+	if out.reg != nil {
+		if note := m.pendingActions().RemainingNote(m.target); note != "" {
+			cmd = m.showNotice(note)
+		}
 	}
 	m.screen = screenResults
 	return cmd

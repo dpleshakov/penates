@@ -168,9 +168,6 @@ func itemRow(m *model, key string) ItemRow {
 	return ItemRow{}
 }
 
-// writeFixtureKit writes a kit with one installable item — tagged, with a
-// changelog — and one that uses a required variable in a templated file,
-// proposing target as its target hint.
 // stageSelection stages an item's selection for target directly in the
 // state store, made against the given version: the scaffolding the
 // restore-time and rescan checks work on, for the cases space cannot
@@ -194,6 +191,9 @@ func stageSelection(t *testing.T, st *state.Store, target, key, version string) 
 	}
 }
 
+// writeFixtureKit writes a kit with one installable item — tagged, with a
+// changelog — and one that uses a required variable in a templated file,
+// proposing target as its target hint.
 func writeFixtureKit(t *testing.T, target string) string {
 	t.Helper()
 	dir := t.TempDir()

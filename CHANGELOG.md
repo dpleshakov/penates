@@ -7,6 +7,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The `pending` group's Short reads "The staged pending actions of a target": the line names what the group holds instead of promising a show form it does not have; bare `pending` prints help as before, and `pending clear` is unchanged.
+
 ## [0.1.3] - 2026-11-22
 
 ### Fixed

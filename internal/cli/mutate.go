@@ -415,7 +415,7 @@ func newApplyCmd(ask *confirmer) *cobra.Command {
 func newPendingCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pending",
-		Short: "Show and clear the staged pending actions",
+		Short: "The staged pending actions of a target",
 		Args:  rejectArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

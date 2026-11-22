@@ -373,6 +373,32 @@ func TestKitGroupWithoutSubcommandPrintsHelp(t *testing.T) {
 	}
 }
 
+// The pending group's surface: the Short states what the group holds —
+// "The staged pending actions of a target" — rather than what it does, so
+// it stays true when `pending list` arrives, and bare `pending` prints the
+// help like every group does.
+func TestPendingGroupShortAndBareHelp(t *testing.T) {
+	stdout, stderr, code := execute(t, testBuild, "pending")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	if !strings.Contains(stdout, "clear") {
+		t.Errorf("stdout = %q, want the pending group help listing its commands", stdout)
+	}
+
+	stdout, _, code = execute(t, testBuild, "--help")
+	if code != 0 {
+		t.Fatalf("help exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "The staged pending actions of a target") {
+		t.Errorf("help = %q, want the pending group's Short to state what it holds", stdout)
+	}
+}
+
 func TestHelpGoesToStdoutWithoutError(t *testing.T) {
 	stdout, stderr, code := execute(t, testBuild, "--help")
 

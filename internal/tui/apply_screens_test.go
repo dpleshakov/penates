@@ -274,8 +274,9 @@ func confirmAll(t *testing.T, m tea.Model) (*model, tea.Cmd) {
 // way the runtime delivers them, handing each to visit together with the
 // updated model. The apply runs to completion before the first event is
 // delivered — the channel buffers them — so the visits see the order of the
-// steps, not their wall-clock timing.
-func runApplyCmd(t *testing.T, m *model, cmd tea.Cmd, visit func(m *model, msg tea.Msg)) {
+// steps, not their wall-clock timing. The command of the outcome's own
+// delivery comes back, so a test can pin what the finished run armed.
+func runApplyCmd(t *testing.T, m *model, cmd tea.Cmd, visit func(m *model, msg tea.Msg)) tea.Cmd {
 	t.Helper()
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok {
@@ -297,8 +298,9 @@ func runApplyCmd(t *testing.T, m *model, cmd tea.Cmd, visit func(m *model, msg t
 	if !ok {
 		t.Fatalf("the run returned %T, want the outcome", done)
 	}
-	mm, _ := m.Update(dm)
+	mm, doneCmd := m.Update(dm)
 	visit(mm.(*model), dm)
+	return doneCmd
 }
 
 // TestApplyProgressStepping pins the stepping: the queue reaches the view
@@ -452,7 +454,7 @@ func TestMixedApplyKeepsUnsatisfiedStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runApplyCmd(t, lm, cmd, func(m *model, msg tea.Msg) {
+	doneCmd := runApplyCmd(t, lm, cmd, func(m *model, msg tea.Msg) {
 		if _, ok := msg.(applyDoneMsg); !ok {
 			return
 		}
@@ -474,6 +476,11 @@ func TestMixedApplyKeepsUnsatisfiedStaged(t *testing.T) {
 			t.Errorf("notice = %q, want the remaining-pending note", got)
 		}
 	})
+	// The note armed its timer: the command that ages it out came back
+	// with the outcome, instead of being dropped on the floor.
+	if doneCmd == nil {
+		t.Error("the finished apply returned no command to age the notice out")
+	}
 
 	// Back on the list: the excluded item keeps its pending mark, the
 	// satisfied one is clean (10.3).

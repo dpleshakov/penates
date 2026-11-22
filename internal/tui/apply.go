@@ -521,8 +521,7 @@ func (m *model) confirmApply() tea.Cmd {
 	m.progress = nil
 	m.spinner = 0
 	if len(p.selection) == 0 && len(p.removals) == 0 {
-		m.finishApply(m.completeDeferredOnly())
-		return nil
+		return m.finishApply(m.completeDeferredOnly())
 	}
 	m.screen = screenProgress
 	ch := make(chan any, 256)
@@ -780,8 +779,9 @@ func completeDeferred(app *App, target string, errs []string) (*lock.Lock, *stat
 // result screen (10.3), the record of 10.4 takes the successful steps, the
 // lock and the registry come back as the run left them, and an apply that
 // left staged actions behind names them on the notice line — the same
-// sentence the CLI's note prints.
-func (m *model) finishApply(out *applyOutcome) {
+// sentence the CLI's note prints. The returned command ages that notice
+// out: dropped on the floor here, it would never clear on its own.
+func (m *model) finishApply(out *applyOutcome) tea.Cmd {
 	m.applyCh = nil
 	m.progress = nil
 	m.outcome = out
@@ -792,10 +792,12 @@ func (m *model) finishApply(out *applyOutcome) {
 	if out.reg != nil {
 		m.reg = out.reg
 	}
+	var cmd tea.Cmd
 	if note := m.pendingActions().RemainingNote(m.target); note != "" {
-		m.showNotice(note)
+		cmd = m.showNotice(note)
 	}
 	m.screen = screenResults
+	return cmd
 }
 
 // stepEvent moves one step of the running apply along its boundaries (10.2):

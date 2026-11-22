@@ -1,6 +1,6 @@
 # 2026-11-22-tasks-settle-consumes-actions.md
 
-**Status:** Active
+**Status:** Archived
 
 ## Context
 
@@ -61,4 +61,4 @@ session; the lead (alpha) reviews, commits, and owns the overall solution.
 ### TASK-04 `docs-changelog-and-close`
 **Description:** close-out. The tui-screens.md sentence and the CHANGELOG Fixed entries rode TASK-01's commit, as the repository's same-commit rule requires; what remains: verify docs/concept.md needs no change; run `make check` (CONTRIBUTING.md); lead review of the whole branch against the Context decisions; archive this tasks file.
 **Definition of done:** `make check` passes; docs/concept.md verified unchanged; every task in this file is resolved and the file moves to docs/archive/ in the commit that brings it to that state.
-**Status:** Pending
+**Status:** Done

@@ -28,24 +28,26 @@ category, look there.
 
 ## Read before you act
 
-State is read with two commands:
+State is read with three commands:
 
 ```
 penates status --target <path>  # the target, its kits and items with reasons, staged pending actions
 penates show <kit/item> --target <path>  # one item: description, status with reason, variables, contributions
+penates pending list  # the staged pending actions of every target — where something waits
 ```
 
 Every item line of `status` opens with its state word — `installed`,
 `update-available`, `conflict`, and the rest; the words are a stable
-contract, and the reference explains what each means. Both commands are
+contract, and the reference explains what each means. All three are
 reading commands: they write nothing outside the penates data directory,
 so one permission rule covers them all.
 
 `--target <path>` is required wherever a command acts on a target — pass
-it every time. You know the configuration directory of your harness; name
-it. The active target is the human's terminal-UI state: the CLI neither
-reads nor writes which one it opens, and there is no default to fall back
-on.
+it every time; `pending list` is the one command that takes none, because
+it acts on no single target. You know the configuration directory of your
+harness; name it. The active target is the human's terminal-UI state: the
+CLI neither reads nor writes which one it opens, and there is no default
+to fall back on.
 
 Every failure prints one line, `Error [category]: message`, and the
 message names the concrete next step — the command to run, the flag or

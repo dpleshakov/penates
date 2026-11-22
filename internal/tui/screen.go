@@ -325,8 +325,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stepEvent(msg)
 		return m, m.listenApply()
 	case applyDoneMsg:
-		m.finishApply(msg.out)
-		return m, nil
+		return m, m.finishApply(msg.out)
 	case progressTickMsg:
 		if m.screen == screenProgress {
 			m.spinner++

@@ -458,7 +458,7 @@ func newPendingClearCmd(ask *confirmer) *cobra.Command {
 			}
 			n := pendingActionCount(s)
 			if err := printSections(out, [][]string{
-				{"target " + s.target},
+				{targetHeader(s)},
 				statusPendingLines(s),
 			}); err != nil {
 				return err
@@ -923,7 +923,7 @@ func completeDeferredOnly(s *session, out io.Writer, ask *confirmer, dry, yes bo
 		}
 	}
 	if err := printSections(out, [][]string{
-		{"target " + s.target},
+		{targetHeader(s)},
 		pendingDeferredLines(s),
 	}); err != nil {
 		return err

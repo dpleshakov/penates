@@ -303,6 +303,27 @@ func runApplyCmd(t *testing.T, m *model, cmd tea.Cmd, visit func(m *model, msg t
 	return doneCmd
 }
 
+// A registry the run failed to reload leaves what remains unknown: the
+// model's stale registry may still hold what the settle consumed, so the
+// note stays silent and nothing arms a timer — the outcome's error lines
+// speak for the run instead, the way the CLI's Error line does.
+func TestFinishApplySilentWithoutReloadedRegistry(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "target")
+	stale := &state.Registry{Pending: map[string]*state.Pending{
+		target: {Items: map[string]*state.ItemPending{"ex/good": {Select: true}}},
+	}}
+	m := &model{target: target, reg: stale}
+
+	cmd := m.finishApply(&applyOutcome{})
+
+	if cmd != nil {
+		t.Error("the failed reload armed a notice command")
+	}
+	if text := m.notice.Text(); text != "" {
+		t.Errorf("notice = %q, want nothing without a reloaded registry", text)
+	}
+}
+
 // TestApplyProgressStepping pins the stepping: the queue reaches the view
 // before the steps, the start of a step lights its line, its result settles
 // it, and the finished run lands on the results with every item applied.

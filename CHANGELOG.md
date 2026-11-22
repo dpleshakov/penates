@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-22
+
 ### Added
 - The command-line interface: every scenario of the terminal UI is reachable from commands — `status`, `show`, `install`, `update`, `remove`, `reset` (with `--builtin`), `apply`, `pending clear`, `setup`, and the `kit` and `target` management groups. `--target <path>` names the target a command acts on and is required wherever a command acts on one — the CLI never depends on which target the terminal UI opens; `target list` counts each target's staged pending actions. A mutating command prints its summary and asks once; `--yes` confirms in advance, `--dry-run` previews without writing; without a terminal a command that would ask requires `--yes`.
 - `penates setup`, the first run's CLI form: it attaches the built-in kit to `--target` — registering the target when it is new — and installs the kit's skills, idempotently; a repeat is kept and reported, not an error. An agent may begin a machine alone; the trust it acts under is the same recorded ownership.

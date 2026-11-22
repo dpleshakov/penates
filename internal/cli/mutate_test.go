@@ -1019,6 +1019,222 @@ func TestApplyDropsStaleStagedActions(t *testing.T) {
 	}
 }
 
+// TestApplyConsumesKeptSelection pins the exit from the applied-selection
+// loop: a staged selection of an item the apply keeps as it is — installed
+// at the staged version — is consumed, the pending actions empty, and the
+// one-shot command the staged refusal held back works again. The refusal
+// stands in the test before the apply to pin the deadlock this heals: a
+// registry an older build left with a satisfied selection staged recovers
+// on its first apply, no migration.
+func TestApplyConsumesKeptSelection(t *testing.T) {
+	e := newTestEnv(t)
+	_, target := e.readyKit("personal")
+	if _, _, code := execute(t, testBuild, "install", "personal/writing", "--target", target, "--yes"); code != 0 {
+		t.Fatalf("the install exited %d", code)
+	}
+	// The selection exactly as the TUI's apply used to leave it: the item
+	// marked for install at the version it already sits at.
+	stage(e, target, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Select: true, Version: "1.0.0"},
+		},
+	})
+
+	_, stderr, code := execute(t, testBuild, "install", "personal/greeting", "--target", target, "--yes")
+	if code != 1 {
+		t.Fatalf("the held-back one-shot exit code = %d, want 1", code)
+	}
+	if !strings.HasPrefix(stderr, "Error [staged]: ") {
+		t.Errorf("stderr = %q, want the staged refusal", stderr)
+	}
+
+	stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "kept  personal/writing  1.0.0  already installed") {
+		t.Errorf("stdout lacks the kept row:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
+	}
+	if p := registryOf(e).Pending[target]; p != nil {
+		t.Errorf("the satisfied selection stayed staged: %+v", p.Items)
+	}
+
+	// The refusal is gone: the same one-shot command runs.
+	if _, stderr, code = execute(t, testBuild, "install", "personal/greeting", "--target", target, "--yes"); code != 0 {
+		t.Fatalf("the one-shot install exited %d (stderr: %s)", code, stderr)
+	}
+}
+
+// TestApplyKeepsFailedSelectionStaged pins the failed step's outcome: a
+// staged selection whose step fails at apply time keeps its action whole,
+// and the next apply — once the target takes writes again — retries it
+// and consumes it. The injection is the one TestFailedStepPrintsIOCategory
+// uses: a read-only target directory refuses the step where directory
+// modes are honored, and Windows, which treats them as advisory, runs the
+// step to its lock save and is refused there by the read-only lock file.
+func TestApplyKeepsFailedSelectionStaged(t *testing.T) {
+	e := newTestEnv(t)
+	_, target := e.readyKit("personal")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// The lock file stands read-only in place of the one the first
+	// install would create: nothing reads it differently, and the Windows
+	// leg is refused exactly here, at the step's lock save.
+	if err := e.locks.Save(&lock.Lock{Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := e.locks.Path(target)
+	if err := os.Chmod(lockPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(lockPath, 0o600)
+		_ = os.Chmod(target, 0o700)
+	})
+	stage(e, target, &state.Pending{
+		Items: map[string]*state.ItemPending{
+			"personal/writing": {Select: true, Version: "1.0.0"},
+		},
+	})
+
+	stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout, "failed  personal/writing") {
+		t.Errorf("stdout lacks the failed row:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "Error [io]: personal/writing: ") {
+		t.Errorf("stderr lacks the io Error line:\n%s", stderr)
+	}
+	p := registryOf(e).Pending[target]
+	if p == nil || p.Items["personal/writing"] == nil {
+		t.Fatalf("the failed selection did not stay staged: %+v", p)
+	}
+	if kept := p.Items["personal/writing"]; !kept.Select || kept.Version != "1.0.0" || kept.Remove || kept.Reset {
+		t.Errorf("the staged selection did not survive whole: %+v", kept)
+	}
+
+	// Writes work again. On the leg where directory modes are advisory the
+	// refused step ran to its lock save, and its files stand renamed in
+	// place with no lock record — the step puts them there before it saves
+	// — so the retry would meet them as user content; the test clears what
+	// the injection landed there.
+	if err := os.Chmod(lockPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(target, "skills")); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code = execute(t, testBuild, "apply", "--target", target, "--yes")
+
+	if code != 0 {
+		t.Fatalf("the retry exit code = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "installed  personal/writing  1.0.0") {
+		t.Errorf("the retry stdout lacks the installed row:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("the retry stderr = %q, want nothing", stderr)
+	}
+	if p := registryOf(e).Pending[target]; p != nil {
+		t.Errorf("the retried selection stayed staged: %+v", p.Items)
+	}
+	lk, err := e.locks.Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := lk.Items["personal/writing"]; rec == nil || rec.Version != "1.0.0" {
+		t.Errorf("the retried install did not land: %+v", lk.Items)
+	}
+}
+
+// TestApplyKeepsExcludedSelectionStaged pins the excluded item's outcome:
+// an item the plan excludes holds no outcome to settle, so its staged
+// action stays — and a satisfied item in the same run settles beside it.
+func TestApplyKeepsExcludedSelectionStaged(t *testing.T) {
+	t.Run("a missing answer", func(t *testing.T) {
+		e := newTestEnv(t)
+		dir, target := e.readyKit("personal")
+		e.writeFiles(map[string]string{
+			filepath.Join(dir, "items/templated/item.yaml"): "id: templated\nversion: 1.0.0\nvars:\n  - id: name\n    prompt: Name\n    required: true\ncontributes:\n  - file: t.md\n    to: skills/templated/t.md\n    template: true\n",
+			filepath.Join(dir, "items/templated/t.md"):      "Hello {{name}}.\n",
+		})
+		stage(e, target, &state.Pending{
+			Items: map[string]*state.ItemPending{
+				"personal/templated": {Select: true, Version: "1.0.0"},
+			},
+		})
+
+		stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stdout, "excluded  personal/templated") {
+			t.Errorf("stdout lacks the exclusion:\n%s", stdout)
+		}
+		want := "Error [kit]: personal/templated: required variable \"name\" has no value\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+		p := registryOf(e).Pending[target]
+		if p == nil || p.Items["personal/templated"] == nil || !p.Items["personal/templated"].Select {
+			t.Errorf("the excluded selection did not stay staged: %+v", p)
+		}
+	})
+
+	t.Run("a conflict beside a satisfied item", func(t *testing.T) {
+		e := newTestEnv(t)
+		_, target := e.readyKit("personal")
+		// The content the plan refuses to touch: the selection's
+		// destination exists in the target and no lock records it.
+		e.writeFiles(map[string]string{filepath.Join(target, "skills/writing/SKILL.md"): "# mine\n"})
+		stage(e, target, &state.Pending{
+			Items: map[string]*state.ItemPending{
+				"personal/writing":  {Select: true, Version: "1.0.0"},
+				"personal/greeting": {Select: true, Version: "1.0.0"},
+			},
+		})
+
+		stdout, stderr, code := execute(t, testBuild, "apply", "--target", target, "--yes")
+
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+		if !strings.Contains(stdout, "installed  personal/greeting  1.0.0") {
+			t.Errorf("stdout lacks the applied item:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "excluded  personal/writing") {
+			t.Errorf("stdout lacks the exclusion:\n%s", stdout)
+		}
+		want := "Error [conflict]: personal/writing: skills/writing/SKILL.md exists in the target and is not recorded in the lock; refusing to touch a file that may belong to the user\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+		p := registryOf(e).Pending[target]
+		if p == nil || p.Items["personal/writing"] == nil || !p.Items["personal/writing"].Select {
+			t.Errorf("the excluded selection did not stay staged: %+v", p)
+		}
+		if p != nil && p.Items["personal/greeting"] != nil {
+			t.Errorf("the satisfied selection did not settle: %+v", p.Items["personal/greeting"])
+		}
+	})
+}
+
 // TestApplyNothingStaged pins the empty success of the bridge command.
 func TestApplyNothingStaged(t *testing.T) {
 	e := newTestEnv(t)

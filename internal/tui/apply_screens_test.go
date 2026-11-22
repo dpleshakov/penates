@@ -469,6 +469,10 @@ func TestMixedApplyKeepsUnsatisfiedStaged(t *testing.T) {
 		if header := m.resultsFrame(100).Header; !strings.Contains(header, "1 done · 1 failed") {
 			t.Errorf("the header = %q, want one done and one failed", header)
 		}
+		want := `1 pending action remains staged for ` + target + ` (apply it again with "penates apply", or clear it with "penates pending clear")`
+		if got := m.notice.Text(); got != want {
+			t.Errorf("notice = %q, want the remaining-pending note", got)
+		}
 	})
 
 	// Back on the list: the excluded item keeps its pending mark, the

@@ -430,6 +430,33 @@ func TestDeferForgetTarget(t *testing.T) {
 	}
 }
 
+// TestPendingRemainingNote pins the sentence both interfaces show after
+// an apply that left staged actions behind: the count with its singular
+// form, and the two ways out — its reader has just run the apply, so the
+// staged refusal's third way has no place here.
+func TestPendingRemainingNote(t *testing.T) {
+	one := &Pending{Items: map[string]*ItemPending{"a/one": {Select: true}}}
+	want := `1 pending action remains staged for /t (apply it again with "penates apply", or clear it with "penates pending clear")`
+	if got := one.RemainingNote("/t"); got != want {
+		t.Errorf("one action = %q, want %q", got, want)
+	}
+	three := &Pending{
+		Items:    map[string]*ItemPending{"a/one": {Select: true}, "a/two": {Remove: true}},
+		Deferred: []Deferred{{Kind: DeferredDetachKit, Kit: "a"}},
+	}
+	want = `3 pending actions remain staged for /t (apply them again with "penates apply", or clear them with "penates pending clear")`
+	if got := three.RemainingNote("/t"); got != want {
+		t.Errorf("three actions = %q, want %q", got, want)
+	}
+	var none *Pending
+	if got := none.RemainingNote("/t"); got != "" {
+		t.Errorf("nil pending = %q, want empty", got)
+	}
+	if got := (&Pending{}).RemainingNote("/t"); got != "" {
+		t.Errorf("empty pending = %q, want empty", got)
+	}
+}
+
 func TestSettlePending(t *testing.T) {
 	t.Run("a satisfied selection is consumed with its answers", func(t *testing.T) {
 		store, err := Open(t.TempDir())

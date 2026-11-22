@@ -70,6 +70,27 @@ type Pending struct {
 	Deferred []Deferred `json:"deferred,omitempty"`
 }
 
+// RemainingNote is the sentence an interface shows after an apply that
+// left staged actions behind: what remains, and the two ways out. Its
+// reader has just run the apply, so the staged refusal's third way —
+// asking the person who staged them — has no place here. Empty when
+// nothing remains.
+func (p *Pending) RemainingNote(target string) string {
+	if p == nil {
+		return ""
+	}
+	n := len(p.Items) + len(p.Deferred)
+	if n == 0 {
+		return ""
+	}
+	what, them := "actions remain", "them"
+	if n == 1 {
+		what, them = "action remains", "it"
+	}
+	return fmt.Sprintf("%d pending %s staged for %s (apply %s again with %q, or clear %s with %q)",
+		n, what, target, them, "penates apply", them, "penates pending clear")
+}
+
 // ItemPending holds the actions pending for one item and the answers given
 // when it was selected. The answers stay until the apply writes them into
 // the lock, so a restored selection does not ask again.

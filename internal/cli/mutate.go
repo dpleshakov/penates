@@ -991,6 +991,15 @@ func settleAndComplete(s *session, satisfied, removed map[string]bool) ([]string
 	if err != nil {
 		return nil, &Error{Category: CategoryState, Message: "could not complete the deferred operations: " + err.Error(), Cause: err}
 	}
+	// The pending the session holds is the one the run started with:
+	// reload the registry, so the readers behind the run — the
+	// remaining-pending note among them — see what the settle left.
+	reg, err := s.state.LoadRegistry()
+	if err != nil {
+		return nil, &Error{Category: CategoryState, Message: "could not reload the state: " + err.Error(), Cause: err}
+	}
+	s.registry = reg
+	s.pending = reg.Pending[s.target]
 	return report, nil
 }
 
@@ -1085,6 +1094,16 @@ func (m *mutation) run() error {
 	}
 	if err := printNotes(m.out, m.notes); err != nil {
 		return err
+	}
+	// The apply alone settles staged actions, so the apply alone can
+	// leave them: the note names what remains and the two ways out. A
+	// failed state operation leaves what remains unknown — the Error
+	// line speaks for it instead — and a dry-run never reaches this
+	// path at all: it settles nothing and prints no note.
+	if m.after != nil && oc.stateErr == nil {
+		if err := printRemainingPending(m.out, m.s); err != nil {
+			return err
+		}
 	}
 	if oc.stateErr != nil {
 		return oc.stateErr

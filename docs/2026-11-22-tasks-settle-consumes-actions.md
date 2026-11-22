@@ -56,7 +56,7 @@ session; the lead (alpha) reviews, commits, and owns the overall solution.
 ### TASK-03 `tui-clean-tree-after-apply`
 **Description:** internal/tui tests. After an apply that lands: the applied rows show no pending action in the tree, and opening the target again (switch away and back) offers no restore dialog (11.1); a mixed apply with one failed item keeps that item's pending action marked while the satisfied ones clean up; the save and restore of unapplied selections across target switches (8.2, 11.1 — targets_test.go) stays green. Fix what the tests expose.
 **Definition of done:** the behaviors are pinned by named tests in internal/tui; `go test ./internal/tui/...` passes together with the existing suite.
-**Status:** Pending
+**Status:** Done
 
 ### TASK-04 `docs-changelog-and-close`
 **Description:** close-out. The tui-screens.md sentence and the CHANGELOG Fixed entries rode TASK-01's commit, as the repository's same-commit rule requires; what remains: verify docs/concept.md needs no change; run `make check` (CONTRIBUTING.md); lead review of the whole branch against the Context decisions; archive this tasks file.

@@ -9,7 +9,7 @@ the modules.
 | Target | What it does | When to run it |
 |---|---|---|
 | `make build` | `go vet`, `go test`, then builds the binary into the repository root | While working on the code |
-| `make lint` | `go mod tidy -diff`, which fails if `go.mod` or `go.sum` drifted from the imports, and `golangci-lint run` | Before committing |
+| `make lint` | `go mod tidy -diff`, which fails if `go.mod` or `go.sum` drifted from the imports, then `golangci-lint run`, then the same run under `GOOS=windows` (`lint-windows`) so the windows-only files are read too — on Windows the two passes coincide | Before committing |
 | `make test` | Measures coverage of `internal/...` and fails below the threshold (see Code rules) | While working on tests |
 | `make licenses` | `go-licenses check` for each of the six release platforms (`tools/check-licenses.go`), which fails if a dependency linked into the binary is under a license other than MIT, BSD-3-Clause, or Apache-2.0 | Before committing a dependency change |
 | `make builtin-kit` | Loads `internal/builtin/kit` through the kit reader and fails on any problem it reports, an invalid item version among them (`tools/check-builtin-kit.go`) | Before committing a change to the embedded kit |

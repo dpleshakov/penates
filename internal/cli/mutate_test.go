@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1123,7 +1124,17 @@ func TestApplyKeepsFailedSelectionStaged(t *testing.T) {
 	if !strings.Contains(stdout, wantNote) {
 		t.Errorf("stdout lacks the remaining-pending note:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "  install  personal/writing  1.0.0") {
+	// The verb under the note follows the leg the injection took, and
+	// each platform pins its own: where directory modes are honored —
+	// every Unix — nothing landed, and the item replans as installable;
+	// on Windows the modes are advisory, the refused step's files stand
+	// renamed in place with no lock record, the replan reads them as
+	// user content, and the verdict falls back to apply.
+	wantVerb := "  install  personal/writing  1.0.0"
+	if runtime.GOOS == "windows" {
+		wantVerb = "  apply  personal/writing"
+	}
+	if !strings.Contains(stdout, wantVerb) {
 		t.Errorf("stdout lacks the staged action under the note:\n%s", stdout)
 	}
 	p := registryOf(e).Pending[target]

@@ -7,7 +7,7 @@
 #
 # Prerequisites: Go, and — for `lint` — golangci-lint v2 on PATH.
 
-.PHONY: build lint test licenses builtin-kit check clean
+.PHONY: build lint lint-windows test licenses builtin-kit check clean
 
 # ---------------------------------------------------------------------------
 # Build
@@ -28,8 +28,17 @@ build:
 # before committing; CI runs it as part of check. `go mod tidy -diff` writes
 # nothing: it prints the changes the module files need and fails, and fixing
 # them is a deliberate `go mod tidy` whose result goes into the commit.
+# The second pass reads the windows-only files their build tag hides from the
+# native one — on Windows the native pass already is it, and the pass is
+# idempotent there. GOOS travels through make's own environment rather than a
+# shell prefix, so the same recipe runs under sh and cmd alike.
 lint:
 	go mod tidy -diff
+	golangci-lint run
+	@$(MAKE) --no-print-directory lint-windows
+
+lint-windows: export GOOS=windows
+lint-windows:
 	golangci-lint run
 
 # Measure statement coverage of the internal packages, print the per-function

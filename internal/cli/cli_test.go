@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,6 +43,38 @@ func execute(t *testing.T, b Build, args ...string) (stdout, stderr string, code
 	return out.String(), errOut.String(), code
 }
 
+// tempDir is the command tests' temp root: t.TempDir's directory with a
+// removing cleanup of its own. On Windows a freshly deleted file's
+// directory entry can outlive its close by a moment — a scanner holding
+// the name past the run that wrote it — and the plain RemoveAll then
+// fails the test over a directory it has already emptied. The retry
+// waits the stragglers out; a leftover that survives it is a real one
+// and still fails the test, its survivors named.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	pattern := strings.ReplaceAll(t.Name(), "/", "_") + "-*"
+	dir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		var last error
+		for i := 0; i < 10; i++ {
+			if last = os.RemoveAll(dir); last == nil {
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		entries, _ := os.ReadDir(dir)
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("removing %s: %v (left behind: %v)", dir, last, names)
+	})
+	return dir
+}
+
 // testEnv is the surroundings of one command test: a penates data
 // directory under a temp XDG_CONFIG_HOME, reached the way every run
 // reaches it, and helpers that record kits, targets, and locks in it.
@@ -55,7 +88,7 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	base := t.TempDir()
+	base := tempDir(t)
 	t.Setenv("XDG_CONFIG_HOME", base)
 	dataDir := filepath.Join(base, "penates")
 	st, err := state.Open(dataDir)

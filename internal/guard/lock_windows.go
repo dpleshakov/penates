@@ -13,8 +13,8 @@ import (
 // syscall package carries no constants for either; the values are fixed
 // by the Windows API.
 const (
-	lockFailImmediately = 0x1              // LOCKFILE_FAIL_IMMEDIATELY
-	lockExclusive       = 0x2              // LOCKFILE_EXCLUSIVE_LOCK
+	lockFailImmediately = 0x1               // LOCKFILE_FAIL_IMMEDIATELY
+	lockExclusive       = 0x2               // LOCKFILE_EXCLUSIVE_LOCK
 	errLockViolation    = syscall.Errno(33) // ERROR_LOCK_VIOLATION
 )
 
@@ -41,7 +41,7 @@ func lockFile(file *os.File) error {
 		0,
 		1,
 		0,
-		uintptr(unsafe.Pointer(&ol)),
+		uintptr(unsafe.Pointer(&ol)), //nolint:gosec // the Overlapped pointer is the syscall call's own shape; the caller's live reference holds it past the call
 	)
 	if r1 != 0 {
 		return nil
@@ -56,7 +56,7 @@ func lockFile(file *os.File) error {
 // it too, but the explicit drop keeps both platforms symmetric.
 func unlockFile(file *os.File) error {
 	var ol syscall.Overlapped
-	r1, _, err := procUnlockFileEx.Call(file.Fd(), 0, 1, 0, uintptr(unsafe.Pointer(&ol)))
+	r1, _, err := procUnlockFileEx.Call(file.Fd(), 0, 1, 0, uintptr(unsafe.Pointer(&ol))) //nolint:gosec // the Overlapped pointer is the syscall call's own shape; the caller's live reference holds it past the call
 	if r1 != 0 {
 		return nil
 	}

@@ -1,5 +1,5 @@
 id: kit-authoring
-version: 0.1.0
+version: 0.2.0
 description: Creating and maintaining a penates kit repository — schemas, contribution kinds, variables, versioning
 tags: [docs]
 vars: []

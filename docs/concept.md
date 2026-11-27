@@ -146,6 +146,9 @@ vars: []
 contributes:
   - file: skill/SKILL.md
     to: skills/git-via-gh/SKILL.md
+  - file: gh-run
+    to: skills/git-via-gh/gh-run
+    executable: true
   - section: agents-note.md
     to: AGENTS.md
   - json: permissions.json
@@ -170,6 +173,8 @@ Rules:
 | `json` | A JSON or JSONC file | The fragment's values are placed into a shared JSON or JSONC file. |
 
 `section` and `json` contributions may target only files listed in `shared` of the item's kit.
+
+A `file` contribution may declare `executable: true`: the file — every file of a directory source — installs with the executable permission bit (0755 on Unix; the flag has no effect on Windows). The bit is taken from the declaration on every write of the file — installation, update, reset, the repair of lost content — and a change of the flag alone writes nothing: the escape hatch is a reset. The flag is invalid on `section` and `json` contributions.
 
 ### 6.5 Variables
 

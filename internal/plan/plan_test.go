@@ -1377,6 +1377,144 @@ func TestPlanFileUpdates(t *testing.T) {
 	}
 }
 
+// TestPlanFileActionExec pins the declared executable bit on the three kinds of
+// file action — install, update, reset — and that actions of other kinds never
+// carry it.
+func TestPlanFileActionExec(t *testing.T) {
+	const v1 = "installed content\n"
+	const v2 = "kit content\n"
+	execItem := func(version string) *kit.Item {
+		it := &kit.Item{ID: "one", Version: version}
+		it.Contributes = []kit.Contribution{
+			{Kind: kit.KindFile, Src: "src/skills/one/SKILL.md", To: "skills/one/SKILL.md"},
+			{Kind: kit.KindFile, Src: "src/skills/one/run", To: "skills/one/run", Executable: true},
+		}
+		return it
+	}
+	sourcesOf := func(it *kit.Item, content string) map[string][]byte {
+		out := map[string][]byte{}
+		for _, c := range it.Contributes {
+			out[it.SourcePath(c)] = []byte(content)
+		}
+		return out
+	}
+	// execOf reads the planned actions as a to → Exec map.
+	execOf := func(ip *ItemPlan) map[string]bool {
+		out := map[string]bool{}
+		for _, a := range ip.Actions {
+			out[a.To] = a.Exec
+		}
+		return out
+	}
+
+	t.Run("install carries the declaration", func(t *testing.T) {
+		it := execItem("1.0.0")
+		p := Build(Input{
+			Kits:      oneKit("k", it),
+			Selection: []string{"k/one"},
+			Lock:      newLock(nil),
+			Snapshot:  snapOf(nil),
+			Sources:   sourcesOf(it, v2),
+		})
+		if got := execOf(p.Items[0]); !got["skills/one/run"] || got["skills/one/SKILL.md"] {
+			t.Errorf("exec = %v, want the script's alone", got)
+		}
+	})
+
+	t.Run("update carries the declaration", func(t *testing.T) {
+		it := execItem("1.1.0")
+		p := Build(Input{
+			Kits:      oneKit("k", it),
+			Selection: []string{"k/one"},
+			Lock: newLock(map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				Files: map[string]string{
+					"skills/one/SKILL.md": hashOf([]byte(v1)),
+					"skills/one/run":      hashOf([]byte(v1)),
+				},
+			}}),
+			Snapshot: snapOf(map[string]target.FileState{
+				"skills/one/SKILL.md": {Exists: true, Hash: hashOf([]byte(v1))},
+				"skills/one/run":      {Exists: true, Hash: hashOf([]byte(v1))},
+			}),
+			Sources: sourcesOf(it, v2),
+		})
+		ip := p.Items[0]
+		if ip.Status != StatusInstall || len(ip.Actions) != 2 {
+			t.Fatalf("status %q actions %v, want both files replaced", ip.Status, ip.Actions)
+		}
+		if got := execOf(ip); !got["skills/one/run"] || got["skills/one/SKILL.md"] {
+			t.Errorf("exec = %v, want the script's alone", got)
+		}
+	})
+
+	t.Run("reset carries the declaration", func(t *testing.T) {
+		it := execItem("1.1.0")
+		p := Build(Input{
+			Kits:      oneKit("k", it),
+			Selection: []string{"k/one"},
+			Lock: newLock(map[string]*lock.Item{"k/one": {
+				Version: "1.0.0",
+				Files: map[string]string{
+					"skills/one/SKILL.md": hashOf([]byte(v1)),
+					"skills/one/run":      hashOf([]byte(v1)),
+				},
+			}}),
+			Snapshot: snapOf(map[string]target.FileState{
+				"skills/one/SKILL.md": {Exists: true, Hash: hashOf([]byte("user edit\n"))},
+				"skills/one/run":      {Exists: true, Hash: hashOf([]byte("user edit\n"))},
+			}),
+			Sources: sourcesOf(it, v2),
+			Reset:   map[string]bool{"k/one": true},
+		})
+		ip := p.Items[0]
+		if ip.Status != StatusInstall || len(ip.Actions) != 2 {
+			t.Fatalf("status %q actions %v, want both files reset", ip.Status, ip.Actions)
+		}
+		if got := execOf(ip); !got["skills/one/run"] || got["skills/one/SKILL.md"] {
+			t.Errorf("exec = %v, want the script's alone", got)
+		}
+	})
+
+	t.Run("section actions never carry it", func(t *testing.T) {
+		frag := "## House rules\n\nbody\n"
+		p := Build(Input{
+			Kits:      oneKit("k", sectionItem("one", "note.md", "AGENTS.md")),
+			Selection: []string{"k/one"},
+			Lock:      newLock(nil),
+			Snapshot:  sharedOf(nil),
+			Sources:   map[string][]byte{"note.md": []byte(frag)},
+		})
+		ip := p.Items[0]
+		if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+			t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+		}
+		if a := ip.Actions[0]; a.Kind != ActionSection || a.Exec {
+			t.Errorf("action = %+v, want a section action without the bit", a)
+		}
+	})
+
+	t.Run("json actions never carry it", func(t *testing.T) {
+		it := &kit.Item{ID: "one", Version: "1.0.0", Contributes: []kit.Contribution{{
+			Kind: kit.KindJSON, Src: "frag.jsonc", To: "config.jsonc",
+		}}}
+		p := Build(Input{
+			Kits:      oneKit("k", it),
+			Selection: []string{"k/one"},
+			Lock:      newLock(nil),
+			Snapshot:  sharedOf(nil),
+			Sources:   map[string][]byte{"frag.jsonc": []byte(`{"theme":"dark"}`)},
+		})
+		ip := p.Items[0]
+		if ip.Status != StatusInstall || len(ip.Actions) != 1 {
+			t.Fatalf("status %q actions %v", ip.Status, ip.Actions)
+		}
+		if a := ip.Actions[0]; a.Kind != ActionJSON || a.Exec {
+			t.Errorf("action = %+v, want a json action without the bit", a)
+		}
+	})
+}
+
 // TestPlanSectionUpdates walks the update rows of the three-state table for an owned
 // block, plus the reset row.
 func TestPlanSectionUpdates(t *testing.T) {

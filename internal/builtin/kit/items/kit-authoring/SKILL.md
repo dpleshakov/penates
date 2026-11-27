@@ -3,7 +3,7 @@ name: penates-kit-authoring
 description: Create, fill, and maintain a penates kit repository — the directory skeleton, kit.yaml and item.yaml schemas, the three contribution kinds, variables, tags and variants, versioning conventions, and how penates treats the content on install, update, and removal.
 metadata:
   author: The penates project
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # penates kit authoring
@@ -49,6 +49,9 @@ vars: []
 contributes:
   - file: skill/SKILL.md
     to: skills/git-via-gh/SKILL.md
+  - file: gh-run
+    to: skills/git-via-gh/gh-run
+    executable: true
   - section: agents-note.md
     to: AGENTS.md
   - json: permissions.json
@@ -64,7 +67,11 @@ item details and on major updates.
 
 - **file** — a file or a directory; every file lands in the target owned
   entirely by the item. A `file` contribution may not target a shared
-  file.
+  file. `executable: true` installs the file — every file of a directory
+  source — with the executable permission bit, so a kit can ship runnable
+  scripts; the bit is taken from the declaration on every write of the file,
+  a change of the flag alone writes nothing until a reset, and the flag has
+  no effect on Windows.
 - **section** — a Markdown file; its content is placed into a shared
   Markdown file inside block markers:
 

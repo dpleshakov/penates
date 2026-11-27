@@ -279,6 +279,100 @@ func TestLoadSources(t *testing.T) {
 	})
 }
 
+// TestLoadExecutable pins the declared executable flag: it parses on a file
+// contribution, rides the directory expansion onto every file, and a section
+// or json contribution carrying it is a broken declaration reported on the
+// item's row.
+func TestLoadExecutable(t *testing.T) {
+	files := map[string]string{
+		"kit.yaml":                  "name: example\nshared:\n  - AGENTS.md\n",
+		"items/a/item.yaml":         "id: a\nversion: 1.0.0\ncontributes:\n  - file: peer-chat\n    to: skills/a/peer-chat\n    executable: true\n  - file: f\n    to: skills/a/f\n",
+		"items/a/peer-chat":         "#!/bin/sh\n",
+		"items/a/f":                 "content\n",
+		"items/a/skill/SKILL.md":    "skill\n",
+		"items/a/skill/lib/util.md": "util\n",
+	}
+
+	t.Run("flag parses on a file contribution", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, files)
+		k, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		want := []Contribution{
+			{Kind: KindFile, Src: "peer-chat", To: "skills/a/peer-chat", Executable: true},
+			{Kind: KindFile, Src: "f", To: "skills/a/f"},
+		}
+		if diff := cmp.Diff(want, k.Items[0].Contributes); diff != "" {
+			t.Errorf("contributions (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("directory source carries the flag on every file", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, files)
+		writeFiles(t, dir, map[string]string{"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - file: skill\n    to: skills/a\n    executable: true\n"})
+		k, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		want := []Contribution{
+			{Kind: KindFile, Src: "skill/SKILL.md", To: "skills/a/SKILL.md", Executable: true},
+			{Kind: KindFile, Src: "skill/lib/util.md", To: "skills/a/lib/util.md", Executable: true},
+		}
+		if diff := cmp.Diff(want, k.Items[0].Contributes); diff != "" {
+			t.Errorf("contributions (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("flag on a section contribution is a broken declaration", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, files)
+		writeFiles(t, dir, map[string]string{"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - section: f\n    to: AGENTS.md\n    executable: true\n"})
+		writeFiles(t, dir, map[string]string{
+			"items/b/item.yaml": "id: b\nversion: 1.0.0\ncontributes:\n  - file: f\n    to: skills/b/f\n",
+			"items/b/f":         "content\n",
+		})
+		k, problems, err := Read(dir)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if len(k.Items) != 2 {
+			t.Fatalf("items = %d, want the broken one beside the healthy one", len(k.Items))
+		}
+		// Healthy items sort first; the broken one is found by its id.
+		var a *Item
+		for _, it := range k.Items {
+			if it.ID == "a" {
+				a = it
+			}
+		}
+		if a == nil {
+			t.Fatalf("items = %v, want the broken item among them", k.Items)
+		}
+		if len(a.Problems) != 1 || !strings.Contains(a.Problems[0].Error(), "contributes[0].executable: is only valid on a file contribution") {
+			t.Errorf("a: problems = %v, want the flag problem on the row", a.Problems)
+		}
+		if len(a.Contributes) != 0 {
+			t.Errorf("a: contributes = %v, want the contribution left out", a.Contributes)
+		}
+		if len(problems) != 1 {
+			t.Errorf("problems = %v, want the one item problem", problems)
+		}
+	})
+
+	t.Run("flag on a json contribution is a broken declaration", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFiles(t, dir, files)
+		writeFiles(t, dir, map[string]string{"items/a/item.yaml": "id: a\nversion: 1.0.0\ncontributes:\n  - json: f\n    to: AGENTS.md\n    executable: true\n"})
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "contributes[0].executable: is only valid on a file contribution") {
+			t.Fatalf("Load error = %v", err)
+		}
+	})
+}
+
 func TestReadSources(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{

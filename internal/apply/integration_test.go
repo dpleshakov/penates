@@ -3,8 +3,10 @@ package apply
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -819,4 +821,82 @@ func TestInstallJSONEndToEnd(t *testing.T) {
 	if p.Items[0].Status != plan.StatusNoAction || !strings.Contains(p.Items[0].Reason, "already installed") {
 		t.Errorf("re-plan verdict = %q %q", p.Items[0].Status, p.Items[0].Reason)
 	}
+}
+
+// TestApplyExecutableBit walks the declared flag through the whole core: a kit
+// whose item declares an executable script file installs it with the
+// executable permission bit, and an ordinary file without it. The apply's
+// success and the contents are pinned on every platform; the mode comparison
+// runs only where directory modes are honored — every Unix, since on Windows
+// the two chmods leave the file in the same state.
+func TestApplyExecutableBit(t *testing.T) {
+	root := t.TempDir()
+	kitDir := t.TempDir()
+	writeSource(t, kitDir, "kit.yaml", "name: demo\n")
+	writeSource(t, kitDir, "items/one/item.yaml",
+		"id: one\nversion: 1.0.0\ncontributes:\n  - file: SKILL.md\n    to: skills/one/SKILL.md\n  - file: peer-chat\n    to: skills/one/peer-chat\n    executable: true\n")
+	writeSource(t, kitDir, "items/one/SKILL.md", "one skill\n")
+	writeSource(t, kitDir, "items/one/peer-chat", "#!/bin/sh\necho hi\n")
+
+	k, err := kit.Load(kitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := []string{"demo/one"}
+	sources, err := kit.ReadSources([]*kit.Kit{k}, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := lock.NewStore(t.TempDir())
+	lk, err := store.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plan.Build(plan.Input{
+		Kits:      []*kit.Kit{k},
+		Selection: selection,
+		Lock:      lk,
+		Snapshot:  &target.Snapshot{Root: root},
+		Sources:   sources,
+	})
+	results := Apply(root, p, lk, store, nil)
+	for _, r := range results {
+		if r.Err != nil {
+			t.Fatalf("apply %s: %v", r.Key, r.Err)
+		}
+	}
+
+	script, err := os.ReadFile(filepath.Join(root, "skills", "one", "peer-chat"))
+	if err != nil || string(script) != "#!/bin/sh\necho hi\n" {
+		t.Fatalf("installed script = %q, %v", script, err)
+	}
+	skill, err := os.ReadFile(filepath.Join(root, "skills", "one", "SKILL.md"))
+	if err != nil || string(skill) != "one skill\n" {
+		t.Fatalf("installed skill = %q, %v", skill, err)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	scriptMode, err := statMode(filepath.Join(root, "skills", "one", "peer-chat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scriptMode != 0o755 {
+		t.Errorf("script mode = %o, want 755", scriptMode)
+	}
+	skillMode, err := statMode(filepath.Join(root, "skills", "one", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skillMode != 0o644 {
+		t.Errorf("skill mode = %o, want 644", skillMode)
+	}
+}
+
+func statMode(path string) (fs.FileMode, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Mode().Perm(), nil
 }

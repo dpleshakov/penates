@@ -106,6 +106,9 @@ type Contribution struct {
 	To string
 	// Template opts the contribution into variable substitution.
 	Template bool
+	// Executable marks a file contribution whose files install with the
+	// executable permission bit; section and json contributions reject it.
+	Executable bool
 }
 
 // SourcePath returns the absolute path of the source file of one contribution.
@@ -168,11 +171,12 @@ type varFile struct {
 }
 
 type contributionFile struct {
-	File     *string `yaml:"file"`
-	Section  *string `yaml:"section"`
-	JSON     *string `yaml:"json"`
-	To       string  `yaml:"to"`
-	Template bool    `yaml:"template"`
+	File       *string `yaml:"file"`
+	Section    *string `yaml:"section"`
+	JSON       *string `yaml:"json"`
+	To         string  `yaml:"to"`
+	Template   bool    `yaml:"template"`
+	Executable bool    `yaml:"executable"`
 }
 
 // Load reads and validates the kit in dir. It either returns a fully valid kit or an
@@ -400,7 +404,11 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 			fail(file, field+".to", "%s contributions may target only files listed in the kit's shared", kind)
 			continue
 		}
-		it.Contributes = append(it.Contributes, resolveSource(dir, kind, src, c.To, c.Template, field, file, fail)...)
+		if c.Executable && kind != KindFile {
+			fail(file, field+".executable", "is only valid on a file contribution")
+			continue
+		}
+		it.Contributes = append(it.Contributes, resolveSource(dir, kind, src, c.To, c.Template, c.Executable, field, file, fail)...)
 	}
 
 	return it, problems
@@ -409,7 +417,7 @@ func loadItem(dir, dirName string, shared []string, ids map[string]bool) (*Item,
 // resolveSource checks that a contribution's source exists and expands directory
 // file sources into one contribution per file, so every contribution names one
 // plain file. Problems are reported through fail and leave the contribution out.
-func resolveSource(itemDir string, kind ContributionKind, src, to string, template bool, field, file string, fail func(file, field, format string, args ...any)) []Contribution {
+func resolveSource(itemDir string, kind ContributionKind, src, to string, template, executable bool, field, file string, fail func(file, field, format string, args ...any)) []Contribution {
 	path := filepath.Join(itemDir, filepath.FromSlash(src))
 	info, err := os.Stat(path)
 	if err != nil {
@@ -434,10 +442,11 @@ func resolveSource(itemDir string, kind ContributionKind, src, to string, templa
 				return err
 			}
 			out = append(out, Contribution{
-				Kind:     KindFile,
-				Src:      filepath.ToSlash(filepath.Join(src, rel)),
-				To:       to + "/" + filepath.ToSlash(rel),
-				Template: template,
+				Kind:       KindFile,
+				Src:        filepath.ToSlash(filepath.Join(src, rel)),
+				To:         to + "/" + filepath.ToSlash(rel),
+				Template:   template,
+				Executable: executable,
 			})
 			return nil
 		})
@@ -452,7 +461,7 @@ func resolveSource(itemDir string, kind ContributionKind, src, to string, templa
 		sort.Slice(out, func(i, j int) bool { return out[i].To < out[j].To })
 		return out
 	}
-	return []Contribution{{Kind: kind, Src: src, To: to, Template: template}}
+	return []Contribution{{Kind: kind, Src: src, To: to, Template: template, Executable: executable}}
 }
 
 // contributionSource returns the source path, its kind, and how many kind keys are

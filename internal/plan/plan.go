@@ -224,6 +224,12 @@ type Action struct {
 	To string
 	// Content is the complete final content of To.
 	Content []byte
+	// Exec marks a file action whose file installs with the executable
+	// permission bit — 0o755 instead of 0o644 — because the kit's
+	// contribution declared it. Section, json, and removal actions never
+	// carry it. The bit is part of the declaration: every write of the file,
+	// on install, update, or reset, takes it from there.
+	Exec bool
 	// Block is the managed block identifier a section action writes.
 	Block string
 	// BlockHash is "sha256:<hex>" of the content between the markers of a section
@@ -1204,6 +1210,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 					Kind:    ActionFile,
 					To:      c.To,
 					Content: content,
+					Exec:    c.Executable,
 					Src:     c.Src,
 					Reason:  "target file is absent",
 				})
@@ -1239,6 +1246,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 					Kind:    ActionFile,
 					To:      c.To,
 					Content: content,
+					Exec:    c.Executable,
 					Src:     c.Src,
 					Reason:  "reset to kit replaces the owned file",
 				})
@@ -1256,6 +1264,7 @@ func planContributions(key string, it *kit.Item, in Input, claims *claimSet, sha
 					Kind:    ActionFile,
 					To:      c.To,
 					Content: content,
+					Exec:    c.Executable,
 					Src:     c.Src,
 					Reason:  "update replaces the owned file",
 				})

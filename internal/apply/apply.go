@@ -101,7 +101,7 @@ func Item(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store) erro
 		}
 		createdDirs = append(createdDirs, dirs...)
 
-		tmp, err := stage(dst, a.Content)
+		tmp, err := stage(dst, a.Content, a.Exec)
 		if err != nil {
 			return fail(fmt.Errorf("stage %s: %w", a.To, err))
 		}
@@ -230,7 +230,7 @@ func RemoveItem(root string, ip *plan.ItemPlan, lk *lock.Lock, store *lock.Store
 		case plan.ActionRemove:
 			deletes = append(deletes, dst)
 		case plan.ActionSectionRemove, plan.ActionJSONRemove:
-			tmp, err := stage(dst, a.Content)
+			tmp, err := stage(dst, a.Content, a.Exec)
 			if err != nil {
 				return fail(fmt.Errorf("stage %s: %w", a.To, err))
 			}
@@ -382,8 +382,9 @@ func containsPath(list []string, p string) bool {
 
 // stage writes content to a fresh temp file in the destination's directory and
 // returns its path; the rename into place happens only after the whole item is
-// staged.
-func stage(dst string, content []byte) (string, error) {
+// staged. An executable action's file takes the executable permission bit;
+// every other file is an ordinary user file.
+func stage(dst string, content []byte, exec bool) (string, error) {
 	tmp, err := os.CreateTemp(filepath.Dir(dst), ".penates-*")
 	if err != nil {
 		return "", err
@@ -398,7 +399,11 @@ func stage(dst string, content []byte) (string, error) {
 		_ = os.Remove(name)
 		return "", err
 	}
-	if err := os.Chmod(name, 0o644); err != nil { //nolint:gosec // an installed file is an ordinary user file, not a secret
+	perm := fs.FileMode(0o644)
+	if exec {
+		perm = 0o755
+	}
+	if err := os.Chmod(name, perm); err != nil { //nolint:gosec // an installed file is an ordinary user file or the kit's declared script, not a secret
 		_ = os.Remove(name)
 		return "", err
 	}

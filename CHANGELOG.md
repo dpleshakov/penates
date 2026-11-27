@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-27
+
 ### Added
 - A `file` contribution may declare `executable: true`: the file — every file of a directory source — installs with the executable permission bit, so a kit can ship runnable scripts. The bit is taken from the declaration on every write of the file (installation, update, reset, the repair of lost content); a change of the flag alone writes nothing until the item is reset. No effect on Windows.
 
